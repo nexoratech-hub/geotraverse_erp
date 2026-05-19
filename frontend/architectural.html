@@ -70,6 +70,8 @@
         .status-pending { background: #fef3c7; color: #d97706; }
         .status-progress { background: #dbeafe; color: #2563eb; }
         .status-completed { background: #d1fae5; color: #059669; }
+        .status-paid { background: #d1fae5; color: #059669; }
+        .status-partial { background: #fef3c7; color: #d97706; }
         
         .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
         .report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 20px; }
@@ -108,19 +110,38 @@
         
         .send-dropdown { position: relative; display: inline-block; }
         .send-dropdown-content { display: none; position: absolute; left: 0; top: 100%; background: white; min-width: 200px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; max-height: 300px; overflow-y: auto; margin-top: 5px; }
-        .send-dropdown-content a { display: block; padding: 8px 12px; color: #333; text-decoration: none; font-size: 13px; cursor: pointer; }
+        .send-dropdown-content a { display: block; padding: 8px 12px; color: #333; text-decoration: none; font-size: 13px; cursor: pointer; border-bottom: 1px solid #e5e7eb; }
         .send-dropdown-content a:hover { background: #f3f4f6; }
         body.dark-mode .send-dropdown-content { background: #1e293b; }
-        body.dark-mode .send-dropdown-content a { color: #f1f5f9; }
+        body.dark-mode .send-dropdown-content a { color: #f1f5f9; border-bottom-color: #334155; }
         
         .income-row { background-color: #f0fdf4; }
         .expense-row { background-color: #fef2f2; }
+        .pending-row { background-color: #fef3c7; }
+        .partial-row { background-color: #fffbeb; }
+        body.dark-mode .pending-row { background-color: #78350f20; }
+        body.dark-mode .partial-row { background-color: #451a0320; }
+        
+        .budget-table-container { overflow-x: auto; border-radius: 12px; }
+        .budget-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 800px; }
+        .budget-table th, .budget-table td { padding: 12px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+        .budget-table th { background: #f8fafc; font-weight: 600; position: sticky; top: 0; text-align: left; }
+        .budget-table td.text-right, .budget-table th.text-right { text-align: right; }
+        .budget-table td.text-center, .budget-table th.text-center { text-align: center; }
+        body.dark-mode .budget-table th { background: #1e293b; border-bottom-color: #334155; }
+        
+        .action-btn { padding: 5px 10px; font-size: 11px; border-radius: 5px; cursor: pointer; transition: all 0.2s; border: none; display: inline-flex; align-items: center; gap: 4px; }
+        .action-btn.view { background: #3b82f6; color: white; }
+        .action-btn.edit { background: #f59e0b; color: white; }
+        .action-btn.delete { background: #ef4444; color: white; }
         
         @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         
         .scroll-top { position: fixed; bottom: 20px; right: 20px; background: #be123c; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 0.3s; z-index: 99; color: white; }
         .scroll-top.visible { opacity: 1; }
+        
+        .money-input { text-align: left; font-family: monospace; font-weight: 500; }
     </style>
 </head>
 <body>
@@ -209,7 +230,7 @@
 <script>
     // ==================== CONFIGURATION ====================
     const API_BASE = '../backend/api/';
-    const DEPARTMENT_ID = 9; // Architectural department ID
+    const DEPARTMENT_ID = 9;
     let refreshInterval = null;
     let countdownSeconds = 5;
     let countdownInterval = null;
@@ -224,10 +245,12 @@
     let reportsData = [];
     let departmentsList = [];
     
-    // Money format function - converts number to 1,000,000 format
+    const departmentNames = { 1: "Super Admin", 2: "Finance", 3: "Sales & Marketing", 4: "Manager", 5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium", 8: "Town Planning", 9: "Architectural", 10: "Survey", 11: "Construction", 12: "Hatimiliki" };
+    
     function formatMoney(amt) { let num = parseFloat(amt) || 0; return "TZS " + num.toLocaleString('en-US'); }
     function parseMoney(value) { return parseFloat(String(value).replace(/,/g, '')) || 0; }
     function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]); }
+    function formatDate(d) { if (!d) return 'N/A'; return new Date(d).toLocaleDateString('en-GB'); }
     
     function showToast(msg, isError) { let t = document.createElement('div'); t.className = 'toast' + (isError ? ' error' : ''); t.innerHTML = '<i class="fas ' + (isError ? 'fa-exclamation-circle' : 'fa-check-circle') + ' mr-2"></i>' + msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
     
@@ -235,14 +258,15 @@
     function closeModal(id) { document.getElementById(id).style.display = 'none'; document.body.style.overflow = 'auto'; }
     function closeMobileSidebar() { document.getElementById("mainSidebar").classList.remove("mobile-open"); document.getElementById("mobileMenuOverlay").classList.add("hidden"); }
     
-    // Close modal when clicking outside modal content
     document.addEventListener('click', function(e) {
         if (e.target.classList.contains('modal')) {
             closeModal(e.target.id);
         }
+        if (!e.target.closest('.send-dropdown')) {
+            document.querySelectorAll('.send-dropdown-content').forEach(d => d.style.display = 'none');
+        }
     });
     
-    // Format money inputs
     function setupMoneyInputs() {
         document.querySelectorAll('.money-input').forEach(el => {
             el.addEventListener('input', function() { 
@@ -253,6 +277,14 @@
                 } 
             });
         });
+    }
+    
+    function getImageFullUrl(imagePath) {
+        if (!imagePath) return null;
+        if (imagePath.startsWith('http')) return imagePath;
+        if (imagePath.startsWith('data:')) return imagePath;
+        if (imagePath.startsWith('assets/')) return '/geotraverse/frontend/' + imagePath;
+        return '/geotraverse/frontend/assets/uploads/projects/' + imagePath;
     }
     
     async function apiCall(endpoint, method = 'GET', data = null) {
@@ -268,8 +300,8 @@
     
     async function loadDepartments() {
         const res = await apiCall('get_departments.php');
-        if (res.success && res.data) departmentsList = res.data.filter(d => d.id !== 1);
-        else departmentsList = [{ id: 2, name: "Finance" }, { id: 3, name: "Sales & Marketing" }, { id: 4, name: "Manager" }, { id: 5, name: "Secretary" }];
+        if (res.success && res.data) departmentsList = res.data.filter(d => d.id !== 1 && d.id !== DEPARTMENT_ID);
+        else departmentsList = [{ id: 2, name: "Finance" }, { id: 3, name: "Sales & Marketing" }, { id: 4, name: "Manager" }, { id: 5, name: "Secretary" }, { id: 6, name: "Bricks & Timber" }, { id: 7, name: "Aluminium" }, { id: 8, name: "Town Planning" }, { id: 10, name: "Survey" }, { id: 11, name: "Construction" }, { id: 12, name: "Hatimiliki" }];
         ['projDept', 'msgTo'].forEach(id => { const s = document.getElementById(id); if(s) s.innerHTML = '<option value="">Select Department</option>' + departmentsList.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join(''); });
     }
     
@@ -285,8 +317,17 @@
         budgetsData = budgets.success ? budgets.data : [];
         messagesData = msg.success ? msg.data : [];
         
-        let totalIncome = 0, totalExpense = 0;
-        budgetsData.forEach(t => { if(t.status === 'paid') { if(t.type === 'income') totalIncome += parseFloat(t.amount); else totalExpense += parseFloat(t.amount); } });
+        let totalIncome = 0, totalExpense = 0, pendingAmount = 0;
+        budgetsData.forEach(t => { 
+            if(t.type === 'income') {
+                if(t.status === 'paid') totalIncome += parseFloat(t.amount);
+                else if(t.status === 'partial') totalIncome += parseFloat(t.paid_amount || 0);
+                if(t.status !== 'paid') pendingAmount += (parseFloat(t.amount) - (parseFloat(t.paid_amount) || 0));
+            } else if(t.type === 'expense' && t.status === 'paid') {
+                totalExpense += parseFloat(t.amount);
+            }
+        });
+        let netProfit = totalIncome - totalExpense;
         let pending = projectsData.filter(p => p.status === 'pending').length;
         let inProgress = projectsData.filter(p => p.status === 'in_progress').length;
         let completed = projectsData.filter(p => p.status === 'completed').length;
@@ -296,7 +337,7 @@
                 <div class="stat-card" onclick="showSection('projects')"><div class="flex justify-between items-start"><div><p class="text-gray-500 text-xs uppercase">Projects</p><p class="text-2xl font-bold text-pink-600">${projectsData.length}</p><p class="text-xs text-gray-400">In progress: ${inProgress}</p></div><div class="w-10 h-10 bg-pink-100 rounded-xl flex items-center justify-center"><i class="fas fa-tasks text-pink-500"></i></div></div></div>
                 <div class="stat-card" onclick="showSection('budget')"><div class="flex justify-between items-start"><div><p class="text-gray-500 text-xs uppercase">Total Income</p><p class="text-lg font-bold text-green-600">${formatMoney(totalIncome)}</p></div><div class="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center"><i class="fas fa-arrow-down text-green-500"></i></div></div></div>
                 <div class="stat-card" onclick="showSection('budget')"><div class="flex justify-between items-start"><div><p class="text-gray-500 text-xs uppercase">Expenses</p><p class="text-lg font-bold text-red-600">${formatMoney(totalExpense)}</p></div><div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center"><i class="fas fa-arrow-up text-red-500"></i></div></div></div>
-                <div class="stat-card" onclick="showSection('budget')"><div class="flex justify-between items-start"><div><p class="text-gray-500 text-xs uppercase">Net Profit</p><p class="text-lg font-bold text-${totalIncome-totalExpense>=0?'green':'red'}-600">${formatMoney(totalIncome-totalExpense)}</p></div><div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><i class="fas fa-chart-line text-blue-500"></i></div></div></div>
+                <div class="stat-card" onclick="showSection('budget')"><div class="flex justify-between items-start"><div><p class="text-gray-500 text-xs uppercase">Net Profit</p><p class="text-lg font-bold text-${netProfit>=0?'green':'red'}-600">${formatMoney(netProfit)}</p><p class="text-xs text-gray-400">Pending: ${formatMoney(pendingAmount)}</p></div><div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><i class="fas fa-chart-line text-blue-500"></i></div></div></div>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
                 <div class="bg-white rounded-xl p-4"><h3 class="font-semibold mb-3"><i class="fas fa-chart-pie text-pink-500 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas></div>
@@ -323,19 +364,94 @@
         if(projectsData.length === 0) { document.getElementById('projectsGrid').innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400 bg-white rounded-xl">No projects found</div>'; return; }
         let projectsHtml = '';
         for(let p of projectsData) {
-            let imageUrl = p.image ? (p.image.startsWith('http') ? p.image : (p.image.startsWith('assets/') ? '/geotraverse/frontend/' + p.image : '/geotraverse/frontend/assets/uploads/projects/' + p.image)) : null;
-            projectsHtml += `<div class="bg-white rounded-xl border hover:shadow-lg transition-all cursor-pointer" onclick="viewProjectDetails(${p.id})"><div class="h-40 overflow-hidden bg-gray-100">${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="w-full h-full flex items-center justify-center text-gray-400"><i class="fas fa-image text-4xl"></i></div>'}</div><div class="p-4"><div class="flex justify-between items-start mb-2"><h4 class="font-semibold text-sm truncate">${escapeHtml(p.name)}</h4><span class="status-badge ${p.status==='pending'?'status-pending':p.status==='in_progress'?'status-progress':'status-completed'}">${p.status}</span></div><p class="text-xs text-gray-500 mb-1">Client: ${escapeHtml(p.client_name || 'N/A')}</p><p class="text-sm font-bold text-pink-600 mb-2">${formatMoney(p.amount)}</p><div class="mt-2"><div class="flex justify-between text-xs mb-1"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-pink-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view text-xs px-2 py-1 rounded bg-blue-500 text-white"><i class="fas fa-eye mr-1"></i>View</button><button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit text-xs px-2 py-1 rounded bg-green-500 text-white"><i class="fas fa-edit mr-1"></i>Edit</button><button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete text-xs px-2 py-1 rounded bg-red-500 text-white"><i class="fas fa-trash mr-1"></i>Delete</button></div></div></div>`;
+            let imageUrl = getImageFullUrl(p.image);
+            projectsHtml += `<div class="bg-white rounded-xl border hover:shadow-lg transition-all cursor-pointer" onclick="viewProjectDetails(${p.id})"><div class="h-40 overflow-hidden bg-gray-100">${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="w-full h-full flex items-center justify-center text-gray-400"><i class="fas fa-image text-4xl"></i></div>'}</div><div class="p-4"><div class="flex justify-between items-start mb-2"><h4 class="font-semibold text-sm truncate">${escapeHtml(p.name)}</h4><span class="status-badge ${p.status==='pending'?'status-pending':p.status==='in_progress'?'status-progress':'status-completed'}">${p.status}</span></div><p class="text-xs text-gray-500 mb-1">Client: ${escapeHtml(p.client_name || 'N/A')}</p><p class="text-sm font-bold text-pink-600 mb-2">${formatMoney(p.amount)}</p><div class="mt-2"><div class="flex justify-between text-xs mb-1"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-pink-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye mr-1"></i>View</button><button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit mr-1"></i>Edit</button><button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash mr-1"></i>Delete</button></div></div></div>`;
         }
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
+    }
+    
+    // ==================== PDF EXPORT - Opens new window with small image and vertical details (like Construction) ====================
+    function exportProjectPDF(projectId) {
+        const p = projectsData.find(p => p.id === projectId);
+        if(!p) { showToast('Project not found', true); return; }
+        let imageUrl = getImageFullUrl(p.image);
+        let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : 'status-completed';
+        let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+        
+        const htmlContent = `<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>${escapeHtml(p.name)} - Project Report</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: white; padding: 30px; }
+                .pdf-container { max-width: 750px; margin: 0 auto; border: 3px solid #000000; background: white; border-radius: 12px; overflow: hidden; }
+                .header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 18px 22px; text-align: center; }
+                .header h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+                .header p { font-size: 10px; opacity: 0.85; }
+                .info-bar { background: #f3f4f6; padding: 6px 15px; text-align: center; font-size: 10px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; }
+                .image-section { text-align: center; margin: 15px 20px; padding: 10px; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
+                .image-section img { max-width: 160px; max-height: 110px; object-fit: contain; border-radius: 5px; }
+                .no-image { padding: 20px; background: #f9fafb; border-radius: 8px; color: #9ca3af; text-align: center; font-size: 12px; }
+                .details-container { margin: 15px 20px 20px 20px; }
+                .detail-row { display: flex; border-bottom: 1px solid #000000; }
+                .detail-row:last-child { border-bottom: none; }
+                .detail-title { width: 35%; background: #fce7f3; padding: 10px 12px; font-weight: 700; font-size: 12px; color: #9d174d; border-right: 1px solid #000000; }
+                .detail-value { width: 65%; padding: 10px 12px; font-size: 12px; color: #1f2937; background: white; }
+                .status-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; }
+                .status-pending { background: #fef3c7; color: #d97706; }
+                .status-progress { background: #dbeafe; color: #2563eb; }
+                .status-completed { background: #d1fae5; color: #059669; }
+                .amount-value { color: #059669; font-weight: 700; }
+                .footer { text-align: center; font-size: 8px; color: #9ca3af; padding: 10px 20px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+                .print-btn { text-align: center; padding: 12px 20px; background: #f9fafb; }
+                .print-btn button { padding: 6px 18px; background: #be123c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600; }
+                @media print { .print-btn { display: none; } body { padding: 0; } .pdf-container { border: none; border-radius: 0; } .detail-title { background: #fce7f3 !important; -webkit-print-color-adjust: exact; } .header { background: #be123c !important; -webkit-print-color-adjust: exact; } }
+            </style>
+        </head>
+        <body>
+            <div class="pdf-container">
+                <div class="header"><h1>${escapeHtml(p.name)}</h1><p>Architectural Department | Project Report</p></div>
+                <div class="info-bar"><span><strong>Project ID:</strong> #${p.id}</span><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span><span><strong>Department:</strong> Architectural</span></div>
+                <div class="image-section">${imageUrl ? `<img src="${imageUrl}" alt="Project Image" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>No Image Available</p></div>'">` : '<div class="no-image"><i class="fas fa-image"></i><p>No Image Available</p></div>'}</div>
+                <div class="details-container">
+                    <div class="detail-row"><div class="detail-title">📋 Project Name</div><div class="detail-value">${escapeHtml(p.name)}</div></div>
+                    <div class="detail-row"><div class="detail-title">👤 Client Name</div><div class="detail-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
+                    <div class="detail-row"><div class="detail-title">💰 Amount</div><div class="detail-value amount-value">${formatMoney(p.amount)}</div></div>
+                    <div class="detail-row"><div class="detail-title">📌 Status</div><div class="detail-value"><span class="status-badge ${statusClass}">${statusText}</span></div></div>
+                    <div class="detail-row"><div class="detail-title">📈 Progress</div><div class="detail-value">${p.progress || 0}% Complete</div></div>
+                    <div class="detail-row"><div class="detail-title">📍 Location</div><div class="detail-value">${escapeHtml(p.location || 'N/A')}</div></div>
+                    <div class="detail-row"><div class="detail-title">📅 Start Date</div><div class="detail-value">${p.start_date || 'Not specified'}</div></div>
+                    <div class="detail-row"><div class="detail-title">📅 End Date</div><div class="detail-value">${p.end_date || 'Not specified'}</div></div>
+                    <div class="detail-row"><div class="detail-title">📝 Description</div><div class="detail-value">${escapeHtml(p.description || 'No description provided')}</div></div>
+                </div>
+                <div class="footer">GeoTraverse ERP System - Official Project Document<br>Architectural Department | ${new Date().toLocaleDateString()}</div>
+                <div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);"><i class="fas fa-print"></i> Save as PDF / Print</button></div>
+            </div>
+        </body>
+        </html>`;
+        
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const newWindow = window.open(url, '_blank');
+        if(newWindow) newWindow.focus();
+        else showToast('Please allow popups to generate PDF', true);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        showToast('PDF preview opened - Click Print to save');
+    }
+    
+    function exportProjectExcel(projectId) {
+        const p = projectsData.find(p => p.id === projectId);
+        if(p) { let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Description']]; ws.push([p.id, p.name, p.client_name || '-', p.amount, p.status, p.progress, p.location || '-', p.description || '-']); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); XLSX.writeFile(wb, `project_${p.id}.xlsx`); showToast('Exported to Excel'); }
     }
     
     function viewProjectDetails(id) {
         const p = projectsData.find(p => p.id === id);
         if(!p) return;
-        let imageUrl = p.image ? (p.image.startsWith('http') ? p.image : (p.image.startsWith('assets/') ? '/geotraverse/frontend/' + p.image : '/geotraverse/frontend/assets/uploads/projects/' + p.image)) : null;
-        
-        // Generate department options for send dropdown
+        let imageUrl = getImageFullUrl(p.image);
         let deptOptions = '';
+        deptOptions += `<a href="#" onclick="event.stopPropagation(); sendProjectToDept(${p.id}, 1); return false;">👑 Super Admin</a>`;
         departmentsList.forEach(d => {
             deptOptions += `<a href="#" onclick="event.stopPropagation(); sendProjectToDept(${p.id}, ${d.id}); return false;">${escapeHtml(d.name)}</a>`;
         });
@@ -343,9 +459,9 @@
         document.getElementById('viewProjContent').innerHTML = `${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage('${imageUrl}')">` : '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>'}<div class="space-y-1"><p><strong>Name:</strong> ${escapeHtml(p.name)}</p><p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p><p><strong>Amount:</strong> ${formatMoney(p.amount)}</p><p><strong>Status:</strong> ${p.status}</p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p><p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p></div>`;
         document.getElementById('viewProjButtons').innerHTML = `
             <button onclick="exportProjectExcel(${p.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
-            <button onclick="exportProjectPDF(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+            <button onclick="exportProjectPDF(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF with Image</button>
             ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-image mr-1"></i> View Full Image</button>` : ''}
-            <div class="send-dropdown"><button onclick="event.stopPropagation(); toggleSendDropdown('projectSendDropdown-${p.id}')" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="projectSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>`;
+            <div class="send-dropdown"><button onclick="event.stopPropagation(); toggleSendDropdown('projectSendDropdown-${p.id}')" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-paper-plane mr-1"></i> Send to Department</button><div id="projectSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>`;
         openModal('viewProjModal');
     }
     
@@ -359,32 +475,15 @@
         const p = projectsData.find(p => p.id === projectId);
         if(p) {
             const res = await apiCall('send_project.php', 'POST', { project_id: projectId, to_department_id: deptId, from_department_id: DEPARTMENT_ID });
-            if(res.success) showToast(`Project "${p.name}" sent to ${departmentsList.find(d => d.id === deptId)?.name || 'Department'}`);
+            if(res.success) showToast(`Project "${p.name}" sent to ${deptId === 1 ? 'Super Admin' : (departmentsList.find(d => d.id === deptId)?.name || 'Department')}`);
             else showToast(res.message || 'Failed', true);
             toggleSendDropdown(`projectSendDropdown-${projectId}`);
         }
     }
     
-    function exportProjectPDF(projectId) {
-        const p = projectsData.find(p => p.id === projectId);
-        if(!p) { showToast('Project not found', true); return; }
-        let imageUrl = p.image ? (p.image.startsWith('http') ? p.image : (p.image.startsWith('assets/') ? '/geotraverse/frontend/' + p.image : '/geotraverse/frontend/assets/uploads/projects/' + p.image)) : null;
-        const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(p.name)} - Project Report</title><style>body{font-family:Arial,sans-serif;padding:40px;max-width:800px;margin:0 auto;border:2px solid #000;}h1{color:#be123c;text-align:center;border-bottom:3px solid #be123c;padding-bottom:15px;}.image-section{text-align:center;margin:20px 0;}.image-section img{max-width:100%;max-height:300px;border:1px solid #ddd;border-radius:8px;}table{width:100%;border-collapse:collapse;margin:15px 0;border:1px solid #000;}th,td{border:1px solid #000;padding:8px 12px;text-align:left;vertical-align:top;}th{background:#f5f5f5;width:35%;font-weight:bold;}.status-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;}.status-pending{background:#fef3c7;color:#d97706;}.status-progress{background:#dbeafe;color:#2563eb;}.status-completed{background:#d1fae5;color:#059669;}.footer{text-align:center;font-size:10px;color:#999;margin-top:30px;padding-top:10px;border-top:1px solid #ddd;}</style></head><body><h1>${escapeHtml(p.name)}</h1><p style="text-align:center;">Project Report - Generated: ${new Date().toLocaleString()}</p><div class="image-section">${imageUrl ? `<img src="${imageUrl}" onerror="this.style.display='none'">` : '<p style="color:#999;">No Image Available</p>'}</div><table border="1" cellpadding="8"><tr><th>Project ID:</th><td>#${p.id}</td></tr><tr><th>Client Name:</th><td>${escapeHtml(p.client_name || 'N/A')}</td></tr><tr><th>Amount:</th><td style="color:#059669;font-weight:bold;">${formatMoney(p.amount)}</td></tr><tr><th>Status:</th><td><span class="status-badge ${p.status==='pending'?'status-pending':p.status==='in_progress'?'status-progress':'status-completed'}">${p.status}</span></td></tr><tr><th>Progress:</th><td>${p.progress || 0}% Complete</td></tr><tr><th>Location:</th><td>${escapeHtml(p.location || 'N/A')}</td></tr><tr><th>Description:</th><td>${escapeHtml(p.description || 'No description provided')}</td></tr></table><div class="footer">GeoTraverse ERP System - Official Project Document</div><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);" style="padding:10px 20px;background:#be123c;color:white;border:none;border-radius:5px;cursor:pointer;">Save as PDF / Print</button></div></body></html>`;
-        const blob = new Blob([htmlContent], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast('PDF preview opened in new window');
-    }
-    
-    function exportProjectExcel(projectId) {
-        const p = projectsData.find(p => p.id === projectId);
-        if(p) { let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Description']]; ws.push([p.id, p.name, p.client_name || '-', p.amount, p.status, p.progress, p.location || '-', p.description || '-']); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); XLSX.writeFile(wb, `project_${p.id}.xlsx`); showToast('Exported to Excel'); }
-    }
-    
     function openAddProjectModal() { currentEditProjectId = null; currentProjectImageFile = null; document.getElementById('projId').value = ''; document.getElementById('projName').value = ''; document.getElementById('projClient').value = ''; document.getElementById('projAmount').value = ''; document.getElementById('projLocation').value = ''; document.getElementById('projDesc').value = ''; document.getElementById('projStatus').value = 'pending'; document.getElementById('projProgress').value = '0'; document.getElementById('projDept').value = DEPARTMENT_ID; document.getElementById('projImagePreviewContainer').classList.add('hidden'); document.getElementById('projImageUploadArea').classList.remove('hidden'); openModal('projModal'); }
     
-    function editProject(id) { const p = projectsData.find(p => p.id === id); if(p) { currentEditProjectId = id; document.getElementById('projId').value = p.id; document.getElementById('projName').value = p.name; document.getElementById('projClient').value = p.client_name || ''; document.getElementById('projAmount').value = p.amount; document.getElementById('projLocation').value = p.location || ''; document.getElementById('projDesc').value = p.description || ''; document.getElementById('projStatus').value = p.status; document.getElementById('projProgress').value = p.progress; document.getElementById('projDept').value = p.department_id; if(p.image) { let imgUrl = p.image.startsWith('http') ? p.image : '/geotraverse/frontend/assets/uploads/projects/' + p.image; document.getElementById('projImagePreview').src = imgUrl; document.getElementById('projImagePreviewContainer').classList.remove('hidden'); document.getElementById('projImageUploadArea').classList.add('hidden'); } openModal('projModal'); } }
+    function editProject(id) { const p = projectsData.find(p => p.id === id); if(p) { currentEditProjectId = id; document.getElementById('projId').value = p.id; document.getElementById('projName').value = p.name; document.getElementById('projClient').value = p.client_name || ''; document.getElementById('projAmount').value = p.amount; document.getElementById('projLocation').value = p.location || ''; document.getElementById('projDesc').value = p.description || ''; document.getElementById('projStatus').value = p.status; document.getElementById('projProgress').value = p.progress; document.getElementById('projDept').value = p.department_id; if(p.image) { let imgUrl = getImageFullUrl(p.image); document.getElementById('projImagePreview').src = imgUrl; document.getElementById('projImagePreviewContainer').classList.remove('hidden'); document.getElementById('projImageUploadArea').classList.add('hidden'); } openModal('projModal'); } }
     
     document.getElementById('projImageFile')?.addEventListener('change', function(e) { if(e.target.files && e.target.files[0]) { currentProjectImageFile = e.target.files[0]; let reader = new FileReader(); reader.onload = ev => { document.getElementById('projImagePreview').src = ev.target.result; document.getElementById('projImagePreviewContainer').classList.remove('hidden'); document.getElementById('projImageUploadArea').classList.add('hidden'); }; reader.readAsDataURL(e.target.files[0]); } });
     function removeProjectImage() { currentProjectImageFile = null; document.getElementById('projImageFile').value = ''; document.getElementById('projImagePreviewContainer').classList.add('hidden'); document.getElementById('projImageUploadArea').classList.remove('hidden'); }
@@ -406,24 +505,105 @@
     async function loadBudget() {
         const res = await apiCall(`get_transactions.php?department_id=${DEPARTMENT_ID}`);
         budgetsData = res.success ? res.data.sort((a,b) => b.id - a.id) : [];
-        let totalIncome = budgetsData.filter(t => t.type === 'income' && t.status === 'paid').reduce((s,t) => s + parseFloat(t.amount),0);
-        let totalExpense = budgetsData.filter(t => t.type === 'expense' && t.status === 'paid').reduce((s,t) => s + parseFloat(t.amount),0);
+        
+        let totalIncome = 0, totalExpense = 0, pendingAmount = 0;
+        budgetsData.forEach(t => { 
+            if(t.type === 'income') {
+                if(t.status === 'paid') totalIncome += parseFloat(t.amount);
+                else if(t.status === 'partial') totalIncome += parseFloat(t.paid_amount || 0);
+                if(t.status !== 'paid') pendingAmount += (parseFloat(t.amount) - (parseFloat(t.paid_amount) || 0));
+            } else if(t.type === 'expense' && t.status === 'paid') {
+                totalExpense += parseFloat(t.amount);
+            }
+        });
+        let netProfit = totalIncome - totalExpense;
+        
         let html = `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-wallet text-pink-600 mr-2"></i>Budget (${budgetsData.length})</h2><div class="flex gap-2"><button onclick="openModal('budgetModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Transaction</button><button onclick="exportBudgetToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportBudgetToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
-            <div class="grid grid-cols-3 gap-3 mb-4"><div class="bg-green-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Income</p><p class="text-xl font-bold text-green-600">${formatMoney(totalIncome)}</p></div><div class="bg-red-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Expenses</p><p class="text-xl font-bold text-red-600">${formatMoney(totalExpense)}</p></div><div class="bg-blue-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Net</p><p class="text-xl font-bold text-blue-600">${formatMoney(totalIncome-totalExpense)}</p></div></div>
-            <div class="bg-white rounded-xl overflow-hidden"><div class="overflow-x-auto"><table class="min-w-full"><thead class="bg-gray-50"><tr><th class="p-3">Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th><th>Actions</th></tr></thead><tbody>`;
+            <div class="grid grid-cols-4 gap-3 mb-4">
+                <div class="bg-green-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Income</p><p class="text-xl font-bold text-green-600">${formatMoney(totalIncome)}</p></div>
+                <div class="bg-red-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Expenses</p><p class="text-xl font-bold text-red-600">${formatMoney(totalExpense)}</p></div>
+                <div class="bg-blue-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Net Profit</p><p class="text-xl font-bold text-blue-600">${formatMoney(netProfit)}</p></div>
+                <div class="bg-orange-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Pending Payments</p><p class="text-xl font-bold text-orange-600">${formatMoney(pendingAmount)}</p></div>
+            </div>
+            <div class="bg-white rounded-xl overflow-hidden"><div class="budget-table-container"><table class="budget-table"><thead class="bg-gray-50"><tr><th class="p-3">Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th><th class="text-right">Paid</th><th class="text-right">Pending</th><th>Status</th><th>Actions</th></tr></thead><tbody>`;
         for(let t of budgetsData) {
-            html += `<tr class="border-b ${t.type==='income'?'income-row':'expense-row'}"><td class="p-3">${t.transaction_date}<\/td><td class="p-3"><span class="status-badge ${t.type==='income'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${t.type}</span><\/td><td class="p-3">${escapeHtml(t.source)}<\/td><td class="p-3 text-right ${t.type==='income'?'text-green-600':'text-red-600'} font-bold">${formatMoney(t.amount)}<\/td><td class="p-3"><button onclick="viewBudgetItem(${t.id})" class="text-blue-500 mr-2"><i class="fas fa-eye"></i></button><button onclick="editBudgetItem(${t.id})" class="text-green-500 mr-2"><i class="fas fa-edit"></i></button><button onclick="deleteBudgetItem(${t.id})" class="text-red-500"><i class="fas fa-trash"></i></button><\/td><\/tr>`;
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
+            let rowClass = t.status === 'pending' ? 'pending-row' : (t.status === 'partial' ? 'partial-row' : (t.type === 'income' ? 'income-row' : 'expense-row'));
+            html += `<tr class="border-b ${rowClass}"><td class="p-3">${t.transaction_date}<\/td>
+                    <td class="p-3"><span class="status-badge ${t.type==='income'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${t.type}</span><\/td>
+                    <td class="p-3">${escapeHtml(t.source)}<\/td>
+                    <td class="p-3 text-right ${t.type==='income'?'text-green-600':'text-red-600'} font-bold">${formatMoney(amount)}<\/td>
+                    <td class="p-3 text-right text-blue-600">${formatMoney(paid)}<\/td>
+                    <td class="p-3 text-right ${pending>0?'text-orange-600 font-semibold':'text-green-600'}">${formatMoney(pending)}<\/td>
+                    <td class="p-3"><span class="status-badge ${t.status==='paid'?'status-paid':t.status==='partial'?'status-partial':'status-pending'}">${t.status}</span><\/td>
+                    <td class="p-3"><button onclick="viewBudgetItem(${t.id})" class="text-blue-500 mr-2"><i class="fas fa-eye"></i></button><button onclick="editBudgetItem(${t.id})" class="text-green-500 mr-2"><i class="fas fa-edit"></i></button><button onclick="deleteBudgetItem(${t.id})" class="text-red-500"><i class="fas fa-trash"></i></button><\/td><\/tr>`;
         }
-        html += `</tbody>}</div>${budgetsData.length===0?'<div class="text-center py-8 text-gray-400">No transactions</div>':''}</div>`;
+        html += `</tbody>${'</table>'}</div>${budgetsData.length===0?'<div class="text-center py-8 text-gray-400">No transactions</div>':''}</div>`;
         document.getElementById('budgetSection').innerHTML = html;
     }
     
-    function exportBudgetToExcel() { let ws = [['Date','Type','Source','Amount','Description']]; budgetsData.forEach(t => ws.push([t.transaction_date, t.type, t.source, t.amount, t.description || ''])); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Budget'); XLSX.writeFile(wb, `budget_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Budget exported to Excel'); }
-    function exportBudgetToPDF() { let element = document.createElement('div'); let rows = budgetsData.map(t => `<tr><td>${t.transaction_date}</td><td>${t.type}</td><td>${escapeHtml(t.source)}</td><td>${formatMoney(t.amount)}</td><td>${escapeHtml(t.description || '-')}</td></tr>`).join(''); element.innerHTML = `<div style="padding:20px"><h1>Budget Report</h1><p>${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead><tbody>${rows}</tbody>}</div>`; html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); showToast('Budget exported to PDF'); }
+    function exportBudgetToExcel() { 
+        let ws = [['Date','Type','Source','Amount','Paid','Pending','Status','Description']]; 
+        budgetsData.forEach(t => { 
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
+            ws.push([t.transaction_date, t.type, t.source, amount, paid, pending, t.status, t.description || '']); 
+        }); 
+        let wb = XLSX.utils.book_new(); 
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Budget'); 
+        XLSX.writeFile(wb, `budget_${new Date().toISOString().slice(0,10)}.xlsx`); 
+        showToast('Budget exported to Excel'); 
+    }
     
-    function viewBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { document.getElementById('viewBudgetContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${t.transaction_date}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> ${formatMoney(t.amount)}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p></div>`; openModal('viewBudgetModal'); } }
+    function exportBudgetToPDF() { 
+        let element = document.createElement('div'); 
+        let rows = budgetsData.map(t => { 
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
+            return `<tr><td class="px-2 py-1">${t.transaction_date}</td><td class="px-2 py-1">${t.type}</td><td class="px-2 py-1">${escapeHtml(t.source)}</td
+            <td class="px-2 py-1 text-right">${formatMoney(amount)}</td
+            <td class="px-2 py-1 text-right">${formatMoney(paid)}</td
+            <td class="px-2 py-1 text-right">${formatMoney(pending)}</td
+            <td class="px-2 py-1">${t.status}</td
+            <td class="px-2 py-1">${escapeHtml(t.description || '-')}</td</tr`; 
+        }).join(''); 
+        element.innerHTML = `<div style="padding:20px"><h1>Budget Report</h1><p>${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th><th class="text-right">Paid</th><th class="text-right">Pending</th><th>Status</th><th>Description</th></tr></thead><tbody>${rows}</tbody>}</div>`; 
+        html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); 
+        showToast('Budget exported to PDF'); 
+    }
+    
+    function viewBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { 
+        let amount = parseFloat(t.amount) || 0;
+        let paid = parseFloat(t.paid_amount) || 0;
+        let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
+        document.getElementById('viewBudgetContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${t.transaction_date}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> ${formatMoney(amount)}</p><p><strong>Paid:</strong> ${formatMoney(paid)}</p>${pending>0?`<p><strong>Pending:</strong> ${formatMoney(pending)}</p>`:''}<p><strong>Status:</strong> ${t.status}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p></div>`; 
+        openModal('viewBudgetModal'); 
+    } }
+    
     function editBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { document.getElementById('editBudgetId').value = t.id; document.getElementById('budgetType').value = t.type; document.getElementById('budgetSource').value = t.source; document.getElementById('budgetAmount').value = t.amount; document.getElementById('budgetDate').value = t.transaction_date; document.getElementById('budgetDescription').value = t.description || ''; openModal('budgetModal'); } }
-    async function saveBudget() { let id = document.getElementById('editBudgetId').value; let data = { type: document.getElementById('budgetType').value, source: document.getElementById('budgetSource').value.trim(), amount: parseMoney(document.getElementById('budgetAmount').value), transaction_date: document.getElementById('budgetDate').value || new Date().toISOString().split('T')[0], description: document.getElementById('budgetDescription').value, status: 'paid', department_id: DEPARTMENT_ID }; if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data); if(res.success) { showToast(id ? 'Updated' : 'Added'); closeModal('budgetModal'); loadBudget(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
+    
+    async function saveBudget() { 
+        let id = document.getElementById('editBudgetId').value; 
+        let data = { 
+            type: document.getElementById('budgetType').value, 
+            source: document.getElementById('budgetSource').value.trim(), 
+            amount: parseMoney(document.getElementById('budgetAmount').value), 
+            paid_amount: data.type === 'partial' ? parseMoney(document.getElementById('budgetPaidAmount')?.value) : data.amount,
+            transaction_date: document.getElementById('budgetDate').value || new Date().toISOString().split('T')[0], 
+            description: document.getElementById('budgetDescription').value, 
+            status: document.getElementById('budgetStatus')?.value || 'paid', 
+            department_id: DEPARTMENT_ID 
+        }; 
+        if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } 
+        let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data); 
+        if(res.success) { showToast(id ? 'Updated' : 'Added'); closeModal('budgetModal'); loadBudget(); loadDashboard(); } 
+        else showToast(res.message || 'Failed', true); 
+    }
+    
     async function deleteBudgetItem(id) { if(confirm('Delete?')) { let res = await apiCall('delete_transaction.php', 'DELETE', { id: parseInt(id) }); if(res.success) { showToast('Deleted'); loadBudget(); loadDashboard(); } } }
     
     // ==================== MESSAGES ====================
@@ -448,13 +628,41 @@
         document.getElementById('messagesGrid').innerHTML = msgsHtml;
     }
     
-    async function deleteConversation(convId) { if(confirm('Delete this conversation? It will be hidden from your view.')) { let res = await apiCall('delete_conversation.php', 'POST', { conversation_id: convId, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Conversation deleted'); loadMessages(); if(currentChatId === convId) closeModal('chatModal'); } else showToast(res.message || 'Failed', true); } }
+    async function deleteConversation(convId) { if(confirm('Delete this conversation?')) { let res = await apiCall('delete_conversation.php', 'POST', { conversation_id: convId, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Conversation deleted'); loadMessages(); if(currentChatId === convId) closeModal('chatModal'); } else showToast(res.message || 'Failed', true); } }
     
-    async function sendMessage() { let toDept = document.getElementById('msgTo').value; let msg = document.getElementById('msgContent').value.trim(); if(!toDept || !msg) { showToast('Select department and enter message', true); return; } let res = await apiCall('send_message.php', 'POST', { department_id: DEPARTMENT_ID, to_department_id: parseInt(toDept), message: msg }); if(res.success) { showToast('Message sent'); closeModal('msgModal'); document.getElementById('msgContent').value = ''; loadMessages(); } else showToast(res.message || 'Failed', true); }
+    async function sendMessage() { 
+        let toDept = document.getElementById('msgTo').value; 
+        let msg = document.getElementById('msgContent').value.trim(); 
+        if(!toDept || !msg) { showToast('Select department and enter message', true); return; } 
+        let res = await apiCall('send_message.php', 'POST', { department_id: DEPARTMENT_ID, to_department_id: parseInt(toDept), message: msg }); 
+        if(res.success) { showToast('Message sent'); closeModal('msgModal'); document.getElementById('msgContent').value = ''; loadMessages(); } 
+        else showToast(res.message || 'Failed', true); 
+    }
     
-    async function openChat(convId, otherDeptName) { currentChatId = convId; document.getElementById('chatModalTitle').innerHTML = `Chat with ${escapeHtml(otherDeptName)}`; const res = await apiCall(`get_messages.php?conversation_id=${convId}&department_id=${DEPARTMENT_ID}`); if(res.success && res.data) { let chatHtml = ''; for(let m of res.data) { const isSent = m.sender_dept === DEPARTMENT_ID; chatHtml += `<div class="${isSent ? 'text-right' : 'text-left'} mb-3"><div class="inline-block max-w-[70%] ${isSent ? 'bg-pink-500 text-white' : 'bg-gray-200'} rounded-lg px-3 py-2"><div>${escapeHtml(m.message)}</div><div class="text-xs opacity-70 mt-1">${new Date(m.created_at).toLocaleTimeString()}</div></div></div>`; } document.getElementById('chatMessagesArea').innerHTML = chatHtml; document.getElementById('chatMessagesArea').scrollTop = document.getElementById('chatMessagesArea').scrollHeight; openModal('chatModal'); await loadMessages(); } }
+    async function openChat(convId, otherDeptName) { 
+        currentChatId = convId; 
+        document.getElementById('chatModalTitle').innerHTML = `Chat with ${escapeHtml(otherDeptName)}`; 
+        const res = await apiCall(`get_messages.php?conversation_id=${convId}&department_id=${DEPARTMENT_ID}`); 
+        if(res.success && res.data) { 
+            let chatHtml = ''; 
+            for(let m of res.data) { 
+                const isSent = m.sender_dept === DEPARTMENT_ID; 
+                chatHtml += `<div class="${isSent ? 'text-right' : 'text-left'} mb-3"><div class="inline-block max-w-[70%] ${isSent ? 'bg-pink-500 text-white' : 'bg-gray-200'} rounded-lg px-3 py-2"><div>${escapeHtml(m.message)}</div><div class="text-xs opacity-70 mt-1">${new Date(m.created_at).toLocaleTimeString()}</div></div></div>`; 
+            } 
+            document.getElementById('chatMessagesArea').innerHTML = chatHtml; 
+            document.getElementById('chatMessagesArea').scrollTop = document.getElementById('chatMessagesArea').scrollHeight; 
+            openModal('chatModal'); 
+            await loadMessages(); 
+        } 
+    }
     
-    async function sendChatMessage() { let msg = document.getElementById('replyMsg').value.trim(); if(!msg || !currentChatId) return; let res = await apiCall('send_message.php', 'POST', { conversation_id: currentChatId, department_id: DEPARTMENT_ID, message: msg }); if(res.success) { document.getElementById('replyMsg').value = ''; openChat(currentChatId, ''); loadMessages(); } else showToast(res.message || 'Failed', true); }
+    async function sendChatMessage() { 
+        let msg = document.getElementById('replyMsg').value.trim(); 
+        if(!msg || !currentChatId) return; 
+        let res = await apiCall('send_message.php', 'POST', { conversation_id: currentChatId, department_id: DEPARTMENT_ID, message: msg }); 
+        if(res.success) { document.getElementById('replyMsg').value = ''; openChat(currentChatId, ''); loadMessages(); } 
+        else showToast(res.message || 'Failed', true); 
+    }
     
     // ==================== REPORTS ====================
     async function loadReports() {
@@ -465,22 +673,46 @@
         if(reportsData.length === 0) { document.getElementById('reportsGrid').innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No reports found</div>'; return; }
         let reportsHtml = '';
         for(let r of reportsData) {
-            reportsHtml += `<div class="bg-white rounded-xl border hover:shadow-lg transition-all cursor-pointer p-4" onclick="viewReportDetails(${r.id})"><div class="flex justify-between items-start"><div><h4 class="font-semibold">${escapeHtml(r.title)}</h4><p class="text-xs text-gray-500">${r.period} · ${new Date(r.created_at).toLocaleDateString()}</p></div><span class="status-badge ${r.status==='sent'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${r.status}</span></div><p class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(r.content.substring(0,120))}${r.content.length>120?'...':''}</p><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view text-xs px-2 py-1 rounded bg-blue-500 text-white"><i class="fas fa-eye mr-1"></i>View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit text-xs px-2 py-1 rounded bg-green-500 text-white"><i class="fas fa-edit mr-1"></i>Edit</button><button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete text-xs px-2 py-1 rounded bg-red-500 text-white"><i class="fas fa-trash mr-1"></i>Delete</button></div></div>`;
+            reportsHtml += `<div class="bg-white rounded-xl border hover:shadow-lg transition-all cursor-pointer p-4" onclick="viewReportDetails(${r.id})"><div class="flex justify-between items-start"><div><h4 class="font-semibold">${escapeHtml(r.title)}</h4><p class="text-xs text-gray-500">${r.period} · ${new Date(r.created_at).toLocaleDateString()}</p></div><span class="status-badge ${r.status==='sent'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${r.status}</span></div><p class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(r.content.substring(0,120))}${r.content.length>120?'...':''}</p><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view"><i class="fas fa-eye mr-1"></i>View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit mr-1"></i>Edit</button><button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete"><i class="fas fa-trash mr-1"></i>Delete</button></div></div>`;
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
     }
     
-    function viewReportDetails(id) { const r = reportsData.find(r=>r.id===id); if(r) { document.getElementById('viewReportContent').innerHTML = `<div><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><p><strong>Status:</strong> ${r.status}</p><div class="mt-3 p-3 bg-gray-50 rounded whitespace-pre-wrap">${escapeHtml(r.content)}</div></div>`; document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button><button onclick="sendReportToAdmin(${r.id})" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-paper-plane mr-1"></i> Send</button>`; openModal('viewReportModal'); } }
+    function viewReportDetails(id) { 
+        const r = reportsData.find(r=>r.id===id); 
+        if(r) { 
+            document.getElementById('viewReportContent').innerHTML = `<div><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><p><strong>Status:</strong> ${r.status}</p><div class="mt-3 p-3 bg-gray-50 rounded whitespace-pre-wrap">${escapeHtml(r.content)}</div></div>`; 
+            let deptOptions = '';
+            deptOptions += `<a href="#" onclick="event.stopPropagation(); sendReportToDept(${r.id}, 1); return false;">👑 Super Admin</a>`;
+            departmentsList.forEach(d => {
+                deptOptions += `<a href="#" onclick="event.stopPropagation(); sendReportToDept(${r.id}, ${d.id}); return false;">${escapeHtml(d.name)}</a>`;
+            });
+            document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button><div class="send-dropdown"><button class="btn-warning text-white px-3 py-1.5 rounded text-sm" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane mr-1"></i> Send Report</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content">${deptOptions}</div></div>`; 
+            openModal('viewReportModal'); 
+        } 
+    }
+    
+    async function sendReportToDept(reportId, deptId) {
+        const r = reportsData.find(r => r.id === reportId);
+        if(r) {
+            const res = await apiCall('send_report.php', 'POST', { report_id: reportId, to_department_id: deptId, from_department_id: DEPARTMENT_ID });
+            if(res.success) { 
+                showToast(`Report "${r.title}" sent to ${deptId === 1 ? 'Super Admin' : (departmentsList.find(d => d.id === deptId)?.name || 'Department')}`);
+                r.status = 'sent';
+                loadReports();
+            } else showToast(res.message || 'Failed', true);
+            toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        }
+    }
     
     function editReport(id) { const r = reportsData.find(r=>r.id===id); if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('reportModal'); } }
     async function saveReport() { let id = document.getElementById('reportId').value; let data = { title: document.getElementById('reportTitle').value.trim(), period: document.getElementById('reportPeriod').value, content: document.getElementById('reportContent').value.trim(), department_id: DEPARTMENT_ID }; if(!data.title || !data.content) { showToast('Title and content required', true); return; } let res = id ? await apiCall('update_report.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_report.php', 'POST', data); if(res.success) { showToast(id ? 'Updated' : 'Added'); closeModal('reportModal'); loadReports(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
     async function deleteReport(id) { if(confirm('Delete this report?')) { let res = await apiCall('delete_report.php', 'POST', { report_id: id, user_id: 1, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Deleted'); loadReports(); loadDashboard(); } else showToast(res.message || 'Failed', true); } }
-    async function sendReportToAdmin(reportId) { let r = reportsData.find(r=>r.id===reportId); if(r) { let res = await apiCall('send_report.php', 'POST', { report_id: reportId, to_department_id: 1, from_department_id: DEPARTMENT_ID }); if(res.success) { showToast(`Report "${r.title}" sent to Admin`); r.status = 'sent'; loadReports(); } else showToast(res.message || 'Failed', true); } }
     
     function exportSingleReportExcel(reportId) { const r = reportsData.find(r=>r.id===reportId); if(r) { let ws = [['Title','Period','Content','Created']]; ws.push([r.title, r.period, r.content, r.created_at]); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Report'); XLSX.writeFile(wb, `report_${r.id}.xlsx`); showToast('Exported to Excel'); } }
-    function exportSingleReportPDF(reportId) { const r = reportsData.find(r=>r.id===reportId); if(r) { let element = document.createElement('div'); element.innerHTML = `<div style="padding:20px"><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><hr/><div>${escapeHtml(r.content)}</div><p>Generated: ${new Date().toLocaleString()}</p></div>`; html2pdf().set({ margin: 0.5, filename: `report_${r.id}.pdf` }).from(element).save(); showToast('Exported to PDF'); } }
+    function exportSingleReportPDF(reportId) { const r = reportsData.find(r=>r.id===reportId); if(r) { let element = document.createElement('div'); element.innerHTML = `<div style="padding:20px"><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><hr/><div style="background:#1e1e2f; color:#ffffff; padding:15px; border-radius:8px;">${escapeHtml(r.content)}</div><p>Generated: ${new Date().toLocaleString()}</p></div>`; html2pdf().set({ margin: 0.5, filename: `report_${r.id}.pdf` }).from(element).save(); showToast('Exported to PDF'); } }
     function exportAllReportsToExcel() { let ws = [['ID','Title','Period','Content','Created','Status']]; reportsData.forEach(r => ws.push([r.id, r.title, r.period, r.content, r.created_at, r.status])); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports'); XLSX.writeFile(wb, `all_reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('All reports exported to Excel'); }
-    function exportAllReportsToPDF() { let element = document.createElement('div'); let reportsHtml = reportsData.map(r => `<div style="margin-bottom:20px"><h3>${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><div>${escapeHtml(r.content)}</div><hr/></div>`).join(''); element.innerHTML = `<div style="padding:20px"><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${reportsHtml}</div>`; html2pdf().set({ margin: 0.5, filename: `all_reports.pdf` }).from(element).save(); showToast('All reports exported to PDF'); }
+    function exportAllReportsToPDF() { let element = document.createElement('div'); let reportsHtml = reportsData.map(r => `<div style="margin-bottom:20px"><h3>${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${new Date(r.created_at).toLocaleString()}</p><div style="background:#1e1e2f; color:#ffffff; padding:10px;">${escapeHtml(r.content)}</div><hr/></div>`).join(''); element.innerHTML = `<div style="padding:20px"><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${reportsHtml}</div>`; html2pdf().set({ margin: 0.5, filename: `all_reports.pdf` }).from(element).save(); showToast('All reports exported to PDF'); }
     
     // ==================== SETTINGS ====================
     function loadSettings() {
@@ -558,16 +790,17 @@
     window.exportProjectPDF = exportProjectPDF; window.exportProjectExcel = exportProjectExcel;
     window.viewBudgetItem = viewBudgetItem; window.editBudgetItem = editBudgetItem; window.saveBudget = saveBudget;
     window.deleteBudgetItem = deleteBudgetItem; window.sendMessage = sendMessage; window.openChat = openChat;
-    window.sendChatMessage = sendChatMessage; window.sendReportToAdmin = sendReportToAdmin;
-    window.viewReportDetails = viewReportDetails; window.editReport = editReport; window.saveReport = saveReport;
-    window.deleteReport = deleteReport; window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor;
+    window.sendChatMessage = sendChatMessage; window.viewReportDetails = viewReportDetails; 
+    window.editReport = editReport; window.saveReport = saveReport; window.deleteReport = deleteReport;
+    window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor;
     window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.logout = logout;
     window.closeMobileSidebar = closeMobileSidebar; window.goToMainWebsite = goToMainWebsite;
     window.showFullImage = showFullImage; window.toggleSendDropdown = toggleSendDropdown;
-    window.sendProjectToDept = sendProjectToDept; window.exportAllReportsToExcel = exportAllReportsToExcel;
-    window.exportAllReportsToPDF = exportAllReportsToPDF; window.exportSingleReportExcel = exportSingleReportExcel;
-    window.exportSingleReportPDF = exportSingleReportPDF; window.exportBudgetToExcel = exportBudgetToExcel;
-    window.exportBudgetToPDF = exportBudgetToPDF; window.deleteConversation = deleteConversation;
+    window.sendProjectToDept = sendProjectToDept; window.sendReportToDept = sendReportToDept;
+    window.exportAllReportsToExcel = exportAllReportsToExcel; window.exportAllReportsToPDF = exportAllReportsToPDF;
+    window.exportSingleReportExcel = exportSingleReportExcel; window.exportSingleReportPDF = exportSingleReportPDF;
+    window.exportBudgetToExcel = exportBudgetToExcel; window.exportBudgetToPDF = exportBudgetToPDF;
+    window.deleteConversation = deleteConversation;
     
     init();
 </script>
