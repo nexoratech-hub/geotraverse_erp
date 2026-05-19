@@ -20,29 +20,9 @@
         ::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 10px; }
         ::-webkit-scrollbar-thumb { background: #be123c; border-radius: 10px; }
         
-        .sidebar {
-            background: #be123c;
-            transition: transform 0.3s ease, left 0.3s ease;
-            height: 100vh;
-            overflow-y: auto;
-            position: fixed;
-            width: 280px;
-            z-index: 30;
-            left: 0;
-            top: 0;
-        }
-        
-        .main-content {
-            margin-left: 280px;
-            min-height: 100vh;
-            transition: margin-left 0.3s ease;
-        }
-        
-        @media (max-width: 768px) {
-            .sidebar { transform: translateX(-100%); left: 0; }
-            .sidebar.mobile-open { transform: translateX(0); }
-            .main-content { margin-left: 0; }
-        }
+        .sidebar { background: #be123c; transition: transform 0.3s ease; height: 100vh; overflow-y: auto; position: fixed; width: 280px; z-index: 30; left: 0; top: 0; }
+        .main-content { margin-left: 280px; min-height: 100vh; transition: margin-left 0.3s ease; }
+        @media (max-width: 768px) { .sidebar { transform: translateX(-100%); } .sidebar.mobile-open { transform: translateX(0); } .main-content { margin-left: 0; } }
         
         .sidebar-logo { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
         .nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 10px; color: white; cursor: pointer; transition: all 0.2s; }
@@ -95,6 +75,8 @@
         body.dark-mode .form-group input, body.dark-mode .form-group select, body.dark-mode .form-group textarea { background: #0f172a; border-color: #334155; color: #f1f5f9; }
         body.dark-mode .income-row { background-color: #064e3b20; }
         body.dark-mode .expense-row { background-color: #7f1d1d20; }
+        body.dark-mode .pending-row { background-color: #78350f20; }
+        body.dark-mode .partial-row { background-color: #451a0320; }
         
         .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #e5e7eb; border-top-color: #be123c; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -119,15 +101,12 @@
         .expense-row { background-color: #fef2f2; }
         .pending-row { background-color: #fef3c7; }
         .partial-row { background-color: #fffbeb; }
-        body.dark-mode .pending-row { background-color: #78350f20; }
-        body.dark-mode .partial-row { background-color: #451a0320; }
         
         .budget-table-container { overflow-x: auto; border-radius: 12px; }
         .budget-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 800px; }
         .budget-table th, .budget-table td { padding: 12px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
         .budget-table th { background: #f8fafc; font-weight: 600; position: sticky; top: 0; text-align: left; }
         .budget-table td.text-right, .budget-table th.text-right { text-align: right; }
-        .budget-table td.text-center, .budget-table th.text-center { text-align: center; }
         body.dark-mode .budget-table th { background: #1e293b; border-bottom-color: #334155; }
         
         .action-btn { padding: 5px 10px; font-size: 11px; border-radius: 5px; cursor: pointer; transition: all 0.2s; border: none; display: inline-flex; align-items: center; gap: 4px; }
@@ -142,6 +121,7 @@
         .scroll-top.visible { opacity: 1; }
         
         .money-input { text-align: left; font-family: monospace; font-weight: 500; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
@@ -211,9 +191,21 @@
 
 <div id="viewProjModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-folder-open text-pink-500 mr-2"></i>Project Details</h3><div id="viewProjContent"></div><div id="viewProjButtons" class="flex flex-wrap gap-2 justify-center mt-4 pt-3 border-t"></div><button onclick="closeModal('viewProjModal')" class="w-full bg-gray-200 py-2 rounded mt-3">Close</button></div></div>
 
-<div id="budgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-wallet text-pink-500 mr-2"></i>Add Transaction</h3><input type="hidden" id="editBudgetId"><div class="form-group"><label>Type</label><select id="budgetType"><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="form-group"><label>Source</label><input type="text" id="budgetSource" placeholder="Source/Category" required></div><div class="form-group"><label>Amount (TZS)</label><input type="text" id="budgetAmount" class="money-input" required></div><div class="form-group"><label>Date</label><input type="date" id="budgetDate"></div><div class="form-group"><label>Description</label><textarea id="budgetDescription" rows="2"></textarea></div><div class="flex gap-3 pt-2"><button onclick="saveBudget()" class="flex-1 btn-primary">Save</button><button onclick="closeModal('budgetModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div>
+<!-- BUDGET MODAL WITH PAYMENT STATUS -->
+<div id="budgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4" id="budgetModalTitle"><i class="fas fa-wallet text-pink-500 mr-2"></i>Add Transaction</h3><input type="hidden" id="editBudgetId"><div class="form-group"><label>Type</label><select id="budgetType"><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="form-group"><label>Source/Category <span class="required">*</span></label><input type="text" id="budgetSource" placeholder="e.g., Client Payment, Office Rent" required></div><div class="form-group"><label>Amount (TZS) <span class="required">*</span></label><input type="text" id="budgetAmount" class="money-input" placeholder="0" required></div><div class="form-group"><label>Date</label><input type="date" id="budgetDate"></div><div class="form-group"><label>Payment Status <span class="required">*</span></label><select id="budgetStatus" class="w-full">
+    <option value="paid">✅ Paid - Full payment received</option>
+    <option value="pending">⏳ Pending - No payment yet</option>
+    <option value="partial">🔄 Partial - Partially paid</option>
+</select></div>
+<div class="form-group partial-field hidden" id="paidAmountGroup">
+    <label>Paid Amount (TZS) <span class="required">*</span></label>
+    <input type="text" id="budgetPaidAmount" class="money-input" placeholder="Enter amount paid">
+    <p class="text-xs text-gray-500 mt-1">Remaining amount will be tracked as pending</p>
+</div>
+<div class="form-group"><label>Description</label><textarea id="budgetDescription" rows="3" placeholder="Transaction description"></textarea></div>
+<div class="flex gap-3 pt-2"><button onclick="saveBudget()" class="flex-1 btn-primary">Save</button><button onclick="closeModal('budgetModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div>
 
-<div id="viewBudgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4">Budget Details</h3><div id="viewBudgetContent"></div><button onclick="closeModal('viewBudgetModal')" class="w-full bg-gray-200 py-2 rounded mt-3">Close</button></div></div>
+<div id="viewBudgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4">Transaction Details</h3><div id="viewBudgetContent"></div><button onclick="closeModal('viewBudgetModal')" class="w-full bg-gray-200 py-2 rounded mt-3">Close</button></div></div>
 
 <div id="reportModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-chart-line text-pink-500 mr-2"></i>Add Report</h3><input type="hidden" id="reportId"><div class="form-group"><label>Title *</label><input type="text" id="reportTitle" placeholder="Report title" required></div><div class="form-group"><label>Period</label><select id="reportPeriod"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></div><div class="form-group"><label>Content *</label><textarea id="reportContent" rows="6" placeholder="Report content" required></textarea></div><div class="flex gap-3 pt-2"><button onclick="saveReport()" class="flex-1 btn-primary">Save</button><button onclick="closeModal('reportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div>
 
@@ -277,6 +269,22 @@
                 } 
             });
         });
+    }
+    
+    // Show/hide paid amount field based on status selection
+    function setupStatusListener() {
+        const statusSelect = document.getElementById('budgetStatus');
+        if (statusSelect) {
+            statusSelect.addEventListener('change', function() {
+                const paidAmountGroup = document.getElementById('paidAmountGroup');
+                if (this.value === 'partial') {
+                    paidAmountGroup.classList.remove('hidden');
+                } else {
+                    paidAmountGroup.classList.add('hidden');
+                    document.getElementById('budgetPaidAmount').value = '';
+                }
+            });
+        }
     }
     
     function getImageFullUrl(imagePath) {
@@ -370,75 +378,91 @@
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
     }
     
-    // ==================== PDF EXPORT - Opens new window with small image and vertical details (like Construction) ====================
+    // ==================== PDF EXPORT (SURVEY STYLE) ====================
     function exportProjectPDF(projectId) {
-        const p = projectsData.find(p => p.id === projectId);
-        if(!p) { showToast('Project not found', true); return; }
+        let p = projectsData.find(p => p.id === projectId);
+        if (!p) return;
         let imageUrl = getImageFullUrl(p.image);
         let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : 'status-completed';
         let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
         
-        const htmlContent = `<!DOCTYPE html>
+        let printContent = `<!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
             <title>${escapeHtml(p.name)} - Project Report</title>
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: white; padding: 30px; }
-                .pdf-container { max-width: 750px; margin: 0 auto; border: 3px solid #000000; background: white; border-radius: 12px; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 18px 22px; text-align: center; }
-                .header h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+                body { font-family: 'Inter', Arial, sans-serif; background: white; padding: 30px; }
+                .pdf-container { max-width: 750px; margin: 0 auto; border: 3px solid #be123c; background: white; border-radius: 12px; overflow: hidden; }
+                .header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 15px 20px; text-align: center; }
+                .header h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
                 .header p { font-size: 10px; opacity: 0.85; }
-                .info-bar { background: #f3f4f6; padding: 6px 15px; text-align: center; font-size: 10px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; }
-                .image-section { text-align: center; margin: 15px 20px; padding: 10px; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
-                .image-section img { max-width: 160px; max-height: 110px; object-fit: contain; border-radius: 5px; }
-                .no-image { padding: 20px; background: #f9fafb; border-radius: 8px; color: #9ca3af; text-align: center; font-size: 12px; }
-                .details-container { margin: 15px 20px 20px 20px; }
-                .detail-row { display: flex; border-bottom: 1px solid #000000; }
+                .info-bar { background: #f3f4f6; padding: 5px 12px; text-align: center; font-size: 9px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; }
+                .image-section { text-align: center; margin: 12px 15px; padding: 8px; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
+                .image-section img { max-width: 130px; max-height: 90px; object-fit: contain; border-radius: 4px; }
+                .no-image { padding: 12px; background: #f9fafb; border-radius: 6px; color: #9ca3af; text-align: center; font-size: 11px; }
+                .no-image i { font-size: 24px; }
+                .details-container { margin: 10px 15px 15px 15px; }
+                .detail-row { display: flex; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; }
-                .detail-title { width: 35%; background: #fce7f3; padding: 10px 12px; font-weight: 700; font-size: 12px; color: #9d174d; border-right: 1px solid #000000; }
-                .detail-value { width: 65%; padding: 10px 12px; font-size: 12px; color: #1f2937; background: white; }
-                .status-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; }
+                .detail-title { width: 35%; background: #fce7f3; padding: 8px 10px; font-weight: 700; font-size: 11px; color: #9d174d; border-right: 1px solid #e5e7eb; }
+                .detail-value { width: 65%; padding: 8px 10px; font-size: 11px; color: #1f2937; background: white; }
+                .status-badge { display: inline-block; padding: 2px 8px; border-radius: 16px; font-size: 9px; font-weight: 600; }
                 .status-pending { background: #fef3c7; color: #d97706; }
                 .status-progress { background: #dbeafe; color: #2563eb; }
                 .status-completed { background: #d1fae5; color: #059669; }
                 .amount-value { color: #059669; font-weight: 700; }
-                .footer { text-align: center; font-size: 8px; color: #9ca3af; padding: 10px 20px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-                .print-btn { text-align: center; padding: 12px 20px; background: #f9fafb; }
-                .print-btn button { padding: 6px 18px; background: #be123c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600; }
-                @media print { .print-btn { display: none; } body { padding: 0; } .pdf-container { border: none; border-radius: 0; } .detail-title { background: #fce7f3 !important; -webkit-print-color-adjust: exact; } .header { background: #be123c !important; -webkit-print-color-adjust: exact; } }
+                .footer { text-align: center; font-size: 8px; color: #6b7280; padding: 8px 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+                .print-btn { text-align: center; padding: 10px 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+                .print-btn button { padding: 6px 16px; background: #be123c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600; }
+                .print-btn button:hover { background: #9d174d; }
+                @media print { .print-btn { display: none; } body { padding: 0; } .pdf-container { border: none; padding: 0; } .detail-title { background: #fce7f3 !important; -webkit-print-color-adjust: exact; } .header { background: #be123c !important; -webkit-print-color-adjust: exact; } }
             </style>
         </head>
         <body>
             <div class="pdf-container">
-                <div class="header"><h1>${escapeHtml(p.name)}</h1><p>Architectural Department | Project Report</p></div>
-                <div class="info-bar"><span><strong>Project ID:</strong> #${p.id}</span><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span><span><strong>Department:</strong> Architectural</span></div>
-                <div class="image-section">${imageUrl ? `<img src="${imageUrl}" alt="Project Image" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>No Image Available</p></div>'">` : '<div class="no-image"><i class="fas fa-image"></i><p>No Image Available</p></div>'}</div>
-                <div class="details-container">
-                    <div class="detail-row"><div class="detail-title">📋 Project Name</div><div class="detail-value">${escapeHtml(p.name)}</div></div>
-                    <div class="detail-row"><div class="detail-title">👤 Client Name</div><div class="detail-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
-                    <div class="detail-row"><div class="detail-title">💰 Amount</div><div class="detail-value amount-value">${formatMoney(p.amount)}</div></div>
-                    <div class="detail-row"><div class="detail-title">📌 Status</div><div class="detail-value"><span class="status-badge ${statusClass}">${statusText}</span></div></div>
-                    <div class="detail-row"><div class="detail-title">📈 Progress</div><div class="detail-value">${p.progress || 0}% Complete</div></div>
-                    <div class="detail-row"><div class="detail-title">📍 Location</div><div class="detail-value">${escapeHtml(p.location || 'N/A')}</div></div>
-                    <div class="detail-row"><div class="detail-title">📅 Start Date</div><div class="detail-value">${p.start_date || 'Not specified'}</div></div>
-                    <div class="detail-row"><div class="detail-title">📅 End Date</div><div class="detail-value">${p.end_date || 'Not specified'}</div></div>
-                    <div class="detail-row"><div class="detail-title">📝 Description</div><div class="detail-value">${escapeHtml(p.description || 'No description provided')}</div></div>
+                <div class="header">
+                    <h1>${escapeHtml(p.name)}</h1>
+                    <p>Architectural Department | Project Report</p>
                 </div>
-                <div class="footer">GeoTraverse ERP System - Official Project Document<br>Architectural Department | ${new Date().toLocaleDateString()}</div>
-                <div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);"><i class="fas fa-print"></i> Save as PDF / Print</button></div>
+                <div class="info-bar">
+                    <span><strong>Project ID:</strong> #${p.id}</span>
+                    <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+                    <span><strong>Department:</strong> Architectural</span>
+                </div>
+                <div class="image-section">
+                    ${imageUrl ? `<img src="${imageUrl}" alt="Project Image" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>No Image Available</p></div>'">` : '<div class="no-image"><i class="fas fa-image"></i><p>No Image Available</p></div>'}
+                </div>
+                <div class="details-container">
+                    <div class="detail-row"><div class="detail-title">📋 PROJECT NAME</div><div class="detail-value"><strong>${escapeHtml(p.name)}</strong></div></div>
+                    <div class="detail-row"><div class="detail-title">👤 CLIENT NAME</div><div class="detail-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
+                    <div class="detail-row"><div class="detail-title">💰 AMOUNT</div><div class="detail-value amount-value">${formatMoney(p.amount)}</div></div>
+                    <div class="detail-row"><div class="detail-title">📌 STATUS</div><div class="detail-value"><span class="status-badge ${statusClass}">${statusText}</span></div></div>
+                    <div class="detail-row"><div class="detail-title">📈 PROGRESS</div><div class="detail-value"><strong>${p.progress || 0}% Complete</strong></div></div>
+                    <div class="detail-row"><div class="detail-title">📍 LOCATION</div><div class="detail-value">${escapeHtml(p.location || 'N/A')}</div></div>
+                    <div class="detail-row"><div class="detail-title">📅 START DATE</div><div class="detail-value">${p.start_date || 'Not specified'}</div></div>
+                    <div class="detail-row"><div class="detail-title">📅 END DATE</div><div class="detail-value">${p.end_date || 'Not specified'}</div></div>
+                    <div class="detail-row"><div class="detail-title">📝 DESCRIPTION</div><div class="detail-value">${escapeHtml(p.description || 'No description provided')}</div></div>
+                </div>
+                <div class="footer">
+                    GeoTraverse ERP System - Official Project Document | Architectural Department | ${new Date().toLocaleDateString()}
+                </div>
+                <div class="print-btn">
+                    <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1000);"><i class="fas fa-print"></i> Save as PDF / Print</button>
+                </div>
             </div>
         </body>
         </html>`;
         
-        const blob = new Blob([htmlContent], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const newWindow = window.open(url, '_blank');
-        if(newWindow) newWindow.focus();
-        else showToast('Please allow popups to generate PDF', true);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        showToast('PDF preview opened - Click Print to save');
+        let printWindow = window.open('', '_blank');
+        if(printWindow) {
+            printWindow.document.write(printContent);
+            printWindow.document.close();
+            showToast("PDF preview opened - Click 'Save as PDF / Print' to download");
+        } else {
+            showToast("Please allow popups to generate PDF", true);
+        }
     }
     
     function exportProjectExcel(projectId) {
@@ -501,7 +525,7 @@
     
     async function deleteProject(id) { if(confirm('Delete this project?')) { let res = await apiCall('delete_project.php', 'POST', { project_id: id, user_id: 1, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Project deleted'); loadProjects(); loadDashboard(); } else showToast(res.message || 'Failed', true); } }
     
-    // ==================== BUDGET ====================
+    // ==================== BUDGET WITH PAYMENT STATUS ====================
     async function loadBudget() {
         const res = await apiCall(`get_transactions.php?department_id=${DEPARTMENT_ID}`);
         budgetsData = res.success ? res.data.sort((a,b) => b.id - a.id) : [];
@@ -518,7 +542,7 @@
         });
         let netProfit = totalIncome - totalExpense;
         
-        let html = `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-wallet text-pink-600 mr-2"></i>Budget (${budgetsData.length})</h2><div class="flex gap-2"><button onclick="openModal('budgetModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Transaction</button><button onclick="exportBudgetToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportBudgetToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
+        let html = `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-wallet text-pink-600 mr-2"></i>Budget (${budgetsData.length})</h2><div class="flex gap-2"><button onclick="openBudgetModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Transaction</button><button onclick="exportBudgetToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportBudgetToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
             <div class="grid grid-cols-4 gap-3 mb-4">
                 <div class="bg-green-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Income</p><p class="text-xl font-bold text-green-600">${formatMoney(totalIncome)}</p></div>
                 <div class="bg-red-50 rounded-xl p-3 text-center"><p class="text-xs text-gray-500 uppercase">Expenses</p><p class="text-xl font-bold text-red-600">${formatMoney(totalExpense)}</p></div>
@@ -531,18 +555,115 @@
             let paid = parseFloat(t.paid_amount) || 0;
             let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
             let rowClass = t.status === 'pending' ? 'pending-row' : (t.status === 'partial' ? 'partial-row' : (t.type === 'income' ? 'income-row' : 'expense-row'));
+            let statusClass = t.status === 'paid' ? 'status-paid' : (t.status === 'partial' ? 'status-partial' : 'status-pending');
             html += `<tr class="border-b ${rowClass}"><td class="p-3">${t.transaction_date}<\/td>
                     <td class="p-3"><span class="status-badge ${t.type==='income'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${t.type}</span><\/td>
                     <td class="p-3">${escapeHtml(t.source)}<\/td>
                     <td class="p-3 text-right ${t.type==='income'?'text-green-600':'text-red-600'} font-bold">${formatMoney(amount)}<\/td>
                     <td class="p-3 text-right text-blue-600">${formatMoney(paid)}<\/td>
                     <td class="p-3 text-right ${pending>0?'text-orange-600 font-semibold':'text-green-600'}">${formatMoney(pending)}<\/td>
-                    <td class="p-3"><span class="status-badge ${t.status==='paid'?'status-paid':t.status==='partial'?'status-partial':'status-pending'}">${t.status}</span><\/td>
+                    <td class="p-3"><span class="status-badge ${statusClass}">${t.status}</span><\/td>
                     <td class="p-3"><button onclick="viewBudgetItem(${t.id})" class="text-blue-500 mr-2"><i class="fas fa-eye"></i></button><button onclick="editBudgetItem(${t.id})" class="text-green-500 mr-2"><i class="fas fa-edit"></i></button><button onclick="deleteBudgetItem(${t.id})" class="text-red-500"><i class="fas fa-trash"></i></button><\/td><\/tr>`;
         }
-        html += `</tbody>${'</table>'}</div>${budgetsData.length===0?'<div class="text-center py-8 text-gray-400">No transactions</div>':''}</div>`;
+        html += `</tbody>${'<td>'}</div>${budgetsData.length===0?'<div class="text-center py-8 text-gray-400">No transactions</div>':''}</div>`;
         document.getElementById('budgetSection').innerHTML = html;
     }
+    
+    function openBudgetModal() {
+        document.getElementById('editBudgetId').value = '';
+        document.getElementById('budgetType').value = 'income';
+        document.getElementById('budgetSource').value = '';
+        document.getElementById('budgetAmount').value = '';
+        document.getElementById('budgetDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('budgetStatus').value = 'paid';
+        document.getElementById('budgetDescription').value = '';
+        document.getElementById('paidAmountGroup').classList.add('hidden');
+        document.getElementById('budgetPaidAmount').value = '';
+        document.getElementById('budgetModalTitle').innerHTML = '<i class="fas fa-wallet text-pink-500 mr-2"></i>Add Transaction';
+        openModal('budgetModal');
+    }
+    
+    function viewBudgetItem(id) { 
+        let t = budgetsData.find(t=>t.id===id); 
+        if(t) { 
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
+            let statusClass = t.status === 'paid' ? 'status-paid' : (t.status === 'partial' ? 'status-partial' : 'status-pending');
+            document.getElementById('viewBudgetContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${t.transaction_date}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> ${formatMoney(amount)}</p><p><strong>Paid Amount:</strong> ${formatMoney(paid)}</p>${pending>0?`<p><strong>Pending Amount:</strong> ${formatMoney(pending)}</p>`:''}<p><strong>Status:</strong> <span class="status-badge ${statusClass}">${t.status}</span></p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p></div>`; 
+            openModal('viewBudgetModal'); 
+        } 
+    }
+    
+    function editBudgetItem(id) { 
+        let t = budgetsData.find(t=>t.id===id); 
+        if(t) { 
+            document.getElementById('editBudgetId').value = t.id; 
+            document.getElementById('budgetType').value = t.type; 
+            document.getElementById('budgetSource').value = t.source; 
+            document.getElementById('budgetAmount').value = t.amount; 
+            document.getElementById('budgetDate').value = t.transaction_date; 
+            document.getElementById('budgetStatus').value = t.status; 
+            document.getElementById('budgetDescription').value = t.description || ''; 
+            if (t.status === 'partial') {
+                document.getElementById('paidAmountGroup').classList.remove('hidden');
+                document.getElementById('budgetPaidAmount').value = t.paid_amount || 0;
+            } else {
+                document.getElementById('paidAmountGroup').classList.add('hidden');
+                document.getElementById('budgetPaidAmount').value = '';
+            }
+            document.getElementById('budgetModalTitle').innerHTML = '<i class="fas fa-edit text-pink-500 mr-2"></i>Edit Transaction';
+            openModal('budgetModal'); 
+        } 
+    }
+    
+    async function saveBudget() { 
+        let id = document.getElementById('editBudgetId').value; 
+        let type = document.getElementById('budgetType').value; 
+        let source = document.getElementById('budgetSource').value.trim(); 
+        let amount = parseMoney(document.getElementById('budgetAmount').value); 
+        let transaction_date = document.getElementById('budgetDate').value || new Date().toISOString().split('T')[0]; 
+        let status = document.getElementById('budgetStatus').value; 
+        let description = document.getElementById('budgetDescription').value; 
+        let paid_amount = 0;
+        
+        if(!source || amount <= 0) { showToast('Source and valid amount required', true); return; } 
+        
+        if (status === 'paid') {
+            paid_amount = amount;
+        } else if (status === 'partial') {
+            paid_amount = parseMoney(document.getElementById('budgetPaidAmount').value);
+            if (paid_amount <= 0 || paid_amount >= amount) {
+                showToast('For Partial payment, paid amount must be greater than 0 and less than total amount', true);
+                return;
+            }
+        } else {
+            paid_amount = 0;
+        }
+        
+        let data = { 
+            type: type, 
+            source: source, 
+            amount: amount, 
+            paid_amount: paid_amount,
+            transaction_date: transaction_date, 
+            description: description, 
+            status: status, 
+            department_id: DEPARTMENT_ID 
+        }; 
+        
+        let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data); 
+        if(res && res.success) { 
+            showToast(id ? 'Transaction updated' : 'Transaction added'); 
+            closeModal('budgetModal'); 
+            await loadBudget(); 
+            await loadDashboard(); 
+        } else { 
+            showToast(res?.message || 'Failed', true); 
+        } 
+    }
+    
+    async function deleteBudgetItem(id) { if(confirm('Delete this transaction?')) { let res = await apiCall('delete_transaction.php', 'POST', { id: parseInt(id), is_deleted: 1 }); if(res.success) { showToast('Transaction deleted'); await loadBudget(); await loadDashboard(); } else showToast(res.message || 'Failed', true); } }
     
     function exportBudgetToExcel() { 
         let ws = [['Date','Type','Source','Amount','Paid','Pending','Status','Description']]; 
@@ -575,36 +696,6 @@
         html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); 
         showToast('Budget exported to PDF'); 
     }
-    
-    function viewBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { 
-        let amount = parseFloat(t.amount) || 0;
-        let paid = parseFloat(t.paid_amount) || 0;
-        let pending = (t.type === 'income' && t.status !== 'paid') ? amount - paid : 0;
-        document.getElementById('viewBudgetContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${t.transaction_date}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> ${formatMoney(amount)}</p><p><strong>Paid:</strong> ${formatMoney(paid)}</p>${pending>0?`<p><strong>Pending:</strong> ${formatMoney(pending)}</p>`:''}<p><strong>Status:</strong> ${t.status}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p></div>`; 
-        openModal('viewBudgetModal'); 
-    } }
-    
-    function editBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { document.getElementById('editBudgetId').value = t.id; document.getElementById('budgetType').value = t.type; document.getElementById('budgetSource').value = t.source; document.getElementById('budgetAmount').value = t.amount; document.getElementById('budgetDate').value = t.transaction_date; document.getElementById('budgetDescription').value = t.description || ''; openModal('budgetModal'); } }
-    
-    async function saveBudget() { 
-        let id = document.getElementById('editBudgetId').value; 
-        let data = { 
-            type: document.getElementById('budgetType').value, 
-            source: document.getElementById('budgetSource').value.trim(), 
-            amount: parseMoney(document.getElementById('budgetAmount').value), 
-            paid_amount: data.type === 'partial' ? parseMoney(document.getElementById('budgetPaidAmount')?.value) : data.amount,
-            transaction_date: document.getElementById('budgetDate').value || new Date().toISOString().split('T')[0], 
-            description: document.getElementById('budgetDescription').value, 
-            status: document.getElementById('budgetStatus')?.value || 'paid', 
-            department_id: DEPARTMENT_ID 
-        }; 
-        if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } 
-        let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data); 
-        if(res.success) { showToast(id ? 'Updated' : 'Added'); closeModal('budgetModal'); loadBudget(); loadDashboard(); } 
-        else showToast(res.message || 'Failed', true); 
-    }
-    
-    async function deleteBudgetItem(id) { if(confirm('Delete?')) { let res = await apiCall('delete_transaction.php', 'DELETE', { id: parseInt(id) }); if(res.success) { showToast('Deleted'); loadBudget(); loadDashboard(); } } }
     
     // ==================== MESSAGES ====================
     async function loadMessages() {
@@ -766,6 +857,7 @@
     
     async function init() {
         setupMoneyInputs();
+        setupStatusListener();
         await loadDepartments();
         const savedDark = localStorage.getItem('architectural_dark_mode');
         if(savedDark === 'true') document.body.classList.add('dark-mode');
@@ -788,11 +880,11 @@
     window.openAddProjectModal = openAddProjectModal; window.saveProject = saveProject; window.editProject = editProject;
     window.deleteProject = deleteProject; window.viewProjectDetails = viewProjectDetails;
     window.exportProjectPDF = exportProjectPDF; window.exportProjectExcel = exportProjectExcel;
-    window.viewBudgetItem = viewBudgetItem; window.editBudgetItem = editBudgetItem; window.saveBudget = saveBudget;
-    window.deleteBudgetItem = deleteBudgetItem; window.sendMessage = sendMessage; window.openChat = openChat;
-    window.sendChatMessage = sendChatMessage; window.viewReportDetails = viewReportDetails; 
-    window.editReport = editReport; window.saveReport = saveReport; window.deleteReport = deleteReport;
-    window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor;
+    window.openBudgetModal = openBudgetModal; window.saveBudget = saveBudget; window.viewBudgetItem = viewBudgetItem;
+    window.editBudgetItem = editBudgetItem; window.deleteBudgetItem = deleteBudgetItem;
+    window.sendMessage = sendMessage; window.openChat = openChat; window.sendChatMessage = sendChatMessage;
+    window.viewReportDetails = viewReportDetails; window.editReport = editReport; window.saveReport = saveReport;
+    window.deleteReport = deleteReport; window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor;
     window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.logout = logout;
     window.closeMobileSidebar = closeMobileSidebar; window.goToMainWebsite = goToMainWebsite;
     window.showFullImage = showFullImage; window.toggleSendDropdown = toggleSendDropdown;

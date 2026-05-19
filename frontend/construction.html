@@ -101,13 +101,13 @@
         .color-option:hover { transform: scale(1.1); }
         .color-option.selected { border-color: white; box-shadow: 0 0 0 2px #333; }
         
-        /* PDF Specific Styles */
+        /* PDF Print Styles */
         @media print {
             .print-btn { display: none; }
             body { padding: 0; margin: 0; }
             .pdf-container { border: none; border-radius: 0; }
-            .details-table th { background: #fef3c7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .header { background: #d97706 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .detail-title { background: #fef3c7 !important; -webkit-print-color-adjust: exact; }
+            .header { background: #d97706 !important; -webkit-print-color-adjust: exact; }
         }
     </style>
 </head>
@@ -193,7 +193,7 @@ function formatDate(d) { if (!d) return 'N/A'; return new Date(d).toLocaleDateSt
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 11;
-const UPLOAD_PATH = '/geotraverse/frontend/assets/uploads/projects/';
+const IMAGE_BASE_URL = '/geotraverse/frontend/assets/uploads/projects/';
 
 // ALL DEPARTMENTS + SUPER ADMIN (ID 1)
 const allDepartments = [
@@ -304,7 +304,8 @@ function getProjectImageUrl(p) {
     if (!p.image || p.image === '') return null;
     if (p.image.startsWith('http')) return p.image;
     if (p.image.startsWith('data:')) return p.image;
-    return UPLOAD_PATH + p.image;
+    if (p.image.startsWith('/')) return p.image;
+    return IMAGE_BASE_URL + p.image;
 }
 
 async function loadProjects(highlightId = null) {
@@ -358,13 +359,26 @@ function exportSingleProjectExcel(projectId) {
     if (p) { let ws = [['Name','Client','Amount','Status','Progress','Location','Start Date','End Date','Description']]; ws.push([p.name, p.client_name, p.amount, p.status, p.progress, p.location, p.start_date, p.end_date, p.description]); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); XLSX.writeFile(wb, `project_${p.id}.xlsx`); showToast('Exported to Excel'); }
 }
 
-// ==================== PDF EXPORT - Opens new window with small image and vertical details ====================
-function exportSingleProjectPDF(projectId) {
+// ==================== PDF EXPORT - Opens new window with SMALL image (60px max) ====================
+async function exportSingleProjectPDF(projectId) {
     let p = projectsData.find(p => p.id === projectId);
     if (!p) return;
+    
+    showToast('Generating PDF...', false);
+    
     let imageUrl = getProjectImageUrl(p);
     let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
     let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+    
+    // VERY SMALL image - max 60px
+    let imageHtml = imageUrl ? 
+        `<div style="text-align: center; margin: 5px 0 15px 0;">
+            <img src="${imageUrl}" style="max-width: 60px; max-height: 60px; width: auto; height: auto; border: 1px solid #ccc; border-radius: 6px; object-fit: cover;" 
+                 onerror="this.parentElement.innerHTML='<div style=\\'text-align:center; padding:10px; color:#999; font-size:11px;\\'><i class=\\'fas fa-image\\' style=\\'font-size:24px;\\'></i><br/>No Image</div>'">
+        </div>` : 
+        `<div style="text-align: center; margin: 5px 0 15px 0; color: #999; font-size: 11px;">
+            <i class="fas fa-image" style="font-size: 24px;"></i><br/>No Image
+        </div>`;
     
     let htmlContent = `<!DOCTYPE html>
     <html>
@@ -372,50 +386,144 @@ function exportSingleProjectPDF(projectId) {
         <meta charset="UTF-8">
         <title>${escapeHtml(p.name)} - Project Report</title>
         <style>
-            *{margin:0;padding:0;box-sizing:border-box;}
-            body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:white;padding:30px;}
-            .pdf-container{max-width:750px;margin:0 auto;border:3px solid #000000;background:white;border-radius:12px;overflow:hidden;}
-            .header{background:linear-gradient(135deg,#d97706,#b45309);color:white;padding:18px 22px;text-align:center;}
-            .header h1{font-size:22px;font-weight:800;margin:0 0 4px;}
-            .header p{font-size:10px;opacity:0.85;}
-            .info-bar{background:#f3f4f6;padding:6px 15px;text-align:center;font-size:10px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;}
-            .image-section{text-align:center;margin:15px 20px;padding:10px;background:#fafafa;border-radius:8px;border:1px solid #e5e7eb;}
-            .image-section img{max-width:160px;max-height:110px;object-fit:contain;border-radius:5px;}
-            .no-image{padding:20px;background:#f9fafb;border-radius:8px;color:#9ca3af;text-align:center;font-size:12px;}
-            .details-container{margin:15px 20px 20px 20px;}
-            .detail-row{display:flex;border-bottom:1px solid #000000;}
-            .detail-row:last-child{border-bottom:none;}
-            .detail-title{width:35%;background:#fef3c7;padding:10px 12px;font-weight:700;font-size:12px;color:#92400e;border-right:1px solid #000000;}
-            .detail-value{width:65%;padding:10px 12px;font-size:12px;color:#1f2937;background:white;}
-            .status-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
-            .status-pending{background:#fef3c7;color:#d97706;}
-            .status-progress{background:#dbeafe;color:#2563eb;}
-            .status-completed{background:#d1fae5;color:#059669;}
-            .amount-value{color:#059669;font-weight:700;}
-            .footer{text-align:center;font-size:8px;color:#9ca3af;padding:10px 20px;border-top:1px solid #e5e7eb;background:#f9fafb;}
-            .print-btn{text-align:center;padding:12px 20px;background:#f9fafb;}
-            .print-btn button{padding:6px 18px;background:#d97706;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;}
-            @media print{.print-btn{display:none;}body{padding:0;}.pdf-container{border:none;border-radius:0;}.detail-title{background:#fef3c7!important;-webkit-print-color-adjust:exact;}.header{background:#d97706!important;-webkit-print-color-adjust:exact;}}
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+                background: white;
+                padding: 20px;
+            }
+            .pdf-container {
+                max-width: 700px;
+                margin: 0 auto;
+                border: 2px solid #000000;
+                background: white;
+                border-radius: 8px;
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #d97706, #b45309);
+                color: white;
+                padding: 12px 16px;
+                text-align: center;
+            }
+            .header h1 {
+                font-size: 18px;
+                font-weight: 800;
+                margin: 0;
+            }
+            .header p {
+                font-size: 9px;
+                opacity: 0.85;
+                margin-top: 3px;
+            }
+            .info-bar {
+                background: #f3f4f6;
+                padding: 4px 12px;
+                text-align: center;
+                font-size: 9px;
+                display: flex;
+                justify-content: space-between;
+                border-bottom: 1px solid #e5e7eb;
+            }
+            .details-container {
+                margin: 10px 15px 15px 15px;
+            }
+            .detail-row {
+                display: flex;
+                border-bottom: 1px solid #000000;
+            }
+            .detail-row:last-child {
+                border-bottom: none;
+            }
+            .detail-title {
+                width: 35%;
+                background: #fef3c7;
+                padding: 6px 8px;
+                font-weight: 700;
+                font-size: 11px;
+                color: #92400e;
+                border-right: 1px solid #000000;
+            }
+            .detail-value {
+                width: 65%;
+                padding: 6px 8px;
+                font-size: 11px;
+                color: #1f2937;
+                background: white;
+            }
+            .status-badge {
+                display: inline-block;
+                padding: 2px 6px;
+                border-radius: 12px;
+                font-size: 9px;
+                font-weight: 600;
+            }
+            .status-pending { background: #fef3c7; color: #d97706; }
+            .status-progress { background: #dbeafe; color: #2563eb; }
+            .status-completed { background: #d1fae5; color: #059669; }
+            .amount-value { color: #059669; font-weight: 700; }
+            .footer {
+                text-align: center;
+                font-size: 7px;
+                color: #9ca3af;
+                padding: 6px 12px;
+                border-top: 1px solid #e5e7eb;
+                background: #f9fafb;
+            }
+            .print-btn {
+                text-align: center;
+                padding: 8px 12px;
+                background: #f9fafb;
+            }
+            .print-btn button {
+                padding: 4px 12px;
+                background: #d97706;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            @media print {
+                .print-btn { display: none; }
+                body { padding: 0; }
+                .pdf-container { border: none; border-radius: 0; }
+                .detail-title { background: #fef3c7 !important; -webkit-print-color-adjust: exact; }
+                .header { background: #d97706 !important; -webkit-print-color-adjust: exact; }
+            }
         </style>
     </head>
     <body>
         <div class="pdf-container">
-            <div class="header"><h1>${escapeHtml(p.name)}</h1><p>Construction Department | Project Report</p></div>
-            <div class="info-bar"><span><strong>Project ID:</strong> #${p.id}</span><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span><span><strong>Department:</strong> Construction</span></div>
-            <div class="image-section">${imageUrl ? `<img src="${imageUrl}" alt="Project Image" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>No Image Available</p></div>'">` : '<div class="no-image"><i class="fas fa-image"></i><p>No Image Available</p></div>'}</div>
-            <div class="details-container">
-                <div class="detail-row"><div class="detail-title">📋 Project Name</div><div class="detail-value">${escapeHtml(p.name)}</div></div>
-                <div class="detail-row"><div class="detail-title">👤 Client Name</div><div class="detail-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
-                <div class="detail-row"><div class="detail-title">💰 Amount</div><div class="detail-value amount-value">${formatMoney(p.amount)}</div></div>
-                <div class="detail-row"><div class="detail-title">📌 Status</div><div class="detail-value"><span class="status-badge ${statusClass}">${statusText}</span></div></div>
-                <div class="detail-row"><div class="detail-title">📈 Progress</div><div class="detail-value">${p.progress || 0}% Complete</div></div>
-                <div class="detail-row"><div class="detail-title">📍 Location</div><div class="detail-value">${escapeHtml(p.location || 'N/A')}</div></div>
-                <div class="detail-row"><div class="detail-title">📅 Start Date</div><div class="detail-value">${p.start_date || 'Not specified'}</div></div>
-                <div class="detail-row"><div class="detail-title">📅 End Date</div><div class="detail-value">${p.end_date || 'Not specified'}</div></div>
-                <div class="detail-row"><div class="detail-title">📝 Description</div><div class="detail-value">${escapeHtml(p.description || 'No description provided')}</div></div>
+            <div class="header">
+                <h1>${escapeHtml(p.name)}</h1>
+                <p>Construction Department | Project Report</p>
             </div>
-            <div class="footer">GeoTraverse ERP System - Official Project Document<br>Construction Department | ${new Date().toLocaleDateString()}</div>
-            <div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);"><i class="fas fa-print"></i> Save as PDF / Print</button></div>
+            <div class="info-bar">
+                <span><strong>ID:</strong> #${p.id}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+            ${imageHtml}
+            <div class="details-container">
+                <div class="detail-row"><div class="detail-title">Project Name</div><div class="detail-value">${escapeHtml(p.name)}</div></div>
+                <div class="detail-row"><div class="detail-title">Client Name</div><div class="detail-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
+                <div class="detail-row"><div class="detail-title">Amount</div><div class="detail-value amount-value">${formatMoney(p.amount)}</div></div>
+                <div class="detail-row"><div class="detail-title">Status</div><div class="detail-value"><span class="status-badge ${statusClass}">${statusText}</span></div></div>
+                <div class="detail-row"><div class="detail-title">Progress</div><div class="detail-value">${p.progress || 0}% Complete</div></div>
+                <div class="detail-row"><div class="detail-title">Location</div><div class="detail-value">${escapeHtml(p.location || 'N/A')}</div></div>
+                <div class="detail-row"><div class="detail-title">Start Date</div><div class="detail-value">${p.start_date || 'Not specified'}</div></div>
+                <div class="detail-row"><div class="detail-title">End Date</div><div class="detail-value">${p.end_date || 'Not specified'}</div></div>
+                <div class="detail-row"><div class="detail-title">Description</div><div class="detail-value">${escapeHtml(p.description || 'No description')}</div></div>
+            </div>
+            <div class="footer">
+                GeoTraverse ERP System - Construction Department | ${new Date().toLocaleDateString()}
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                    <i class="fas fa-print"></i> Save as PDF / Print
+                </button>
+            </div>
         </div>
     </body>
     </html>`;
@@ -523,7 +631,7 @@ function editBudgetItem(id) { let t = budgetsData.find(t=>t.id===id); if(t) { do
 async function saveBudget() { let id = document.getElementById('editBudgetId').value; let status = document.getElementById('budgetStatus').value; let data = { type: document.getElementById('budgetType').value, source: document.getElementById('budgetSource').value.trim(), amount: parseMoneyValue(document.getElementById('budgetAmount').value), transaction_date: document.getElementById('budgetDate').value || new Date().toISOString().split('T')[0], status: status, description: document.getElementById('budgetDescription').value, department_id: DEPARTMENT_ID }; if (status === 'partial') data.paid_amount = parseMoneyValue(document.getElementById('budgetPaidAmount').value); else data.paid_amount = data.amount; if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data); if(res.success) { showToast(id ? 'Transaction updated' : 'Transaction added'); closeModal('budgetModal'); loadBudget(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
 async function deleteBudgetItem(id) { if(confirm('Delete this transaction?')) { let res = await apiCall('delete_transaction.php', 'POST', { id, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Transaction deleted'); loadBudget(); loadDashboard(); } else showToast(res.message || 'Failed', true); } }
 function exportBudgetToExcel() { let ws = [['Date','Type','Source','Amount','Status','Paid','Description']]; budgetsData.forEach(t => ws.push([t.transaction_date, t.type, t.source, t.amount, t.status, t.paid_amount||0, t.description||''])); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Budget'); XLSX.writeFile(wb, `budget_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Budget exported to Excel'); }
-function exportBudgetToPDF() { let element = document.createElement('div'); let rows = budgetsData.map(t => `<tr><td class="px-2 py-1">${t.transaction_date}</td><td class="px-2 py-1">${t.type}</td><td class="px-2 py-1">${escapeHtml(t.source)}</td><td class="px-2 py-1 text-right">${formatMoney(t.amount)}</td</tr`).join(''); element.innerHTML = `<div style="padding:20px; border:2px solid #d97706;"><h1 style="color:#d97706; text-align:center;">Budget Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8" style="width:100%; border-collapse:collapse;"><thead><tr style="background:#fef3c7;"><th>Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th></tr></thead><tbody>${rows}</tbody>}</div>`; html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); showToast('Budget exported to PDF'); }
+function exportBudgetToPDF() { let element = document.createElement('div'); let rows = budgetsData.map(t => `<table><td class="px-2 py-1">${t.transaction_date}</td><td class="px-2 py-1">${t.type}</td><td class="px-2 py-1">${escapeHtml(t.source)}</td><td class="px-2 py-1 text-right">${formatMoney(t.amount)}</td</tr`).join(''); element.innerHTML = `<div style="padding:20px; border:2px solid #d97706;"><h1 style="color:#d97706; text-align:center;">Budget Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8" style="width:100%; border-collapse:collapse;"><thead><tr style="background:#fef3c7;"><th>Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th></tr></thead><tbody>${rows}</tbody>}</div>`; html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); showToast('Budget exported to PDF'); }
 
 // ==================== MESSAGES ====================
 async function loadMessages() { const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`); conversationsList = res.success ? res.data : []; let unread = conversationsList.reduce((s,c)=>s+(c.unread_count||0),0); document.getElementById('msgBadge').innerText = unread; let html = `<div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold"><i class="fas fa-envelope text-amber-600 mr-2"></i>Messages</h2><button onclick="openModal('startChatModal')" class="btn-primary">+ New Chat</button></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="messagesGrid"></div>`; document.getElementById('messagesPage').innerHTML = html; if (conversationsList.length === 0) { document.getElementById('messagesGrid').innerHTML = '<div class="col-span-2 text-center py-12 text-gray-400">No messages found</div>'; return; } let msgsHtml = ''; for (let conv of conversationsList) { msgsHtml += `<div class="message-card" onclick="openChat(${conv.conversation_id})"><div class="message-header"><span class="font-semibold">${escapeHtml(conv.other_department_name)}</span>${conv.unread_count > 0 ? `<span class="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">${conv.unread_count}</span>` : ''}</div><div class="p-3"><p class="text-sm text-gray-600">${conv.last_message ? conv.last_message.substring(0,80) : 'No messages'}</p><p class="text-xs text-gray-400 mt-1">${conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : ''}</p></div></div>`; } document.getElementById('messagesGrid').innerHTML = msgsHtml; }
@@ -579,8 +687,8 @@ async function deleteReport(id) { if(confirm('Delete this report?')) { let res =
 function loadSettings() {
     const darkMode = document.body.classList.contains('dark-mode');
     const sidebarColors = [
+        { name: 'Orange', value: '#d97706' },
         { name: 'Blue', value: '#2563eb' },
-        { name: 'Orange', value: '#ea580c' },
         { name: 'Purple', value: '#7c3aed' },
         { name: 'Green', value: '#059669' },
         { name: 'Red', value: '#dc2626' },

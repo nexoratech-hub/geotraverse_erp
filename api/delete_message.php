@@ -1,63 +1,58 @@
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST');
 header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+require_once '../config/database.php';
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
+$database = new Database();
+$db = $database->getConnection();
 
-try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed"]);
-    exit();
-}
+$method = $_SERVER['REQUEST_METHOD'];
 
-$input = json_decode(file_get_contents("php://input"), true);
-if (!$input) {
-    echo json_encode(["success" => false, "message" => "Invalid request data"]);
-    exit();
-}
-
-$message_id = isset($input['message_id']) ? intval($input['message_id']) : 0;
-$user_id = isset($input['user_id']) ? intval($input['user_id']) : 0;
-
-if ($message_id === 0 || $user_id === 0) {
-    echo json_encode(["success" => false, "message" => "Missing message_id or user_id"]);
-    exit();
-}
-
-// Check if user is sender or receiver
-$check = $pdo->prepare("SELECT sender_id, receiver_id FROM messages WHERE id = ?");
-$check->execute([$message_id]);
-$msg = $check->fetch(PDO::FETCH_ASSOC);
-
-if (!$msg) {
-    echo json_encode(["success" => false, "message" => "Message not found"]);
-    exit();
-}
-
-if ($msg['sender_id'] == $user_id) {
-    // User is sender - soft delete from sender side only
-    $update = $pdo->prepare("UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?");
-    $update->execute([$message_id]);
-    echo json_encode(["success" => true, "message" => "Message deleted from your view (sender)"]);
-} elseif ($msg['receiver_id'] == $user_id) {
-    // User is receiver - soft delete from receiver side only
-    $update = $pdo->prepare("UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?");
-    $update->execute([$message_id]);
-    echo json_encode(["success" => true, "message" => "Message deleted from your view (receiver)"]);
-} else {
-    echo json_encode(["success" => false, "message" => "Unauthorized"]);
-    exit();
+if ($method === 'GET') {
+    $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
+    $conversation_id = isset($_GET['conversation_id']) ? intval($_GET['conversation_id']) : 0;
+    
+    if ($department_id === 0 && $conversation_id === 0) {
+        echo json_encode(['success' => false, 'message' => 'Department ID or Conversation ID required']);
+        exit;
+    }
+    
+    if ($conversation_id > 0) {
+        // Get messages for specific conversation
+        $query = "SELECT m.*, 
+                  d1.name as sender_department_name,
+                  d2.name as receiver_department_name
+                  FROM messages m
+                  LEFT JOIN departments d1 ON m.sender_dept = d1.id
+                  LEFT JOIN departments d2 ON m.receiver_dept = d2.id
+                  WHERE m.conversation_id = :conversation_id
+                  ORDER BY m.created_at ASC";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':conversation_id', $conversation_id);
+    } else {
+        // Get messages between current department and the other department
+        $query = "SELECT m.*, 
+                  d1.name as sender_department_name,
+                  d2.name as receiver_department_name
+                  FROM messages m
+                  LEFT JOIN departments d1 ON m.sender_dept = d1.id
+                  LEFT JOIN departments d2 ON m.receiver_dept = d2.id
+                  WHERE (m.sender_dept = :dept_id OR m.receiver_dept = :dept_id)
+                  AND ((m.sender_dept = :dept_id AND m.sender_deleted = 0) OR (m.receiver_dept = :dept_id AND m.receiver_deleted = 0))
+                  ORDER BY m.created_at ASC";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':dept_id', $department_id);
+    }
+    
+    $stmt->execute();
+    $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $messages
+    ]);
 }
 ?>
