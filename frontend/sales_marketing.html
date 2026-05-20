@@ -97,12 +97,17 @@
         .card-header p { font-size: 9px; opacity: 0.8; margin: 2px 0 0; }
         
         .message-unread { background: #fff7ed; border-left: 4px solid #ea580c; }
-        body.dark-mode .message-unread { background: #431407; border-left-color: #ea580c; }
+        .report-unviewed { background: #fff7ed; border-left: 4px solid #ea580c; }
+        body.dark-mode .message-unread, body.dark-mode .report-unviewed { background: #431407; border-left-color: #ea580c; }
         
         .messages-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
         .report-grid, .campaigns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
         @media (max-width: 1024px) { .messages-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 640px) { .messages-grid { grid-template-columns: 1fr; } }
+        
+        /* Infinite scroll loading indicator */
+        .loading-trigger { height: 40px; display: flex; align-items: center; justify-content: center; margin: 20px 0; }
+        .loading-spinner-small { display: inline-block; width: 24px; height: 24px; border: 2px solid #e5e7eb; border-top-color: #ea580c; border-radius: 50%; animation: spin 0.8s linear infinite; }
         
         .new-badge { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 20px; padding: 2px 8px; font-size: 8px; font-weight: bold; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         
@@ -146,6 +151,7 @@
         .form-group { margin-bottom: 14px; }
         .form-group label { display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px; }
         .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 12px; font-size: 13px; border: 1.5px solid #e5e7eb; border-radius: 8px; background: white; transition: all 0.2s; }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #ea580c; box-shadow: 0 0 0 3px rgba(234,88,12,0.1); }
         body.dark-mode .form-group label { color: #94a3b8; }
         body.dark-mode .form-group input, body.dark-mode .form-group select, body.dark-mode .form-group textarea { background: #0f172a; border-color: #334155; color: #f1f5f9; }
         
@@ -164,12 +170,9 @@
         .amount-input, .money-input { text-align: left; font-family: monospace; font-weight: 500; }
         .detail-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 15px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
         
-        .delete-conv-btn, .delete-campaign-btn { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: all 0.2s; z-index: 15; font-size: 10px; }
+        .delete-conv-btn, .delete-campaign-btn, .delete-report-btn { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: all 0.2s; z-index: 15; font-size: 10px; }
         .message-card:hover .delete-conv-btn, .campaign-card:hover .delete-campaign-btn, .report-card:hover .delete-report-btn { opacity: 0.8; }
         .delete-conv-btn:hover, .delete-campaign-btn:hover, .delete-report-btn:hover { background: #dc2626; transform: scale(1.05); opacity: 1; }
-        
-        .delete-report-btn { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: all 0.2s; z-index: 15; font-size: 10px; }
-        .report-card:hover .delete-report-btn { opacity: 0.8; }
         
         .income-row { background-color: #f0fdf4; }
         .expense-row { background-color: #fef2f2; }
@@ -179,8 +182,20 @@
         .report-content-view { background: #1e293b; color: #f1f5f9; padding: 12px; border-radius: 10px; white-space: pre-wrap; font-family: monospace; font-size: 12px; }
         body.dark-mode .report-content-view { background: #0f172a; }
         
-        .search-highlight { background: #fef3c7 !important; border-left: 3px solid #f59e0b !important; }
-        body.dark-mode .search-highlight { background: #78350f !important; border-left-color: #fbbf24 !important; }
+        .search-highlight { 
+            background: #fef3c7 !important; 
+            border: 2px solid #f59e0b !important;
+            border-radius: 12px !important;
+            box-shadow: 0 0 0 2px #fef3c7 !important;
+            transition: all 0.3s ease;
+        }
+        body.dark-mode .search-highlight { 
+            background: #78350f !important; 
+            border-color: #fbbf24 !important;
+            box-shadow: 0 0 0 2px #78350f !important;
+        }
+        
+        .hidden-field { display: none; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -201,7 +216,7 @@
             <nav class="space-y-1">
                 <div class="text-white/40 text-[10px] px-3 py-2 uppercase font-semibold">MAIN</div>
                 <a href="#" class="nav-item active" data-section="dashboard"><i class="fas fa-tachometer-alt w-5"></i><span>Dashboard</span></a>
-                <a href="#" class="nav-item" data-section="marketing"><i class="fas fa-chart-line w-5"></i><span>Marketing</span><span id="campaignBadge" class="badge hidden">0</span></a>
+                <a href="#" class="nav-item" data-section="marketing"><i class="fas fa-chart-line w-5"></i><span>Marketing</span></a>
                 <a href="#" class="nav-item" data-section="budget"><i class="fas fa-wallet w-5"></i><span>Budget</span></a>
                 <a href="#" class="nav-item" data-section="messages"><i class="fas fa-envelope w-5"></i><span>Messages</span><span id="msgBadge" class="badge hidden">0</span></a>
                 <a href="#" class="nav-item" data-section="reports"><i class="fas fa-chart-bar w-5"></i><span>Reports</span><span id="reportBadge" class="badge hidden">0</span></a>
@@ -246,25 +261,33 @@
     </main>
 </div>
 
-<!-- MODALS -->
+<!-- MARKETING MODALS -->
 <div id="campaignModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-plus-circle text-orange-600 mr-2"></i>Add Marketing Campaign</h3><input type="hidden" id="editCampaignId"><div class="form-group"><label>Campaign Name <span class="required">*</span></label><input type="text" id="campaignName" placeholder="Enter campaign name" required></div><div class="form-group"><label>Campaign Type</label><select id="campaignType"><option value="digital">Digital Ads</option><option value="social_media">Social Media</option><option value="tv_radio">TV / Radio</option><option value="print">Print / Billboard</option><option value="event">Event / Seminar</option></select></div><div class="form-group"><label>Budget (TZS)</label><input type="text" id="campaignBudget" placeholder="0" class="money-input"></div><div class="form-group"><label>Amount Spent (TZS)</label><input type="text" id="campaignSpent" placeholder="0" class="money-input"></div><div class="form-group"><label>Start Date</label><input type="date" id="campaignStartDate"></div><div class="form-group"><label>End Date</label><input type="date" id="campaignEndDate"></div><div class="form-group"><label>Target Audience</label><input type="text" id="campaignTarget" placeholder="e.g., Homeowners, Real Estate Developers"></div><div class="form-group"><label>Description</label><textarea id="campaignDescription" rows="3" placeholder="Campaign description"></textarea></div><div class="form-group"><label>Status</label><select id="campaignStatus"><option value="planned">Planned</option><option value="active">Active</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div><div class="flex gap-3"><button onclick="saveCampaign()" class="flex-1 btn-primary py-2 rounded-lg">Save</button><button onclick="closeModal('campaignModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
 <div id="viewCampaignModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-chart-line text-orange-600 mr-2"></i>Campaign Details</h3><div id="viewCampaignContent"></div><div id="viewCampaignButtons" class="detail-buttons"></div><button onclick="closeModal('viewCampaignModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 
-<div id="budgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-plus-circle text-orange-600 mr-2"></i>Add Transaction</h3><input type="hidden" id="editBudgetId"><div class="form-group"><label>Type</label><select id="budgetType"><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="form-group"><label>Source/Category <span class="required">*</span></label><input type="text" id="budgetSource" placeholder="e.g., Advertising Revenue, Marketing Costs" required></div><div class="form-group"><label>Amount (TZS) <span class="required">*</span></label><input type="text" id="budgetAmount" placeholder="0" class="money-input" required></div><div class="form-group"><label>Date</label><input type="date" id="budgetDate"></div><div class="form-group"><label>Description</label><textarea id="budgetDescription" rows="3" placeholder="Transaction description..."></textarea></div><div class="flex gap-3"><button onclick="saveBudget()" class="flex-1 btn-primary py-2 rounded-lg">Save</button><button onclick="closeModal('budgetModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
+<!-- BUDGET MODAL -->
+<div id="budgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4" id="budgetModalTitle"><i class="fas fa-plus-circle text-orange-600 mr-2"></i>Add Transaction</h3><input type="hidden" id="editBudgetId"><div class="form-group"><label>Type</label><select id="budgetType"><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="form-group"><label>Source/Category <span class="required">*</span></label><input type="text" id="budgetSource" placeholder="e.g., Advertising Revenue, Marketing Costs" required></div><div class="form-group"><label>Amount (TZS) <span class="required">*</span></label><input type="text" id="budgetAmount" placeholder="0" class="money-input" required></div><div class="form-group"><label>Date</label><input type="date" id="budgetDate"></div>
+<div class="form-group"><label>Status <span class="required">*</span></label><select id="budgetStatus"><option value="paid">Paid - Full Payment</option><option value="pending">Pending - No Payment Yet</option><option value="partial">Partial - Partially Paid</option></select></div>
+<div class="form-group partial-field hidden" id="paidAmountGroup"><label>Paid Amount (TZS) <span class="required">*</span></label><input type="text" id="budgetPaidAmount" placeholder="Enter amount paid" class="money-input"><p class="text-xs text-gray-500 mt-1">Remaining amount will be recorded as pending payment</p></div>
+<div class="form-group"><label>Description</label><textarea id="budgetDescription" rows="3" placeholder="Transaction description..."></textarea></div>
+<div class="flex gap-3"><button onclick="saveBudget()" class="flex-1 btn-primary py-2 rounded-lg">Save</button><button onclick="closeModal('budgetModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
 <div id="viewBudgetModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-receipt text-orange-600 mr-2"></i>Transaction Details</h3><div id="viewBudgetContent"></div><button onclick="closeModal('viewBudgetModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 
+<!-- MESSAGES MODALS -->
 <div id="chatModal" class="modal"><div class="modal-content" style="max-width:750px;"><div class="flex justify-between items-center mb-4"><h3 id="chatModalTitle" class="text-xl font-bold"><i class="fas fa-comments text-orange-600 mr-2"></i>Chat</h3><button onclick="closeModal('chatModal')" class="text-gray-400 text-2xl">&times;</button></div><div class="chat-container"><div id="chatMessagesArea" class="h-96 overflow-y-auto bg-gray-50 rounded-xl p-4 mb-3"></div><div class="flex gap-2"><textarea id="chatInput" rows="2" placeholder="Type your message..." class="flex-1 p-2 border rounded-xl text-sm resize-none"></textarea><button onclick="sendChatMessage()" class="btn-primary px-4 py-2 rounded-xl">Send</button></div></div></div></div>
 
 <div id="startChatModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-plus-circle text-orange-600 mr-2"></i>Start New Chat</h3><div class="form-group"><label>Select Department</label><select id="chatRecipientSelect" class="w-full p-2 border rounded-xl"><option value="">Select Department</option></select></div><div class="form-group"><label>Message</label><textarea id="newChatMsg" rows="4" placeholder="Type your message..."></textarea></div><div class="flex gap-3"><button onclick="sendNewChat()" class="flex-1 btn-primary py-2 rounded-lg">Send</button><button onclick="closeModal('startChatModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
+<!-- REPORTS MODALS -->
 <div id="addReportModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-chart-line text-orange-600 mr-2"></i>Add Report</h3><div class="form-group"><label>Title <span class="required">*</span></label><input type="text" id="newReportTitle" placeholder="Report title" required></div><div class="form-group"><label>Period</label><select id="newReportPeriod"><option value="weekly">Weekly Report</option><option value="monthly">Monthly Report</option><option value="quarterly">Quarterly Report</option><option value="annual">Annual Report</option></select></div><div class="form-group"><label>Content <span class="required">*</span></label><textarea id="newReportContent" rows="6" placeholder="Report content..." required></textarea></div><div class="flex gap-3"><button onclick="addReport()" class="flex-1 btn-primary py-2 rounded-lg">Add</button><button onclick="closeModal('addReportModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
 <div id="editReportModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-edit text-orange-600 mr-2"></i>Edit Report</h3><input type="hidden" id="editReportId"><div class="form-group"><label>Title</label><input type="text" id="editReportTitle" required></div><div class="form-group"><label>Period</label><select id="editReportPeriod"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></div><div class="form-group"><label>Content</label><textarea id="editReportContent" rows="6" required></textarea></div><div class="flex gap-3"><button onclick="updateReport()" class="flex-1 btn-primary py-2 rounded-lg">Update</button><button onclick="closeModal('editReportModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
 <div id="viewReportModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-file-alt text-orange-600 mr-2"></i>Report Details</h3><div id="viewReportContent" class="report-content-view"></div><div id="viewReportButtons" class="detail-buttons"></div><button onclick="closeModal('viewReportModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 
+<!-- SETTINGS MODALS -->
 <div id="backupRestoreModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-database text-orange-600 mr-2"></i>Backup & Restore</h3><p class="text-sm text-gray-600 mb-4">Backup includes all system data</p><div class="flex gap-3"><button onclick="createBackup()" class="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-download mr-2"></i>Backup</button><button onclick="restoreBackup()" class="flex-1 bg-orange-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-upload mr-2"></i>Restore</button></div><button onclick="closeModal('backupRestoreModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 
 <script>
@@ -287,23 +310,6 @@ function formatMoney(amt) {
     return "TZS " + num.toLocaleString('en-US');
 }
 
-function setupMoneyInputs() {
-    const moneyFields = ['campaignBudget', 'campaignSpent', 'budgetAmount'];
-    moneyFields.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('input', function() { formatMoneyInput(this); });
-    });
-}
-
-// ==================== HELPER FUNCTIONS ====================
-function showToast(msg, isError) { 
-    let t = document.createElement("div"); 
-    t.className = "toast-notification" + (isError ? " error" : ""); 
-    t.innerHTML = `<i class="fas ${isError ? 'fa-exclamation-circle' : 'fa-check-circle'} mr-1"></i>${msg}`; 
-    document.body.appendChild(t); 
-    setTimeout(() => t.remove(), 3000); 
-}
-
 function formatDate(dateStr) { 
     if (!dateStr) return "N/A"; 
     return new Date(dateStr).toLocaleDateString("en-GB"); 
@@ -319,6 +325,23 @@ function escapeHtml(text) {
     var div = document.createElement("div"); 
     div.textContent = text; 
     return div.innerHTML; 
+}
+
+function setupMoneyInputs() {
+    const moneyFields = ['campaignBudget', 'campaignSpent', 'budgetAmount', 'budgetPaidAmount'];
+    moneyFields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', function() { formatMoneyInput(this); });
+    });
+}
+
+// ==================== HELPER FUNCTIONS ====================
+function showToast(msg, isError) { 
+    let t = document.createElement("div"); 
+    t.className = "toast-notification" + (isError ? " error" : ""); 
+    t.innerHTML = `<i class="fas ${isError ? 'fa-exclamation-circle' : 'fa-check-circle'} mr-1"></i>${msg}`; 
+    document.body.appendChild(t); 
+    setTimeout(() => t.remove(), 3000); 
 }
 
 function addLog(action) { 
@@ -353,11 +376,34 @@ function toggleSendDropdown(dropdownId) {
     if(dropdown) dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block'; 
 }
 
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('modal')) closeModal(e.target.id);
+    if (!e.target.closest('.send-dropdown')) {
+        document.querySelectorAll('.send-dropdown-content').forEach(d => d.style.display = 'none');
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupMoneyInputs();
+    const statusSelect = document.getElementById('budgetStatus');
+    if (statusSelect) {
+        statusSelect.addEventListener('change', function() {
+            const paidGroup = document.getElementById('paidAmountGroup');
+            if (this.value === 'partial') paidGroup.classList.remove('hidden');
+            else { 
+                paidGroup.classList.add('hidden'); 
+                document.getElementById('budgetPaidAmount').value = ''; 
+            }
+        });
+    }
+});
+
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 3;
 const USER_ID = 4;
 
+// ALL DEPARTMENTS FOR SEND (including Super Admin) - used for reports and messages
 const allDepartmentsForSend = [ 
     { id: 1, name: "👑 Super Admin" },
     { id: 2, name: "Finance" },
@@ -382,10 +428,17 @@ let searchTimeout = null;
 let refreshInterval = null;
 let countdownSeconds = 5;
 let unviewedReportsCount = 0;
+let unreadMessagesCount = 0;
+let highlightTimer = null;
 
-let currentCampaignPage = 1;
+// Infinite scroll variables for campaigns
+let campaignsPage = 1;
+let campaignsHasMore = true;
+let campaignsLoading = false;
+let campaignsContainer = null;
+let campaignsObserver = null;
+
 let currentBudgetPage = 1;
-let rowsPerPage = 6;
 let budgetRowsPerPage = 5;
 
 const departmentNames = {
@@ -432,7 +485,7 @@ function startAutoRefresh() {
         const activeSection = document.querySelector('.nav-item.active')?.getAttribute('data-section') || 'dashboard';
         if (!document.querySelector('.modal[style*="display: flex"]')) {
             if (activeSection === 'dashboard') loadDashboard();
-            else if (activeSection === 'marketing') loadCampaigns();
+            else if (activeSection === 'marketing') loadCampaignsInfinite();
             else if (activeSection === 'budget') loadBudget();
             else if (activeSection === 'messages') loadMessages();
             else if (activeSection === 'reports') loadReports();
@@ -453,15 +506,23 @@ function startCountdownDisplay() {
     }, 1000);
 }
 
-// ==================== MARKETING CAMPAIGNS ====================
-async function fetchCampaigns() {
-    const res = await apiCall(`get_marketing_campaigns.php?department_id=${DEPARTMENT_ID}`);
+// ==================== MARKETING CAMPAIGNS (INFINITE SCROLL) ====================
+async function fetchCampaigns(page = 1, limit = 10) {
+    const res = await apiCall(`get_marketing_campaigns.php?department_id=${DEPARTMENT_ID}&page=${page}&limit=${limit}`);
     if (res.success && res.data) {
-        campaigns = res.data.filter(c => c.deleted_by_department !== 1 && c.deleted_by_admin !== 1);
+        const newCampaigns = res.data.filter(c => c.deleted_by_department !== 1 && c.deleted_by_admin !== 1);
+        if (page === 1) {
+            campaigns = newCampaigns;
+        } else {
+            campaigns = [...campaigns, ...newCampaigns];
+        }
+        campaignsHasMore = newCampaigns.length === limit;
+        return newCampaigns;
     } else {
-        campaigns = [];
+        if (page === 1) campaigns = [];
+        campaignsHasMore = false;
+        return [];
     }
-    return true;
 }
 
 async function addCampaignAPI(data) {
@@ -480,7 +541,102 @@ async function deleteCampaignAPI(id) {
     return await apiCall('delete_marketing_campaign.php', 'POST', { id, department_id: DEPARTMENT_ID, deleted_by_department: 1 });
 }
 
-// ==================== BUDGET (TRANSACTIONS) ====================
+// Render campaigns with infinite scroll
+async function loadCampaignsInfinite(reset = true) {
+    if (reset) {
+        campaignsPage = 1;
+        campaignsHasMore = true;
+        campaigns = [];
+    }
+    
+    if (campaignsLoading) return;
+    campaignsLoading = true;
+    
+    // Show loading indicator
+    const loadingDiv = document.getElementById('campaignsLoading');
+    if (loadingDiv) loadingDiv.style.display = 'flex';
+    
+    await fetchCampaigns(campaignsPage, 10);
+    
+    // Render the campaigns grid
+    renderCampaignsGrid();
+    
+    campaignsLoading = false;
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    
+    // Setup intersection observer for infinite scroll
+    setupInfiniteScroll();
+}
+
+function renderCampaignsGrid() {
+    let html = `<div class="section-header"><h2><i class="fas fa-chart-line mr-2"></i>Marketing Campaigns (${campaigns.length})</h2><button onclick="openCampaignModal()"><i class="fas fa-plus mr-1"></i>Add Campaign</button></div>
+        <div class="campaigns-grid" id="campaignsGrid"></div>
+        <div id="campaignsLoading" class="loading-trigger" style="display: none;"><div class="loading-spinner-small"></div><span class="ml-2 text-sm text-gray-500">Loading more campaigns...</span></div>`;
+    document.getElementById("marketingSection").innerHTML = html;
+    
+    if (campaigns.length === 0) {
+        document.getElementById("campaignsGrid").innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400">No campaigns found. Click "Add Campaign" to create one.</div>';
+        return;
+    }
+    
+    let gridHtml = '';
+    for (let c of campaigns) {
+        let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
+        let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled';
+        let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : c.campaign_type === 'social_media' ? 'Social Media' : c.campaign_type === 'tv_radio' ? 'TV/Radio' : c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar';
+        
+        gridHtml += `<div class="campaign-card" id="campaign-card-${c.id}">
+            <div class="delete-campaign-btn" onclick="event.stopPropagation(); deleteCampaign(${c.id})"><i class="fas fa-trash-alt"></i></div>
+            <div class="card-header"><h4>${escapeHtml(c.campaign_name)}</h4><p>${typeText}</p></div>
+            <div class="p-4" onclick="viewCampaign(${c.id})">
+                <div class="flex justify-between items-start mb-2"><span class="px-2 py-0.5 rounded-full text-[9px] ${statusClass}">${c.status}</span></div>
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <div><p class="text-[9px] text-gray-400">Budget</p><p class="text-xs font-semibold text-green-600">${formatMoney(c.budget)}</p></div>
+                    <div><p class="text-[9px] text-gray-400">Spent</p><p class="text-xs font-semibold text-orange-600">${formatMoney(c.spent)}</p></div>
+                </div>
+                <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Usage</span><span>${spentPercent}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="${spentPercent < 50 ? 'bg-green-500' : (spentPercent < 80 ? 'bg-yellow-500' : 'bg-red-500')} h-1 rounded-full" style="width: ${Math.min(spentPercent, 100)}%"></div></div></div>
+                <div class="flex gap-2 mt-3 pt-2 border-t">
+                    <button onclick="event.stopPropagation(); viewCampaign(${c.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                    <button onclick="event.stopPropagation(); editCampaign(${c.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                    <button onclick="event.stopPropagation(); deleteCampaign(${c.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                </div>
+            </div>
+        </div>`;
+    }
+    document.getElementById("campaignsGrid").innerHTML = gridHtml;
+}
+
+function setupInfiniteScroll() {
+    if (campaignsObserver) campaignsObserver.disconnect();
+    
+    const loadingTrigger = document.getElementById('campaignsLoading');
+    if (!loadingTrigger) return;
+    
+    campaignsObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && campaignsHasMore && !campaignsLoading) {
+            campaignsPage++;
+            loadCampaignsInfinite(false);
+        }
+    }, { threshold: 0.1 });
+    
+    campaignsObserver.observe(loadingTrigger);
+}
+
+async function deleteCampaign(id) { 
+    if(confirm("Delete this campaign? It will be moved to Recycle Bin.")) { 
+        let res = await deleteCampaignAPI(id); 
+        if(res.success) { 
+            showToast("Campaign deleted and moved to Recycle Bin"); 
+            addLog("Deleted campaign record"); 
+            await loadCampaignsInfinite(true); 
+            await loadDashboard(); 
+        } else { 
+            showToast(res.message || "Failed", true); 
+        } 
+    } 
+}
+
+// ==================== BUDGET ====================
 async function fetchBudgets() {
     const res = await apiCall(`get_transactions.php?department_id=${DEPARTMENT_ID}`);
     if (res.success && res.data) {
@@ -509,7 +665,7 @@ async function fetchReports() {
     const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`);
     if (res.success && res.data) {
         reportsList = res.data.filter(r => r.deleted_by_department !== 1 && r.deleted_by_admin !== 1).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-        unviewedReportsCount = res.unviewed_count || 0;
+        unviewedReportsCount = reportsList.filter(r => r.is_viewed_by_department === 0 || r.is_viewed_by_department === null).length;
     } else {
         reportsList = [];
         unviewedReportsCount = 0;
@@ -532,7 +688,12 @@ async function deleteReportAPI(id) {
 }
 
 async function markReportViewed(reportId) { 
-    return await apiCall('mark_report_viewed.php', 'POST', { report_id: reportId, is_admin: 0 }); 
+    const res = await apiCall('mark_report_viewed.php', 'POST', { report_id: reportId, is_admin: 0 }); 
+    if (res.success) {
+        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+        updateReportBadge();
+    }
+    return res;
 }
 
 function updateReportBadge() { 
@@ -552,24 +713,25 @@ async function fetchMessages() {
     const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`);
     if (res.success && res.data && res.data.length > 0) {
         messagesData = res.data;
+        unreadMessagesCount = messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0);
     } else {
         messagesData = [];
+        unreadMessagesCount = 0;
     }
     updateMessageBadge();
     return messagesData;
 }
 
 function getUnreadMessagesCount() { 
-    return messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0); 
+    return unreadMessagesCount;
 }
 
 function updateMessageBadge() { 
     const badge = document.getElementById('msgBadge'); 
     if (badge) { 
-        const count = getUnreadMessagesCount();
-        if (count > 0) { 
+        if (unreadMessagesCount > 0) { 
             badge.classList.remove('hidden'); 
-            badge.innerText = count > 99 ? '99+' : count; 
+            badge.innerText = unreadMessagesCount > 99 ? '99+' : unreadMessagesCount; 
         } else { 
             badge.classList.add('hidden'); 
         } 
@@ -599,12 +761,13 @@ async function deleteConversationAPI(deptId) {
 
 // ==================== DASHBOARD ====================
 async function loadDashboard() {
-    await Promise.all([fetchCampaigns(), fetchBudgets(), fetchReports(), fetchMessages()]);
+    await Promise.all([fetchCampaigns(1, 5), fetchBudgets(), fetchReports(), fetchMessages()]);
     
     let totalCampaigns = campaigns.length;
     let activeCampaigns = campaigns.filter(c => c.status === 'active').length;
     let totalIncome = 0;
     let totalExpenses = 0;
+    let totalPaid = 0;
     let totalPending = 0;
     
     for (let t of budgets) {
@@ -612,16 +775,22 @@ async function loadDashboard() {
         let paidAmount = parseFloat(t.paid_amount) || 0;
         
         if (t.type === 'income') {
-            if (t.status === 'paid') totalIncome += amount;
-            else if (t.status === 'partial') { totalIncome += paidAmount; totalPending += (amount - paidAmount); }
-            else totalPending += amount;
+            if (t.status === 'paid') { 
+                totalIncome += amount; 
+                totalPaid += amount;
+            } else if (t.status === 'partial') { 
+                totalIncome += paidAmount; 
+                totalPaid += paidAmount;
+                totalPending += (amount - paidAmount); 
+            } else { 
+                totalPending += amount; 
+            }
         } else if (t.type === 'expense') {
             if (t.status === 'paid') totalExpenses += amount;
             else if (t.status === 'partial') totalExpenses += paidAmount;
         }
     }
     let netProfit = totalIncome - totalExpenses;
-    let unreadMsgs = getUnreadMessagesCount();
     
     let html = `<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Sales & Marketing Dashboard</h2><p class="text-xs text-gray-500">Campaign & Financial Management Overview</p></div>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
@@ -651,71 +820,10 @@ async function loadDashboard() {
     
     let ctx2 = document.getElementById("budgetChart")?.getContext("2d");
     if (ctx2) new Chart(ctx2, { type: "doughnut", data: { labels: ["Income", "Expenses"], datasets: [{ data: [totalIncome, totalExpenses], backgroundColor: ["#10b981", "#ef4444"], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } } });
-    
-    updateMessageBadge();
-    updateReportBadge();
 }
 
-// ==================== MARKETING CAMPAIGNS ====================
-async function loadCampaigns(highlightId = null) {
-    await fetchCampaigns();
-    let search = document.getElementById("globalSearchInput")?.value.toLowerCase() || "";
-    let filtered = campaigns.filter(c => c.campaign_name?.toLowerCase().includes(search) || (c.campaign_type && c.campaign_type.toLowerCase().includes(search)));
-    let totalPages = Math.ceil(filtered.length / rowsPerPage);
-    let start = (currentCampaignPage - 1) * rowsPerPage;
-    let paginated = filtered.slice(start, start + rowsPerPage);
-    
-    let html = `<div class="section-header"><h2><i class="fas fa-chart-line mr-2"></i>Marketing Campaigns (${campaigns.length})</h2><button onclick="openCampaignModal()"><i class="fas fa-plus mr-1"></i>Add Campaign</button></div>
-        <div class="campaigns-grid" id="campaignsGrid"></div>`;
-    document.getElementById("marketingSection").innerHTML = html;
-    
-    if (filtered.length === 0) {
-        document.getElementById("campaignsGrid").innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400">No campaigns found. Click "Add Campaign" to create one.</div>';
-        return;
-    }
-    
-    let gridHtml = '';
-    for (let c of paginated) {
-        let isHighlighted = highlightId && c.id === highlightId;
-        let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
-        let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled';
-        let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : c.campaign_type === 'social_media' ? 'Social Media' : c.campaign_type === 'tv_radio' ? 'TV/Radio' : c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar';
-        
-        gridHtml += `<div class="campaign-card ${isHighlighted ? 'search-highlight' : ''}" id="campaign-card-${c.id}">
-            <div class="delete-campaign-btn" onclick="event.stopPropagation(); deleteCampaign(${c.id})"><i class="fas fa-trash-alt"></i></div>
-            <div class="card-header"><h4>${escapeHtml(c.campaign_name)}</h4><p>${typeText}</p></div>
-            <div class="p-4" onclick="viewCampaign(${c.id})">
-                <div class="flex justify-between items-start mb-2"><span class="px-2 py-0.5 rounded-full text-[9px] ${statusClass}">${c.status}</span></div>
-                <div class="grid grid-cols-2 gap-2 mt-2">
-                    <div><p class="text-[9px] text-gray-400">Budget</p><p class="text-xs font-semibold text-green-600">${formatMoney(c.budget)}</p></div>
-                    <div><p class="text-[9px] text-gray-400">Spent</p><p class="text-xs font-semibold text-orange-600">${formatMoney(c.spent)}</p></div>
-                </div>
-                <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Usage</span><span>${spentPercent}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="${spentPercent < 50 ? 'bg-green-500' : (spentPercent < 80 ? 'bg-yellow-500' : 'bg-red-500')} h-1 rounded-full" style="width: ${Math.min(spentPercent, 100)}%"></div></div></div>
-                <div class="flex gap-2 mt-3 pt-2 border-t">
-                    <button onclick="event.stopPropagation(); viewCampaign(${c.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                    <button onclick="event.stopPropagation(); editCampaign(${c.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                    <button onclick="event.stopPropagation(); deleteCampaign(${c.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                </div>
-            </div>
-        </div>`;
-    }
-    document.getElementById("campaignsGrid").innerHTML = gridHtml;
-    
-    if (totalPages > 1) {
-        document.getElementById("marketingSection").innerHTML += `<div class="flex justify-center gap-2 mt-3"><button onclick="changeCampaignPage(${currentCampaignPage - 1})" class="px-2 py-1 border rounded text-xs">Prev</button><span class="text-xs">Page ${currentCampaignPage} of ${totalPages}</span><button onclick="changeCampaignPage(${currentCampaignPage + 1})" class="px-2 py-1 border rounded text-xs">Next</button></div>`;
-    }
-    
-    if (highlightId) { const el = document.getElementById(`campaign-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
-}
-
-function changeCampaignPage(page) { 
-    if (page > 0 && page <= Math.ceil(campaigns.length / rowsPerPage)) { 
-        currentCampaignPage = page; 
-        loadCampaigns(); 
-    } 
-}
-
-function openCampaignModal() { 
+// ==================== MARKETING CAMPAIGN VIEW (WITHOUT SEND BUTTON) ====================
+async function openCampaignModal() { 
     document.getElementById("editCampaignId").value = ""; 
     document.getElementById("campaignName").value = ""; 
     document.getElementById("campaignType").value = "digital"; 
@@ -749,7 +857,7 @@ async function saveCampaign() {
         showToast(id ? "Campaign updated" : "Campaign added"); 
         addLog(`${id ? "Updated" : "Added"} campaign: ${name}`); 
         closeModal('campaignModal'); 
-        await loadCampaigns(); 
+        await loadCampaignsInfinite(true); 
         await loadDashboard(); 
     } else { 
         showToast(res.message || "Failed", true); 
@@ -780,36 +888,12 @@ async function viewCampaign(id) {
                 </div>
             </div>`;
         
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { 
-            deptOptions += `<a onclick="sendCampaignToDept(${c.id}, ${d.id})" class="block px-4 py-2 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0">${escapeHtml(d.name)}</a>`; 
-        });
-        
+        // Only Excel and PDF buttons, NO SEND button
         document.getElementById("viewCampaignButtons").innerHTML = `
             <button onclick="exportSingleCampaignExcel(${c.id})" class="btn-success text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-excel"></i> Export Excel</button>
-            <button onclick="exportSingleCampaignPDF(${c.id})" class="btn-danger text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-pdf"></i> Export PDF</button>
-            <div class="send-dropdown relative inline-block">
-                <button class="btn-purple text-white px-3 py-1 rounded text-sm" onclick="toggleSendDropdown('campaignSendDropdown-${c.id}')"><i class="fas fa-paper-plane"></i> Send to Department</button>
-                <div id="campaignSendDropdown-${c.id}" class="send-dropdown-content absolute right-0 mt-1 bg-gray-800 border border-gray-700 rounded shadow-lg hidden z-50 min-w-[200px]">${deptOptions}</div>
-            </div>`;
+            <button onclick="exportSingleCampaignPDF(${c.id})" class="btn-danger text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-pdf"></i> Export PDF</button>`;
         openModal('viewCampaignModal'); 
     } 
-}
-
-async function sendCampaignToDept(campaignId, deptId) {
-    let c = campaigns.find(c => c.id === campaignId);
-    if (c) {
-        let msg = `📢 MARKETING CAMPAIGN FROM SALES DEPARTMENT:\n\nCampaign: ${c.campaign_name}\nBudget: ${formatMoney(c.budget)}\nStatus: ${c.status}\n\nDescription: ${c.description || 'No description'}`;
-        let res = await sendMessageAPI(deptId, msg);
-        if (res && res.success) {
-            showToast(`Campaign "${c.campaign_name}" sent to ${departmentNames[deptId] || 'Department'}`);
-            addLog(`Campaign sent to ${departmentNames[deptId]}: ${c.campaign_name}`);
-        } else {
-            showToast(res?.message || "Failed to send", true);
-        }
-    }
-    toggleSendDropdown(`campaignSendDropdown-${campaignId}`);
-    closeModal('viewCampaignModal');
 }
 
 function editCampaign(id) { 
@@ -826,20 +910,6 @@ function editCampaign(id) {
         document.getElementById("campaignDescription").value = c.description || ''; 
         document.getElementById("campaignStatus").value = c.status; 
         openModal('campaignModal'); 
-    } 
-}
-
-async function deleteCampaign(id) { 
-    if(confirm("Delete this campaign? It will be moved to Recycle Bin.")) { 
-        let res = await deleteCampaignAPI(id); 
-        if(res.success) { 
-            showToast("Campaign deleted and moved to Recycle Bin"); 
-            addLog("Deleted campaign record"); 
-            await loadCampaigns(); 
-            await loadDashboard(); 
-        } else { 
-            showToast(res.message || "Failed", true); 
-        } 
     } 
 }
 
@@ -881,24 +951,7 @@ function exportSingleCampaignPDF(id) {
     } 
 }
 
-function exportCampaignsToExcel() { 
-    let ws = [["Campaign Name","Type","Budget","Spent","Remaining","Status","Start Date","End Date","Target Audience","Description"]]; 
-    campaigns.forEach(c => ws.push([c.campaign_name, c.campaign_type, c.budget, c.spent, c.budget - c.spent, c.status, c.start_date, c.end_date, c.target_audience, c.description])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), "Campaigns"); 
-    XLSX.writeFile(wb, `campaigns_${new Date().toISOString().slice(0,10)}.xlsx`); 
-    showToast("Campaigns exported to Excel"); 
-}
-
-function exportCampaignsToPDF() { 
-    let element = document.createElement("div"); 
-    let rows = campaigns.map(c => `<tr><td class="px-2 py-1">${escapeHtml(c.campaign_name)}</td<td class="px-2 py-1">${c.campaign_type}</td<td class="px-2 py-1">${formatMoney(c.budget)}</td<td class="px-2 py-1">${formatMoney(c.spent)}</td<td class="px-2 py-1">${formatMoney(c.budget - c.spent)}</td<td class="px-2 py-1">${c.status}</td</tr`).join(''); 
-    element.innerHTML = `<div style="padding:20px; border:2px solid #ea580c;"><h1 style="color:#ea580c; text-align:center;">Marketing Campaigns Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8" style="width:100%; border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th>Campaign Name</th><th>Type</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>Status</th></tr></thead><tbody>${rows}</tbody></div>`; 
-    html2pdf().set({ margin: 0.5, filename: `campaigns_report.pdf` }).from(element).save(); 
-    showToast("Campaigns exported to PDF"); 
-}
-
-// ==================== BUDGET ====================
+// ==================== BUDGET SECTION ====================
 async function loadBudget(highlightId = null) {
     await fetchBudgets();
     let search = document.getElementById("globalSearchInput")?.value.toLowerCase() || "";
@@ -906,6 +959,7 @@ async function loadBudget(highlightId = null) {
     
     let totalIncome = 0;
     let totalExpenses = 0;
+    let totalPaid = 0;
     let totalPending = 0;
     
     for (let t of budgets) {
@@ -913,9 +967,16 @@ async function loadBudget(highlightId = null) {
         let paidAmount = parseFloat(t.paid_amount) || 0;
         
         if (t.type === 'income') {
-            if (t.status === 'paid') totalIncome += amount;
-            else if (t.status === 'partial') { totalIncome += paidAmount; totalPending += (amount - paidAmount); }
-            else totalPending += amount;
+            if (t.status === 'paid') { 
+                totalIncome += amount; 
+                totalPaid += amount;
+            } else if (t.status === 'partial') { 
+                totalIncome += paidAmount; 
+                totalPaid += paidAmount;
+                totalPending += (amount - paidAmount); 
+            } else { 
+                totalPending += amount; 
+            }
         } else if (t.type === 'expense') {
             if (t.status === 'paid') totalExpenses += amount;
             else if (t.status === 'partial') totalExpenses += paidAmount;
@@ -936,10 +997,10 @@ async function loadBudget(highlightId = null) {
         </div>
         <div class="mt-3 w-full bg-gray-200 rounded-full h-1.5"><div class="${totalIncome>0 ? (totalExpenses/totalIncome*100 > 80 ? 'bg-red-500' : (totalExpenses/totalIncome*100 > 60 ? 'bg-yellow-500' : 'bg-green-500')) : 'bg-red-500'} h-1.5 rounded-full" style="width:${totalIncome>0?Math.min((totalExpenses/totalIncome)*100,100):0}%"></div></div>
         <p class="text-[9px] text-gray-500 text-center mt-1 mb-4">${totalIncome>0?((totalExpenses/totalIncome)*100).toFixed(1):0}% of budget used</p>
-        <div class="bg-white rounded-xl shadow-sm p-3"><div class="table-responsive"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-3 py-2">Date</th><th class="px-3 py-2">Type</th><th class="px-3 py-2">Source</th><th class="px-3 py-2 text-left">Amount</th><th class="px-3 py-2 text-left">Paid</th><th class="px-3 py-2 text-left">Pending</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-center">Actions</th></tr></thead><tbody>`;
+        <div class="bg-white rounded-xl shadow-sm p-3"><div class="table-responsive"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-3 py-2">Date</th><th class="px-3 py-2">Type</th><th class="px-3 py-2">Source</th><th class="px-3 py-2 text-left">Total Amount</th><th class="px-3 py-2 text-left">Paid</th><th class="px-3 py-2 text-left">Pending</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-center">Actions</th><tr></thead><tbody>`;
     
     if (paginated.length === 0) {
-        html += `<tr><td colspan="8" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one.</td></tr>`;
+        html += `<tr><td colspan="8" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one. </tr`;
     } else {
         for(let t of paginated) {
             let isHighlighted = highlightId && t.id === highlightId;
@@ -963,9 +1024,16 @@ async function loadBudget(highlightId = null) {
             <\/tr>`;
         }
     }
-    html += `</tbody></table></div>${totalPages > 1 ? `<div class="flex justify-center gap-2 mt-3 pb-3"><button onclick="changeBudgetPage(${currentBudgetPage - 1})" class="px-2 py-1 border rounded text-xs">Prev</button><span class="text-xs">Page ${currentBudgetPage} of ${totalPages}</span><button onclick="changeBudgetPage(${currentBudgetPage + 1})" class="px-2 py-1 border rounded text-xs">Next</button></div>` : ''}</div>`;
+    html += `</tbody>}</div>${totalPages > 1 ? `<div class="flex justify-center gap-2 mt-3 pb-3"><button onclick="changeBudgetPage(${currentBudgetPage - 1})" class="px-2 py-1 border rounded text-xs">Prev</button><span class="text-xs">Page ${currentBudgetPage} of ${totalPages}</span><button onclick="changeBudgetPage(${currentBudgetPage + 1})" class="px-2 py-1 border rounded text-xs">Next</button></div>` : ''}</div>`;
     document.getElementById("budgetSection").innerHTML = html;
-    if (highlightId) { const el = document.getElementById(`budget-row-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+    if (highlightId) { 
+        const el = document.getElementById(`budget-row-${highlightId}`); 
+        if(el) { 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            if (highlightTimer) clearTimeout(highlightTimer);
+            highlightTimer = setTimeout(() => el.classList.remove('search-highlight'), 3000);
+        } 
+    }
 }
 
 function changeBudgetPage(page) { 
@@ -982,7 +1050,11 @@ function openAddTransactionModal() {
     document.getElementById("budgetSource").value = ""; 
     document.getElementById("budgetAmount").value = ""; 
     document.getElementById("budgetDate").value = new Date().toISOString().split('T')[0]; 
+    document.getElementById("budgetStatus").value = "paid";
+    document.getElementById("paidAmountGroup").classList.add("hidden");
+    document.getElementById("budgetPaidAmount").value = "";
     document.getElementById("budgetDescription").value = ""; 
+    document.getElementById("budgetModalTitle").innerHTML = '<i class="fas fa-plus-circle text-orange-600 mr-2"></i>Add Transaction';
     openModal('budgetModal'); 
 }
 
@@ -992,11 +1064,25 @@ async function saveBudget() {
     let source = document.getElementById("budgetSource").value.trim();
     let amount = parseMoneyValue(document.getElementById("budgetAmount").value);
     let transaction_date = document.getElementById("budgetDate").value;
+    let status = document.getElementById("budgetStatus").value;
     let description = document.getElementById("budgetDescription").value;
+    let paidAmount = 0;
     
     if(!source || amount <= 0) { 
         showToast("Please fill source and valid amount", true); 
         return; 
+    }
+    
+    if (status === 'paid') {
+        paidAmount = amount;
+    } else if (status === 'partial') {
+        paidAmount = parseMoneyValue(document.getElementById("budgetPaidAmount").value);
+        if (paidAmount <= 0 || paidAmount >= amount) {
+            showToast("For Partial payment, paid amount must be greater than 0 and less than total amount", true);
+            return;
+        }
+    } else {
+        paidAmount = 0;
     }
     
     let data = { 
@@ -1005,8 +1091,8 @@ async function saveBudget() {
         amount: amount, 
         transaction_date: transaction_date || new Date().toISOString().split('T')[0], 
         description: description, 
-        status: "paid",
-        paid_amount: amount
+        status: status,
+        paid_amount: paidAmount
     }; 
     
     let res = id ? await updateBudgetAPI(parseInt(id), data) : await addBudgetAPI(data);
@@ -1029,6 +1115,8 @@ function viewTransactionDetail(id) {
         let amount = parseFloat(t.amount) || 0;
         let paidAmount = parseFloat(t.paid_amount) || 0;
         let pendingAmount = (t.type === 'income' && t.status !== 'paid') ? (amount - paidAmount) : 0;
+        let statusClass = t.status === 'paid' ? 'bg-green-100 text-green-700' : (t.status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700');
+        let statusText = t.status === 'paid' ? 'Paid' : (t.status === 'partial' ? 'Partial' : 'Pending');
         
         let html = `<div class="space-y-3">
             <div class="border-b pb-2"><h4 class="font-bold text-base">${escapeHtml(t.source)}</h4></div>
@@ -1036,16 +1124,17 @@ function viewTransactionDetail(id) {
                 <div class="font-semibold">Date:</div><div>${t.transaction_date || '-'}</div>
                 <div class="font-semibold">Type:</div><div><span class="px-2 py-0.5 rounded-full text-xs ${t.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${t.type === 'income' ? 'Income' : 'Expense'}</span></div>
                 <div class="font-semibold">Source:</div><div class="font-medium">${escapeHtml(t.source)}</div>
-                <div class="font-semibold">Total Amount:</div><div class="font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">${formatMoney(amount)}</div>`;
+                <div class="font-semibold">Total Amount:</div><div class="font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">${formatMoney(amount)}</div>
+                <div class="font-semibold">Paid Amount:</div><div class="text-blue-600">${formatMoney(paidAmount)}</div>`;
         
         if (t.status === 'partial') {
-            html += `<div class="font-semibold">Paid Amount:</div><div class="text-blue-600">${formatMoney(paidAmount)}</div>
-                     <div class="font-semibold">Pending Amount:</div><div class="text-orange-600">${formatMoney(pendingAmount)}</div>`;
+            html += `<div class="font-semibold">Pending Amount:</div><div class="text-orange-600">${formatMoney(pendingAmount)}</div>`;
         } else if (t.status === 'pending') {
             html += `<div class="font-semibold">Pending Amount:</div><div class="text-orange-600">${formatMoney(amount)}</div>`;
         }
         
-        html += `<div class="font-semibold">Description:</div><div>${escapeHtml(t.description || '-')}</div>
+        html += `<div class="font-semibold">Status:</div><div><span class="status-badge ${statusClass} text-xs px-2 py-1 rounded-full">${statusText}</span></div>
+                <div class="font-semibold">Description:</div><div>${escapeHtml(t.description || '-')}</div>
             </div>
             <div class="text-[10px] text-gray-400 text-center pt-2">Created: ${formatDateTime(t.created_at)}</div>
         </div>`;
@@ -1062,7 +1151,18 @@ function editTransactionDetail(id) {
         document.getElementById("budgetSource").value = t.source; 
         document.getElementById("budgetAmount").value = t.amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); 
         document.getElementById("budgetDate").value = t.transaction_date; 
+        document.getElementById("budgetStatus").value = t.status;
         document.getElementById("budgetDescription").value = t.description || ""; 
+        
+        if (t.status === 'partial') {
+            document.getElementById("paidAmountGroup").classList.remove("hidden");
+            document.getElementById("budgetPaidAmount").value = t.paid_amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        } else {
+            document.getElementById("paidAmountGroup").classList.add("hidden");
+            document.getElementById("budgetPaidAmount").value = "";
+        }
+        
+        document.getElementById("budgetModalTitle").innerHTML = '<i class="fas fa-edit text-orange-600 mr-2"></i>Edit Transaction';
         openModal('budgetModal'); 
     } 
 }
@@ -1082,7 +1182,7 @@ async function deleteTransactionDetail(id) {
 }
 
 function exportBudgetToExcel() { 
-    let ws = [["Date","Type","Source","Amount","Paid Amount","Pending","Status","Description"]]; 
+    let ws = [["Date","Type","Source","Total Amount","Paid Amount","Pending Amount","Status","Description"]]; 
     budgets.forEach(t => {
         let amount = parseFloat(t.amount) || 0;
         let paid = parseFloat(t.paid_amount) || 0;
@@ -1101,14 +1201,14 @@ function exportBudgetToPDF() {
         let amount = parseFloat(t.amount) || 0;
         let paid = parseFloat(t.paid_amount) || 0;
         let pending = (t.type === 'income' && t.status !== 'paid') ? (amount - paid) : 0;
-        return `<tr><td class="px-2 py-1">${t.transaction_date}</td><td class="px-2 py-1">${t.type}</td><td class="px-2 py-1">${escapeHtml(t.source)}</td><td class="px-2 py-1 text-left">${formatMoney(amount)}</td><td class="px-2 py-1 text-left">${paid > 0 ? formatMoney(paid) : '-'}</td><td class="px-2 py-1 text-left">${pending > 0 ? formatMoney(pending) : '-'}</td><td class="px-2 py-1">${t.status}</td></tr>`;
+        return `<tr><td class="px-2 py-1">${t.transaction_date}</td><td class="px-2 py-1">${t.type}</td><td class="px-2 py-1">${escapeHtml(t.source)}</td<td class="px-2 py-1 text-left">${formatMoney(amount)}</td<td class="px-2 py-1 text-left">${paid > 0 ? formatMoney(paid) : '-'}</td<td class="px-2 py-1 text-left">${pending > 0 ? formatMoney(pending) : '-'}</td<td class="px-2 py-1">${t.status}</td</tr`;
     }).join(''); 
-    element.innerHTML = `<div style="padding:20px; border:2px solid #ea580c;"><h1 style="color:#ea580c">Budget Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8" style="width:100%; border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th>Date</th><th>Type</th><th>Source</th><th>Amount</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`; 
+    element.innerHTML = `<div style="padding:20px; border:2px solid #ea580c;"><h1 style="color:#ea580c">Budget Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/><table border="1" cellpadding="8" style="width:100%; border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th>Date</th><th>Type</th><th>Source</th><th>Amount</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>${rows}</tbody></div>`; 
     html2pdf().set({ margin: 0.5, filename: `budget_report.pdf` }).from(element).save(); 
     showToast("Budget exported to PDF"); 
 }
 
-// ==================== MESSAGES ====================
+// ==================== MESSAGES SECTION ====================
 async function loadMessages(highlightId = null) {
     await fetchMessages();
     let html = `<div class="section-header"><h2><i class="fas fa-envelope mr-2"></i>Messages (${messagesData.length} conversations)</h2><button onclick="openModal('startChatModal')"><i class="fas fa-plus mr-1"></i>New Chat</button></div>
@@ -1151,7 +1251,14 @@ async function loadMessages(highlightId = null) {
         </div>`;
     }
     document.getElementById("messagesGridContainer").innerHTML = gridHtml;
-    if (highlightId) { const el = document.getElementById(`msg-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+    if (highlightId) { 
+        const el = document.getElementById(`msg-card-${highlightId}`); 
+        if(el) { 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            if (highlightTimer) clearTimeout(highlightTimer);
+            highlightTimer = setTimeout(() => el.classList.remove('search-highlight'), 3000);
+        } 
+    }
     updateMessageBadge();
 }
 
@@ -1234,7 +1341,7 @@ async function sendChatMessage() {
     }
 }
 
-// ==================== REPORTS ====================
+// ==================== REPORTS SECTION ====================
 async function loadReports(highlightId = null) {
     await fetchReports();
     let search = document.getElementById("globalSearchInput")?.value.toLowerCase() || "";
@@ -1255,7 +1362,7 @@ async function loadReports(highlightId = null) {
         let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
         let shortContent = r.content && r.content.length > 100 ? r.content.substring(0, 100) + '...' : (r.content || '');
         
-        gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}">
+        gridHtml += `<div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}">
             <div class="delete-report-btn" onclick="event.stopPropagation(); deleteReportDetail(${r.id})"><i class="fas fa-trash-alt"></i></div>
             <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report</p></div>
             ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
@@ -1274,7 +1381,14 @@ async function loadReports(highlightId = null) {
         </div>`;
     }
     document.getElementById("reportsGridContainer").innerHTML = gridHtml;
-    if (highlightId) { const el = document.getElementById(`report-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+    if (highlightId) { 
+        const el = document.getElementById(`report-card-${highlightId}`); 
+        if(el) { 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            if (highlightTimer) clearTimeout(highlightTimer);
+            highlightTimer = setTimeout(() => el.classList.remove('search-highlight'), 3000);
+        } 
+    }
     updateReportBadge();
 }
 
@@ -1298,11 +1412,9 @@ async function addReport() {
 async function viewReportDetail(id) { 
     let r = reportsList.find(r => r.id === id); 
     if (r) { 
-        if (r.is_viewed_by_department === 0) { 
+        if (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) { 
             await markReportViewed(r.id); 
             r.is_viewed_by_department = 1; 
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-            updateReportBadge(); 
         }
         
         let deptOptions = ''; 
@@ -1437,7 +1549,7 @@ function exportAllReportsToPDF() {
     showToast("All reports exported to PDF"); 
 }
 
-// ==================== SETTINGS ====================
+// ==================== SETTINGS SECTION ====================
 function renderSettings() {
     let logsHtml = activityLogs.slice(0, 15).map(l => `<div class="text-[10px] border-b py-1"><span>${escapeHtml(l.action)}</span><span class="float-right text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('');
     let colors = [{ name: 'Orange', value: '#ea580c' }, { name: 'Blue', value: '#2563eb' }, { name: 'Purple', value: '#7c3aed' }, { name: 'Green', value: '#065f46' }, { name: 'Red', value: '#dc2626' }, { name: 'Teal', value: '#0d9488' }, { name: 'Pink', value: '#db2777' }, { name: 'Indigo', value: '#6366f1' }];
@@ -1519,6 +1631,80 @@ function clearLogs() {
     } 
 }
 
+// ==================== GLOBAL SEARCH ====================
+function performGlobalSearch() {
+    let term = document.getElementById("globalSearchInput").value.toLowerCase().trim();
+    let dropdown = document.getElementById("searchResultsDropdown");
+    if (searchTimeout) clearTimeout(searchTimeout);
+    if (term === "") { dropdown.classList.remove("active"); dropdown.innerHTML = ""; return; }
+    
+    searchTimeout = setTimeout(() => {
+        let campaignResults = campaigns.filter(c => c.campaign_name?.toLowerCase().includes(term));
+        let transactionResults = budgets.filter(t => t.source?.toLowerCase().includes(term));
+        let reportResults = reportsList.filter(r => r.title?.toLowerCase().includes(term));
+        let html = "";
+        
+        if (campaignResults.length) {
+            html += '<div class="p-2 bg-gray-100 text-xs font-semibold"><i class="fas fa-chart-line mr-1"></i> CAMPAIGNS</div>';
+            campaignResults.slice(0,5).forEach(c => {
+                html += `<div class="search-result-item" onclick="goToSectionAndHighlight('marketing', ${c.id}, 'campaign-card-${c.id}')">
+                    <div class="font-medium">${escapeHtml(c.campaign_name)}</div>
+                    <div class="text-xs text-gray-500">${formatMoney(c.budget)} | ${c.status}</div>
+                </div>`;
+            });
+        }
+        
+        if (transactionResults.length) {
+            html += '<div class="p-2 bg-gray-100 text-xs font-semibold"><i class="fas fa-wallet mr-1"></i> BUDGET</div>';
+            transactionResults.slice(0,5).forEach(t => {
+                html += `<div class="search-result-item" onclick="goToSectionAndHighlight('budget', ${t.id}, 'budget-row-${t.id}')">
+                    <div class="font-medium">${escapeHtml(t.source)}</div>
+                    <div class="text-xs text-gray-500">${formatMoney(t.amount)} | ${t.type}</div>
+                </div>`;
+            });
+        }
+        
+        if (reportResults.length) {
+            html += '<div class="p-2 bg-gray-100 text-xs font-semibold"><i class="fas fa-chart-line mr-1"></i> REPORTS</div>';
+            reportResults.slice(0,5).forEach(r => {
+                html += `<div class="search-result-item" onclick="goToSectionAndHighlight('reports', ${r.id}, 'report-card-${r.id}')">
+                    <div class="font-medium">${escapeHtml(r.title)}</div>
+                    <div class="text-xs text-gray-500">${r.period} report</div>
+                </div>`;
+            });
+        }
+        
+        if (!html) html = '<div class="p-4 text-center text-gray-400 text-sm">No results found for "' + escapeHtml(term) + '"</div>';
+        dropdown.innerHTML = html;
+        dropdown.classList.add("active");
+    }, 300);
+}
+
+function goToSectionAndHighlight(section, id, elementId) {
+    let dd = document.getElementById("searchResultsDropdown");
+    if (dd) dd.classList.remove("active");
+    document.getElementById("globalSearchInput").value = "";
+    showSection(section);
+    setTimeout(() => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('search-highlight');
+            if (highlightTimer) clearTimeout(highlightTimer);
+            highlightTimer = setTimeout(() => {
+                if (element) element.classList.remove('search-highlight');
+            }, 3000);
+        }
+    }, 500);
+}
+
+document.addEventListener("click", (e) => { 
+    let inp = document.getElementById("globalSearchInput"); 
+    let dd = document.getElementById("searchResultsDropdown"); 
+    if (inp && dd && !inp.contains(e.target) && !dd.contains(e.target)) dd.classList.remove("active"); 
+});
+
+// ==================== SECTION NAVIGATION ====================
 async function showSection(sectionId, highlightId = null) {
     let sections = ["dashboardSection","marketingSection","budgetSection","messagesSection","reportsSection","settingsSection"];
     sections.forEach(s => { let el = document.getElementById(s); if (el) el.classList.add("hidden"); });
@@ -1526,13 +1712,14 @@ async function showSection(sectionId, highlightId = null) {
     document.querySelectorAll(".nav-item").forEach(nav => nav.classList.remove("active"));
     document.querySelector(`.nav-item[data-section="${sectionId}"]`)?.classList.add("active");
     if (sectionId === "dashboard") await loadDashboard();
-    else if (sectionId === "marketing") await loadCampaigns(highlightId);
+    else if (sectionId === "marketing") await loadCampaignsInfinite(true);
     else if (sectionId === "budget") await loadBudget(highlightId);
     else if (sectionId === "messages") await loadMessages(highlightId);
     else if (sectionId === "reports") await loadReports(highlightId);
     else if (sectionId === "settings") renderSettings();
 }
 
+// ==================== LOGOUT & CONNECTION ====================
 async function logout() { 
     if(confirm('Logout?')) { 
         localStorage.clear(); 
@@ -1552,36 +1739,6 @@ async function updateConnectionStatus() {
     } catch (error) {
         statusDiv.innerHTML = '<i class="fas fa-plug"></i> Offline';
     }
-}
-
-// ==================== GLOBAL SEARCH ====================
-function performGlobalSearch() {
-    let term = document.getElementById("globalSearchInput").value.toLowerCase().trim();
-    let dropdown = document.getElementById("searchResultsDropdown");
-    if (searchTimeout) clearTimeout(searchTimeout);
-    if (term === "") { dropdown.classList.remove("active"); dropdown.innerHTML = ""; return; }
-    searchTimeout = setTimeout(() => {
-        let campaignResults = campaigns.filter(c => c.campaign_name?.toLowerCase().includes(term));
-        let transactionResults = budgets.filter(t => t.source?.toLowerCase().includes(term));
-        let reportResults = reportsList.filter(r => r.title?.toLowerCase().includes(term));
-        let html = "";
-        if (campaignResults.length) html += '<div class="p-2 bg-gray-50"><span class="text-xs font-semibold text-orange-600">Campaigns</span></div>';
-        campaignResults.slice(0,3).forEach(c => html += `<div class="search-result-item" onclick="goToSectionAndSearch('marketing', '${c.campaign_name}')"><div class="font-medium">${escapeHtml(c.campaign_name)}</div><div class="text-xs text-gray-500">${formatMoney(c.budget)}</div></div>`);
-        if (transactionResults.length) html += '<div class="p-2 bg-gray-50"><span class="text-xs font-semibold text-green-600">Budget</span></div>';
-        transactionResults.slice(0,3).forEach(t => html += `<div class="search-result-item" onclick="goToSectionAndSearch('budget', '${t.source}')"><div class="font-medium">${escapeHtml(t.source)}</div><div class="text-xs text-gray-500">${formatMoney(t.amount)}</div></div>`);
-        if (reportResults.length) html += '<div class="p-2 bg-gray-50"><span class="text-xs font-semibold text-purple-600">Reports</span></div>';
-        reportResults.slice(0,3).forEach(r => html += `<div class="search-result-item" onclick="goToSectionAndSearch('reports', '${r.title}')"><div class="font-medium">${escapeHtml(r.title)}</div><div class="text-xs text-gray-500">${r.period}</div></div>`);
-        if (!html) html = '<div class="p-4 text-center text-gray-400 text-xs">No results</div>';
-        dropdown.innerHTML = html; dropdown.classList.add("active");
-    }, 300);
-}
-
-function goToSectionAndSearch(section, val) { 
-    let dd = document.getElementById("searchResultsDropdown"); 
-    if (dd) dd.classList.remove("active"); 
-    document.getElementById("globalSearchInput").value = val; 
-    showSection(section); 
-    showToast(`Showing "${val}"`); 
 }
 
 // ==================== INIT ====================
@@ -1636,16 +1793,6 @@ async function init() {
     addLog("Sales Dashboard initialized");
     updateConnectionStatus();
     setInterval(updateConnectionStatus, 30000);
-    
-    // Setup modal close on outside click
-    document.addEventListener('click', function(e) {
-        if (e.target.classList.contains('modal')) {
-            closeModal(e.target.id);
-        }
-        if (!e.target.closest('.send-dropdown')) {
-            document.querySelectorAll('.send-dropdown-content').forEach(d => d.style.display = 'none');
-        }
-    });
 }
 
 // Expose global functions
@@ -1663,8 +1810,6 @@ window.editCampaign = editCampaign;
 window.deleteCampaign = deleteCampaign;
 window.exportSingleCampaignExcel = exportSingleCampaignExcel;
 window.exportSingleCampaignPDF = exportSingleCampaignPDF;
-window.exportCampaignsToExcel = exportCampaignsToExcel;
-window.exportCampaignsToPDF = exportCampaignsToPDF;
 window.openAddTransactionModal = openAddTransactionModal;
 window.saveBudget = saveBudget;
 window.viewTransactionDetail = viewTransactionDetail;
@@ -1691,7 +1836,7 @@ window.createBackup = createBackup;
 window.restoreBackup = restoreBackup;
 window.clearLogs = clearLogs;
 window.performGlobalSearch = performGlobalSearch;
-window.goToSectionAndSearch = goToSectionAndSearch;
+window.goToSectionAndHighlight = goToSectionAndHighlight;
 
 init();
 </script>
