@@ -9,31 +9,37 @@ $database = new Database();
 $db = $database->getConnection();
 
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : null;
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : null;
 $is_admin = isset($_GET['is_admin']) ? intval($_GET['is_admin']) : 0;
+
+$departmentNames = [
+    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing', 4 => 'Manager',
+    5 => 'Secretary', 6 => 'Bricks & Timber', 7 => 'Aluminium', 8 => 'Town Planning',
+    9 => 'Architectural', 10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
+];
 
 try {
     if ($department_id == 1 || $is_admin == 1) {
-        // Admin view - show all reports sent to admin OR created by admin
+        // Admin view - show reports for admin
         $query = "SELECT r.*, 
                   d.name as department_name,
-                  CASE 
-                      WHEN r.sent_from_department IS NOT NULL AND r.sent_from_department != 1 THEN 1
-                      ELSE 0
-                  END as is_from_department
+                  sfd.name as sent_from_department_name,
+                  std.name as sent_to_department_name
                   FROM reports r
                   LEFT JOIN departments d ON r.department_id = d.id
-                  WHERE (r.sent_to_department = 1 OR r.department_id = 1)
-                    AND r.deleted_by_admin = 0
+                  LEFT JOIN departments sfd ON r.sent_from_department = sfd.id
+                  LEFT JOIN departments std ON r.sent_to_department = std.id
+                  WHERE (r.sent_to_department = 1 OR r.department_id = 1 OR r.sent_from_department = 1)
+                    AND (r.deleted_by_admin = 0 OR r.deleted_by_admin IS NULL)
                   ORDER BY r.created_at DESC";
         $stmt = $db->prepare($query);
         $stmt->execute();
         $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Count unviewed reports for admin
+        // Count unviewed reports
         $unviewedCount = 0;
         foreach ($reports as $r) {
-            if ($r['is_viewed_by_admin'] == 0 && $r['department_id'] != 1) {
+            if (($r['is_viewed_by_admin'] == 0 || $r['is_viewed_by_admin'] === null) && 
+                $r['department_id'] != 1 && $r['sent_from_department'] != 1) {
                 $unviewedCount++;
             }
         }
@@ -41,27 +47,34 @@ try {
         echo json_encode([
             'success' => true, 
             'data' => $reports, 
-            'unviewed_count' => $unviewedCount,
-            'is_admin' => true
+            'unviewed_count' => $unviewedCount
         ]);
         
     } else if ($department_id) {
-        // Department view - show reports for this department
+        // Department view - show ONLY reports (not messages)
         $query = "SELECT r.*, 
-                  d.name as department_name
+                  d.name as department_name,
+                  sfd.name as sent_from_department_name,
+                  std.name as sent_to_department_name
                   FROM reports r
                   LEFT JOIN departments d ON r.department_id = d.id
-                  WHERE (r.department_id = ? OR r.sent_to_department = ?)
-                    AND r.deleted_by_department = 0
+                  LEFT JOIN departments sfd ON r.sent_from_department = sfd.id
+                  LEFT JOIN departments std ON r.sent_to_department = std.id
+                  WHERE (r.department_id = ? OR r.sent_to_department = ? OR r.sent_from_department = ?)
+                    AND (r.deleted_by_department = 0 OR r.deleted_by_department IS NULL)
+                    AND r.title NOT LIKE '%REPORT%' 
+                    AND r.title NOT LIKE '%Message%'
                   ORDER BY r.created_at DESC";
         $stmt = $db->prepare($query);
-        $stmt->execute([$department_id, $department_id]);
+        $stmt->execute([$department_id, $department_id, $department_id]);
         $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Count unviewed reports for this department
+        // Count unviewed reports
         $unviewedCount = 0;
         foreach ($reports as $r) {
-            if ($r['is_viewed_by_department'] == 0 && $r['sent_from_department'] != $department_id && $r['department_id'] != $department_id) {
+            if (($r['is_viewed_by_department'] == 0 || $r['is_viewed_by_department'] === null) && 
+                $r['sent_from_department'] != $department_id && 
+                $r['department_id'] != $department_id) {
                 $unviewedCount++;
             }
         }

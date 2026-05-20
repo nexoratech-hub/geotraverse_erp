@@ -11,9 +11,6 @@ $db = $database->getConnection();
 
 $data = json_decode(file_get_contents("php://input"));
 
-// Log received data for debugging
-error_log("Send report received: " . print_r($data, true));
-
 if (!$data) {
     echo json_encode(['success' => false, 'message' => 'No data received']);
     exit;
@@ -54,123 +51,75 @@ $departmentNames = [
     5 => 'Secretary', 6 => 'Bricks & Timber', 7 => 'Aluminium', 8 => 'Town Planning',
     9 => 'Architectural', 10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
 ];
-$fromDeptName = isset($departmentNames[$from_department_id]) ? $departmentNames[$from_department_id] : 'Department ' . $from_department_id;
 $toDeptName = isset($departmentNames[$to_department_id]) ? $departmentNames[$to_department_id] : 'Department ' . $to_department_id;
 
 try {
     $db->beginTransaction();
     
-    // Get report details
-    $reportQuery = "SELECT * FROM reports WHERE id = ?";
+    // Get original report details
+    $reportQuery = "SELECT * FROM reports WHERE id = ? AND deleted_by_department = 0 AND deleted_by_admin = 0";
     $reportStmt = $db->prepare($reportQuery);
     $reportStmt->execute([$report_id]);
-    $report = $reportStmt->fetch(PDO::FETCH_ASSOC);
+    $original_report = $reportStmt->fetch(PDO::FETCH_ASSOC);
     
-    if (!$report) {
+    if (!$original_report) {
         echo json_encode(['success' => false, 'message' => 'Report not found']);
         exit;
     }
     
-    // Create a copy of the report for the target department (if sending to different department)
-    if ($to_department_id != $from_department_id) {
-        // Insert a new report entry for the target department
-        $insertQuery = "INSERT INTO reports (title, period, content, status, department_id, sent_from_department, sent_to_department, is_viewed_by_department, created_at) 
-                        VALUES (?, ?, ?, 'sent', ?, ?, ?, 0, NOW())";
-        $insertStmt = $db->prepare($insertQuery);
-        $insertStmt->execute([
-            $report['title'],
-            $report['period'],
-            $report['content'],
-            $to_department_id,
-            $from_department_id,
-            $to_department_id
+    // Check if report already exists for target department
+    $checkExisting = "SELECT id FROM reports 
+                      WHERE title = ? AND sent_from_department = ? AND sent_to_department = ? 
+                      AND deleted_by_department = 0 AND deleted_by_admin = 0";
+    $checkStmt = $db->prepare($checkExisting);
+    $checkStmt->execute([$original_report['title'], $from_department_id, $to_department_id]);
+    
+    if ($checkStmt->rowCount() > 0) {
+        // Report already sent, just update status
+        $existingReport = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        $updateQuery = "UPDATE reports SET status = 'sent', updated_at = NOW() WHERE id = ?";
+        $updateStmt = $db->prepare($updateQuery);
+        $updateStmt->execute([$existingReport['id']]);
+        
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Report already sent to ' . $toDeptName,
+            'report_id' => $existingReport['id']
         ]);
-        
-        $new_report_id = $db->lastInsertId();
-        
-        // Update original report status
-        $updateQuery = "UPDATE reports SET status = 'sent', sent_to_department = ? WHERE id = ?";
-        $updateStmt = $db->prepare($updateQuery);
-        $updateStmt->execute([$to_department_id, $report_id]);
-        
-        $sentReportId = $new_report_id;
-    } else {
-        // Just update the existing report
-        $updateQuery = "UPDATE reports SET status = 'sent', sent_to_department = ? WHERE id = ?";
-        $updateStmt = $db->prepare($updateQuery);
-        $updateStmt->execute([$to_department_id, $report_id]);
-        $sentReportId = $report_id;
+        $db->commit();
+        exit;
     }
     
-    // Create message content for notification
-    $messageText = "📊 NEW REPORT RECEIVED\n\n";
-    $messageText .= "From: " . $fromDeptName . "\n";
-    $messageText .= "To: " . $toDeptName . "\n";
-    $messageText .= "Title: " . $report['title'] . "\n";
-    $messageText .= "Period: " . $report['period'] . "\n";
-    $messageText .= "Sent: " . date('Y-m-d H:i:s') . "\n\n";
-    $messageText .= "Please login to view this report in the Reports section.\n\n";
-    $messageText .= "Report Content Preview:\n";
-    $messageText .= "----------------------------------------\n";
-    $messageText .= substr($report['content'], 0, 500);
-    if (strlen($report['content']) > 500) $messageText .= "...";
-    $messageText .= "\n----------------------------------------";
-    
-    // Find or create conversation between departments
-    $convQuery = "SELECT id FROM conversations 
-                  WHERE (sender_dept = ? AND receiver_dept = ?) 
-                  OR (sender_dept = ? AND receiver_dept = ?)
-                  AND deleted_by_department = 0 AND deleted_by_admin = 0
-                  LIMIT 1";
-    $convStmt = $db->prepare($convQuery);
-    $convStmt->execute([$from_department_id, $to_department_id, $to_department_id, $from_department_id]);
-    
-    if ($convStmt->rowCount() > 0) {
-        $convRow = $convStmt->fetch(PDO::FETCH_ASSOC);
-        $conversation_id = $convRow['id'];
-    } else {
-        // Get user IDs for both departments
-        $userQuery = "SELECT id FROM users WHERE department_id = ? AND is_active = 1 LIMIT 1";
-        $userStmt = $db->prepare($userQuery);
-        $userStmt->execute([$from_department_id]);
-        $senderUser = $userStmt->fetch(PDO::FETCH_ASSOC);
-        $sender_user_id = $senderUser ? $senderUser['id'] : 1;
-        
-        $userStmt2 = $db->prepare($userQuery);
-        $userStmt2->execute([$to_department_id]);
-        $receiverUser = $userStmt2->fetch(PDO::FETCH_ASSOC);
-        $receiver_user_id = $receiverUser ? $receiverUser['id'] : 1;
-        
-        $subject = "Report: " . substr($report['title'], 0, 100);
-        $createConv = "INSERT INTO conversations (user_id, admin_id, sender_dept, receiver_dept, subject, status, created_at, updated_at) 
-                       VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())";
-        $createStmt = $db->prepare($createConv);
-        $createStmt->execute([$sender_user_id, $receiver_user_id, $from_department_id, $to_department_id, $subject]);
-        $conversation_id = $db->lastInsertId();
-    }
-    
-    // Send notification message
-    $msgQuery = "INSERT INTO messages 
-                 (sender_dept, receiver_dept, conversation_id, sender_id, receiver_id, message, is_read, status, created_at) 
-                 VALUES (?, ?, ?, ?, ?, ?, 0, 'sent', NOW())";
-    $msgStmt = $db->prepare($msgQuery);
-    $msgStmt->execute([
-        $from_department_id, 
-        $to_department_id, 
-        $conversation_id, 
-        1, 
-        1, 
-        $messageText
+    // Create a COPY of the report for target department (NO message sending)
+    $insertQuery = "INSERT INTO reports 
+                    (title, period, content, status, department_id, sent_from_department, sent_to_department, is_viewed_by_department, created_at) 
+                    VALUES (?, ?, ?, 'sent', ?, ?, ?, 0, NOW())";
+    $insertStmt = $db->prepare($insertQuery);
+    $insertStmt->execute([
+        $original_report['title'],
+        $original_report['period'],
+        $original_report['content'],
+        $to_department_id,
+        $from_department_id,
+        $to_department_id
     ]);
+    
+    $new_report_id = $db->lastInsertId();
+    
+    // Update original report status
+    $updateQuery = "UPDATE reports SET status = 'sent', sent_to_department = ? WHERE id = ?";
+    $updateStmt = $db->prepare($updateQuery);
+    $updateStmt->execute([$to_department_id, $report_id]);
     
     $db->commit();
     
-    error_log("Report sent successfully: report_id=$report_id, from=$from_department_id, to=$to_department_id");
+    error_log("Report sent successfully: report_id=$report_id, from=$from_department_id, to=$to_department_id, new_report_id=$new_report_id");
     
     echo json_encode([
         'success' => true, 
         'message' => 'Report sent successfully to ' . $toDeptName,
-        'report_id' => $sentReportId,
+        'report_id' => $new_report_id,
+        'original_report_id' => $report_id,
         'from_department' => $from_department_id,
         'to_department' => $to_department_id
     ]);
