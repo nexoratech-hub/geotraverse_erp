@@ -1,63 +1,102 @@
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Methods: POST, DELETE, OPTIONS');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+require_once '../config/database.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$data = json_decode(file_get_contents("php://input"));
+
+if (!$data || !isset($data->message_id)) {
+    echo json_encode(['success' => false, 'message' => 'Message ID required']);
+    exit;
 }
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
+$message_id = $data->message_id;
+$department_id = isset($data->department_id) ? intval($data->department_id) : null;
+$user_id = isset($data->user_id) ? intval($data->user_id) : null;
 
 try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed"]);
-    exit();
-}
-
-$input = json_decode(file_get_contents("php://input"), true);
-if (!$input) {
-    echo json_encode(["success" => false, "message" => "Invalid request data"]);
-    exit();
-}
-
-$message_id = isset($input['message_id']) ? intval($input['message_id']) : 0;
-$user_id = isset($input['user_id']) ? intval($input['user_id']) : 0;
-
-if ($message_id === 0 || $user_id === 0) {
-    echo json_encode(["success" => false, "message" => "Missing message_id or user_id"]);
-    exit();
-}
-
-// Check if user is sender or receiver
-$check = $pdo->prepare("SELECT sender_id, receiver_id FROM messages WHERE id = ?");
-$check->execute([$message_id]);
-$msg = $check->fetch(PDO::FETCH_ASSOC);
-
-if (!$msg) {
-    echo json_encode(["success" => false, "message" => "Message not found"]);
-    exit();
-}
-
-if ($msg['sender_id'] == $user_id) {
-    // User is sender - soft delete from sender side only
-    $update = $pdo->prepare("UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?");
-    $update->execute([$message_id]);
-    echo json_encode(["success" => true, "message" => "Message deleted from your view (sender)"]);
-} elseif ($msg['receiver_id'] == $user_id) {
-    // User is receiver - soft delete from receiver side only
-    $update = $pdo->prepare("UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?");
-    $update->execute([$message_id]);
-    echo json_encode(["success" => true, "message" => "Message deleted from your view (receiver)"]);
-} else {
-    echo json_encode(["success" => false, "message" => "Unauthorized"]);
-    exit();
+    $db->beginTransaction();
+    
+    // Get message details
+    $msgQuery = "SELECT * FROM messages WHERE id = ?";
+    $msgStmt = $db->prepare($msgQuery);
+    $msgStmt->execute([$message_id]);
+    $message = $msgStmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$message) {
+        echo json_encode(['success' => false, 'message' => 'Message not found']);
+        exit;
+    }
+    
+    // Check if message is already deleted
+    if ($message['sender_deleted'] == 1 && $message['receiver_deleted'] == 1) {
+        echo json_encode(['success' => false, 'message' => 'Message already deleted']);
+        exit;
+    }
+    
+    // SOFT DELETE: Mark as deleted by the appropriate party
+    if ($department_id) {
+        // Delete by department
+        if ($message['sender_dept'] == $department_id) {
+            $updateQuery = "UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            $updateStmt = $db->prepare($updateQuery);
+            $updateStmt->execute([$message_id]);
+        } else if ($message['receiver_dept'] == $department_id) {
+            $updateQuery = "UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            $updateStmt = $db->prepare($updateQuery);
+            $updateStmt->execute([$message_id]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'You are not authorized to delete this message']);
+            exit;
+        }
+    } else if ($user_id) {
+        // Delete by user
+        if ($message['sender_id'] == $user_id) {
+            $updateQuery = "UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            $updateStmt = $db->prepare($updateQuery);
+            $updateStmt->execute([$message_id]);
+        } else if ($message['receiver_id'] == $user_id) {
+            $updateQuery = "UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            $updateStmt = $db->prepare($updateQuery);
+            $updateStmt->execute([$message_id]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'You are not authorized to delete this message']);
+            exit;
+        }
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Department ID or User ID required']);
+        exit;
+    }
+    
+    // Insert into recycle bin for tracking
+    $recycleQuery = "INSERT INTO recycle_bin 
+                    (original_table, original_id, deleted_data, deleted_by_department_id, deleted_by_user_id, deleted_by_admin, deleted_at) 
+                    VALUES (?, ?, ?, ?, ?, 0, NOW())";
+    $recycleStmt = $db->prepare($recycleQuery);
+    $recycleStmt->execute([
+        'messages',
+        $message_id,
+        json_encode($message),
+        $department_id,
+        $user_id
+    ]);
+    
+    $db->commit();
+    
+    echo json_encode([
+        'success' => true, 
+        'message' => 'Message moved to recycle bin',
+        'soft_deleted' => true
+    ]);
+    
+} catch (PDOException $e) {
+    $db->rollBack();
+    error_log("Delete message error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 ?>

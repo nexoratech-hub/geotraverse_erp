@@ -1,145 +1,222 @@
 <?php
-error_reporting(0);
-ini_set('display_errors', 0);
-
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+require_once '../config/database.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$data = json_decode(file_get_contents("php://input"));
+
+if (!$data) {
+    echo json_encode(['success' => false, 'message' => 'No data received']);
+    exit;
 }
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
+if (!isset($data->message) || empty(trim($data->message))) {
+    echo json_encode(['success' => false, 'message' => 'Message is required']);
+    exit;
+}
 
 try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed: " . $e->getMessage()]);
-    exit();
-}
-
-$input = json_decode(file_get_contents("php://input"), true);
-if (!$input) {
-    echo json_encode(["success" => false, "message" => "Invalid request data"]);
-    exit();
-}
-
-$sender_id = isset($input['sender_id']) ? intval($input['sender_id']) : (isset($input['user_id']) ? intval($input['user_id']) : 0);
-$receiver_department_id = isset($input['receiver_department_id']) ? intval($input['receiver_department_id']) : 0;
-$department_id = isset($input['department_id']) ? intval($input['department_id']) : 0;
-$conversation_id = isset($input['conversation_id']) ? intval($input['conversation_id']) : 0;
-$message = isset($input['message']) ? trim($input['message']) : '';
-
-if ($sender_id === 0) {
-    echo json_encode(["success" => false, "message" => "Sender ID required"]);
-    exit();
-}
-
-if (empty($message)) {
-    echo json_encode(["success" => false, "message" => "Message cannot be empty"]);
-    exit();
-}
-
-$target_department = $receiver_department_id > 0 ? $receiver_department_id : $department_id;
-
-// SPECIAL CASE: If target is Super Admin (value 1)
-if ($target_department == 1) {
-    // Find Super Admin user (role = 'Super Administrator' or user_id = 1)
-    $superAdminQuery = $pdo->prepare("
-        SELECT id FROM users 
-        WHERE (role = 'Super Administrator' OR id = 1) 
-        AND is_active = 1 
-        LIMIT 1
-    ");
-    $superAdminQuery->execute();
-    $superAdmin = $superAdminQuery->fetch(PDO::FETCH_ASSOC);
+    $db->beginTransaction();
     
-    if ($superAdmin) {
-        $receiver_id = $superAdmin['id'];
-    } else {
-        // Fallback: use user_id = 1
-        $receiver_id = 1;
-    }
-}
-
-if ($conversation_id > 0) {
-    // Existing conversation
-    $getConv = $pdo->prepare("SELECT user_id, admin_id FROM conversations WHERE id = ?");
-    $getConv->execute([$conversation_id]);
-    $conv = $getConv->fetch(PDO::FETCH_ASSOC);
+    $sender_department_id = null;
+    $sender_user_id = null;
+    $receiver_department_id = null;
+    $receiver_user_id = null;
+    $conversation_id = null;
     
-    if (!$conv) {
-        echo json_encode(["success" => false, "message" => "Conversation not found"]);
-        exit();
-    }
-    
-    $receiver_id = ($conv['user_id'] == $sender_id) ? $conv['admin_id'] : $conv['user_id'];
-    
-    $updateConv = $pdo->prepare("UPDATE conversations SET updated_at = NOW() WHERE id = ?");
-    $updateConv->execute([$conversation_id]);
-} 
-else if ($target_department > 0 && !isset($receiver_id)) {
-    // New conversation - find receiver in target department
-    $receiverQuery = $pdo->prepare("
-        SELECT id FROM users 
-        WHERE department_id = ? AND is_active = 1 
-        LIMIT 1
-    ");
-    $receiverQuery->execute([$target_department]);
-    $receiver = $receiverQuery->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$receiver) {
-        echo json_encode(["success" => false, "message" => "No active users found in selected department"]);
-        exit();
+    // CASE 1: Sending from department to department (preferred)
+    if (isset($data->from_department_id) && isset($data->to_department_id)) {
+        $sender_department_id = $data->from_department_id;
+        $receiver_department_id = $data->to_department_id;
+        
+        // Get user IDs for departments
+        $userQuery = "SELECT id FROM users WHERE department_id = ? AND is_active = 1 LIMIT 1";
+        $userStmt = $db->prepare($userQuery);
+        $userStmt->execute([$sender_department_id]);
+        $senderUser = $userStmt->fetch(PDO::FETCH_ASSOC);
+        $sender_user_id = $senderUser ? $senderUser['id'] : 1;
+        
+        $userStmt2 = $db->prepare($userQuery);
+        $userStmt2->execute([$receiver_department_id]);
+        $receiverUser = $userStmt2->fetch(PDO::FETCH_ASSOC);
+        $receiver_user_id = $receiverUser ? $receiverUser['id'] : 1;
+        
+        // Find existing conversation between these departments
+        $convQuery = "SELECT id FROM conversations 
+                      WHERE (sender_dept = ? AND receiver_dept = ?) 
+                      OR (sender_dept = ? AND receiver_dept = ?)
+                      AND deleted_by_department = 0 AND deleted_by_admin = 0
+                      LIMIT 1";
+        $convStmt = $db->prepare($convQuery);
+        $convStmt->execute([$sender_department_id, $receiver_department_id, $receiver_department_id, $sender_department_id]);
+        
+        if ($convStmt->rowCount() > 0) {
+            $convRow = $convStmt->fetch(PDO::FETCH_ASSOC);
+            $conversation_id = $convRow['id'];
+        } else {
+            // Create new conversation
+            $subject = isset($data->subject) ? $data->subject : 'Message from Department ' . $sender_department_id;
+            $createConv = "INSERT INTO conversations (user_id, admin_id, sender_dept, receiver_dept, subject, status, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())";
+            $createStmt = $db->prepare($createConv);
+            $createStmt->execute([$sender_user_id, $receiver_user_id, $sender_department_id, $receiver_department_id, $subject]);
+            $conversation_id = $db->lastInsertId();
+        }
+        
+        // Insert message
+        $query = "INSERT INTO messages 
+                  (sender_dept, receiver_dept, conversation_id, sender_id, receiver_id, message, is_read, status, created_at) 
+                  VALUES (?, ?, ?, ?, ?, ?, 0, 'sent', NOW())";
+        $stmt = $db->prepare($query);
+        $stmt->execute([
+            $sender_department_id, 
+            $receiver_department_id, 
+            $conversation_id, 
+            $sender_user_id, 
+            $receiver_user_id, 
+            $data->message
+        ]);
+        
+        $message_id = $db->lastInsertId();
+        $db->commit();
+        
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Message sent successfully',
+            'message_id' => $message_id,
+            'conversation_id' => $conversation_id
+        ]);
+        exit;
     }
     
-    $receiver_id = $receiver['id'];
-} 
-else if (!isset($receiver_id)) {
-    echo json_encode(["success" => false, "message" => "Please select a department"]);
-    exit();
+    // CASE 2: Sending from user to department
+    else if (isset($data->sender_id) && isset($data->receiver_department_id)) {
+        $sender_user_id = $data->sender_id;
+        $receiver_department_id = $data->receiver_department_id;
+        
+        // Get sender's department
+        $deptQuery = "SELECT department_id FROM users WHERE id = ?";
+        $deptStmt = $db->prepare($deptQuery);
+        $deptStmt->execute([$sender_user_id]);
+        $senderDept = $deptStmt->fetch(PDO::FETCH_ASSOC);
+        $sender_department_id = $senderDept ? $senderDept['department_id'] : null;
+        
+        // Get receiver user
+        $userQuery = "SELECT id FROM users WHERE department_id = ? AND is_active = 1 LIMIT 1";
+        $userStmt = $db->prepare($userQuery);
+        $userStmt->execute([$receiver_department_id]);
+        $receiverUser = $userStmt->fetch(PDO::FETCH_ASSOC);
+        $receiver_user_id = $receiverUser ? $receiverUser['id'] : 1;
+        
+        // Find existing conversation
+        $convQuery = "SELECT id FROM conversations 
+                      WHERE (user_id = ? AND admin_id = ?) 
+                      OR (user_id = ? AND admin_id = ?)
+                      AND deleted_by_department = 0 AND deleted_by_admin = 0
+                      LIMIT 1";
+        $convStmt = $db->prepare($convQuery);
+        $convStmt->execute([$sender_user_id, $receiver_user_id, $receiver_user_id, $sender_user_id]);
+        
+        if ($convStmt->rowCount() > 0) {
+            $convRow = $convStmt->fetch(PDO::FETCH_ASSOC);
+            $conversation_id = $convRow['id'];
+            
+            // Update department info if not set
+            $updateConv = "UPDATE conversations SET sender_dept = ?, receiver_dept = ? WHERE id = ?";
+            $updateStmt = $db->prepare($updateConv);
+            $updateStmt->execute([$sender_department_id, $receiver_department_id, $conversation_id]);
+        } else {
+            $subject = isset($data->subject) ? $data->subject : 'New Message';
+            $createConv = "INSERT INTO conversations (user_id, admin_id, sender_dept, receiver_dept, subject, status, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())";
+            $createStmt = $db->prepare($createConv);
+            $createStmt->execute([$sender_user_id, $receiver_user_id, $sender_department_id, $receiver_department_id, $subject]);
+            $conversation_id = $db->lastInsertId();
+        }
+        
+        // Insert message
+        $query = "INSERT INTO messages 
+                  (sender_dept, receiver_dept, conversation_id, sender_id, receiver_id, message, is_read, status, created_at) 
+                  VALUES (?, ?, ?, ?, ?, ?, 0, 'sent', NOW())";
+        $stmt = $db->prepare($query);
+        $stmt->execute([
+            $sender_department_id, 
+            $receiver_department_id, 
+            $conversation_id, 
+            $sender_user_id, 
+            $receiver_user_id, 
+            $data->message
+        ]);
+        
+        $db->commit();
+        
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Message sent successfully',
+            'message_id' => $db->lastInsertId(),
+            'conversation_id' => $conversation_id
+        ]);
+        exit;
+    }
+    
+    // CASE 3: Using conversation_id only
+    else if (isset($data->conversation_id) && isset($data->message) && isset($data->user_id)) {
+        $sender_user_id = $data->user_id;
+        $message = $data->message;
+        $conversation_id = $data->conversation_id;
+        
+        // Get conversation details
+        $convQuery = "SELECT * FROM conversations WHERE id = ?";
+        $convStmt = $db->prepare($convQuery);
+        $convStmt->execute([$conversation_id]);
+        $conversation = $convStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$conversation) {
+            echo json_encode(['success' => false, 'message' => 'Conversation not found']);
+            exit;
+        }
+        
+        $receiver_user_id = ($conversation['user_id'] == $sender_user_id) ? $conversation['admin_id'] : $conversation['user_id'];
+        $sender_department_id = $conversation['sender_dept'];
+        $receiver_department_id = $conversation['receiver_dept'];
+        
+        $query = "INSERT INTO messages 
+                  (sender_dept, receiver_dept, conversation_id, sender_id, receiver_id, message, is_read, status, created_at) 
+                  VALUES (?, ?, ?, ?, ?, ?, 0, 'sent', NOW())";
+        $stmt = $db->prepare($query);
+        $stmt->execute([
+            $sender_department_id,
+            $receiver_department_id,
+            $conversation_id, 
+            $sender_user_id, 
+            $receiver_user_id, 
+            $message
+        ]);
+        
+        $db->commit();
+        
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Message sent successfully',
+            'message_id' => $db->lastInsertId()
+        ]);
+        exit;
+    }
+    
+    else {
+        echo json_encode(['success' => false, 'message' => 'Invalid parameters. Need from_department_id+to_department_id or sender_id+receiver_department_id or conversation_id+user_id+message']);
+        exit;
+    }
+    
+} catch (PDOException $e) {
+    $db->rollBack();
+    error_log("Send message error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
-
-// Check if conversation already exists
-$convCheck = $pdo->prepare("
-    SELECT id FROM conversations 
-    WHERE (user_id = ? AND admin_id = ?) OR (user_id = ? AND admin_id = ?)
-    LIMIT 1
-");
-$convCheck->execute([$sender_id, $receiver_id, $receiver_id, $sender_id]);
-$existing = $convCheck->fetch(PDO::FETCH_ASSOC);
-
-if ($existing) {
-    $conversation_id = $existing['id'];
-    $updateConv = $pdo->prepare("UPDATE conversations SET updated_at = NOW() WHERE id = ?");
-    $updateConv->execute([$conversation_id]);
-} else {
-    $insertConv = $pdo->prepare("
-        INSERT INTO conversations (user_id, admin_id, subject, created_at, updated_at) 
-        VALUES (?, ?, 'New Message', NOW(), NOW())
-    ");
-    $insertConv->execute([$sender_id, $receiver_id]);
-    $conversation_id = $pdo->lastInsertId();
-}
-
-// Insert message
-$insertMsg = $pdo->prepare("
-    INSERT INTO messages (conversation_id, sender_id, receiver_id, message, status, created_at) 
-    VALUES (?, ?, ?, ?, 'sent', NOW())
-");
-$insertMsg->execute([$conversation_id, $sender_id, $receiver_id, $message]);
-
-echo json_encode([
-    "success" => true, 
-    "message" => "Message sent successfully", 
-    "conversation_id" => $conversation_id,
-    "receiver_id" => $receiver_id
-]);
 ?>

@@ -2,41 +2,55 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
+require_once '../config/database.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$data = json_decode(file_get_contents("php://input"));
+
+if (!$data || !isset($data->id)) {
+    echo json_encode(['success' => false, 'message' => 'Report ID required']);
+    exit;
+}
+
+$report_id = intval($data->id);
+$title = isset($data->title) ? $data->title : null;
+$period = isset($data->period) ? $data->period : null;
+$content = isset($data->content) ? $data->content : null;
 
 try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed"]);
-    exit();
+    $updateFields = [];
+    $params = [];
+    
+    if ($title) {
+        $updateFields[] = "title = ?";
+        $params[] = $title;
+    }
+    if ($period) {
+        $updateFields[] = "period = ?";
+        $params[] = $period;
+    }
+    if ($content) {
+        $updateFields[] = "content = ?";
+        $params[] = $content;
+    }
+    
+    if (empty($updateFields)) {
+        echo json_encode(['success' => false, 'message' => 'No fields to update']);
+        exit;
+    }
+    
+    $params[] = $report_id;
+    $query = "UPDATE reports SET " . implode(", ", $updateFields) . " WHERE id = ?";
+    $stmt = $db->prepare($query);
+    $stmt->execute($params);
+    
+    echo json_encode(['success' => true, 'message' => 'Report updated successfully']);
+    
+} catch (PDOException $e) {
+    error_log("Update report error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
-
-$input = json_decode(file_get_contents("php://input"), true);
-if (!$input) {
-    echo json_encode(["success" => false, "message" => "Invalid request data"]);
-    exit();
-}
-
-$report_id = isset($input['id']) ? intval($input['id']) : (isset($input['report_id']) ? intval($input['report_id']) : 0);
-$title = isset($input['title']) ? $input['title'] : '';
-$period = isset($input['period']) ? $input['period'] : '';
-$content = isset($input['content']) ? $input['content'] : '';
-$department_id = isset($input['department_id']) ? intval($input['department_id']) : 1;
-
-if ($report_id === 0) {
-    echo json_encode(["success" => false, "message" => "Missing report_id"]);
-    exit();
-}
-
-// Only update content, not the sent_to_department or viewed status
-$update = $pdo->prepare("UPDATE reports SET title = ?, period = ?, content = ? WHERE id = ?");
-$update->execute([$title, $period, $content, $report_id]);
-
-echo json_encode(["success" => true, "message" => "Report updated successfully"]);
 ?>

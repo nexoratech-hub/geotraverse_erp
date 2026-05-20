@@ -1,112 +1,121 @@
 <?php
-error_reporting(0);
-ini_set('display_errors', 0);
-
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+require_once '../config/database.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : null;
+$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : null;
+
+if (!$department_id && !$user_id) {
+    echo json_encode(['success' => false, 'message' => 'Department ID or User ID required', 'data' => []]);
+    exit;
 }
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
+$departmentNames = [
+    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing', 4 => 'Manager',
+    5 => 'Secretary', 6 => 'Bricks & Timber', 7 => 'Aluminium', 8 => 'Town Planning',
+    9 => 'Architectural', 10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
+];
 
 try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed", "data" => []]);
-    exit();
+    if ($department_id) {
+        // Get conversations for a department
+        $query = "SELECT 
+                    c.id as conversation_id,
+                    c.subject,
+                    c.status,
+                    c.created_at,
+                    c.sender_dept,
+                    c.receiver_dept,
+                    MAX(m.created_at) as last_message_time,
+                    (SELECT message FROM messages WHERE conversation_id = c.id AND sender_deleted = 0 AND receiver_deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message,
+                    COUNT(CASE WHEN m.receiver_dept = ? AND m.is_read = 0 AND m.sender_deleted = 0 AND m.receiver_deleted = 0 THEN 1 END) as unread_count,
+                    CASE 
+                        WHEN c.sender_dept = ? THEN c.receiver_dept
+                        ELSE c.sender_dept
+                    END as other_department_id
+                  FROM conversations c
+                  LEFT JOIN messages m ON c.id = m.conversation_id AND m.sender_deleted = 0 AND m.receiver_deleted = 0
+                  WHERE (c.sender_dept = ? OR c.receiver_dept = ?)
+                    AND c.deleted_by_department = 0 
+                    AND c.deleted_by_admin = 0
+                  GROUP BY c.id
+                  ORDER BY last_message_time DESC";
+        
+        $stmt = $db->prepare($query);
+        $stmt->execute([$department_id, $department_id, $department_id, $department_id]);
+        $conversations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($conversations as &$conv) {
+            $otherId = $conv['other_department_id'];
+            $conv['other_department_name'] = isset($departmentNames[$otherId]) ? $departmentNames[$otherId] : 'Department ' . $otherId;
+            $conv['unread_count'] = intval($conv['unread_count']);
+        }
+        
+        echo json_encode(['success' => true, 'data' => $conversations, 'department_id' => $department_id]);
+        
+    } else if ($user_id) {
+        // Get conversations for a user
+        $query = "SELECT 
+                    c.id as conversation_id,
+                    c.subject,
+                    c.status,
+                    c.created_at,
+                    c.sender_dept,
+                    c.receiver_dept,
+                    MAX(m.created_at) as last_message_time,
+                    (SELECT message FROM messages WHERE conversation_id = c.id AND sender_deleted = 0 AND receiver_deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message,
+                    COUNT(CASE WHEN m.receiver_id = ? AND m.is_read = 0 AND m.sender_deleted = 0 AND m.receiver_deleted = 0 THEN 1 END) as unread_count,
+                    CASE 
+                        WHEN c.user_id = ? THEN c.admin_id
+                        ELSE c.user_id
+                    END as other_user_id,
+                    CASE
+                        WHEN c.sender_dept != ? AND c.sender_dept IS NOT NULL THEN c.sender_dept
+                        WHEN c.receiver_dept != ? AND c.receiver_dept IS NOT NULL THEN c.receiver_dept
+                        ELSE NULL
+                    END as other_department_id
+                  FROM conversations c
+                  LEFT JOIN messages m ON c.id = m.conversation_id AND m.sender_deleted = 0 AND m.receiver_deleted = 0
+                  WHERE (c.user_id = ? OR c.admin_id = ?)
+                    AND c.deleted_by_user_id IS NULL
+                  GROUP BY c.id
+                  ORDER BY last_message_time DESC";
+        
+        $stmt = $db->prepare($query);
+        $stmt->execute([$user_id, $user_id, $user_id, $user_id, $user_id, $user_id]);
+        $conversations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($conversations as &$conv) {
+            $otherId = $conv['other_user_id'];
+            $userQuery = "SELECT name, department_id FROM users WHERE id = ?";
+            $userStmt = $db->prepare($userQuery);
+            $userStmt->execute([$otherId]);
+            $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($user) {
+                $conv['other_department_name'] = isset($departmentNames[$user['department_id']]) ? $departmentNames[$user['department_id']] : 'Department';
+                $conv['other_department_name'] .= ' - ' . $user['name'];
+                $conv['other_department_id'] = $user['department_id'];
+            } else if ($conv['other_department_id']) {
+                $conv['other_department_name'] = isset($departmentNames[$conv['other_department_id']]) ? $departmentNames[$conv['other_department_id']] : 'Department ' . $conv['other_department_id'];
+            } else {
+                $conv['other_department_name'] = 'Unknown User';
+                $conv['other_department_id'] = 0;
+            }
+            $conv['unread_count'] = intval($conv['unread_count']);
+        }
+        
+        echo json_encode(['success' => true, 'data' => $conversations, 'user_id' => $user_id]);
+    }
+    
+} catch (PDOException $e) {
+    error_log("Get conversations error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => $e->getMessage(), 'data' => []]);
 }
-
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-
-if ($user_id === 0) {
-    echo json_encode(["success" => false, "message" => "User ID required", "data" => []]);
-    exit();
-}
-
-// Get user's department
-$userDeptQuery = $pdo->prepare("SELECT department_id FROM users WHERE id = ?");
-$userDeptQuery->execute([$user_id]);
-$userDept = $userDeptQuery->fetch(PDO::FETCH_ASSOC);
-$user_department_id = $userDept ? $userDept['department_id'] : 1;
-
-// Get conversations where user is involved
-$query = "
-    SELECT 
-        c.id as conversation_id,
-        c.subject,
-        c.updated_at,
-        c.user_id,
-        c.admin_id,
-        u1.name as user_name,
-        u1.department_id as user_department_id,
-        d1.name as user_department_name,
-        u2.name as admin_name,
-        u2.department_id as admin_department_id,
-        d2.name as admin_department_name
-    FROM conversations c
-    WHERE (c.user_id = ? OR c.admin_id = ?)
-    AND c.status = 'active'
-    ORDER BY c.updated_at DESC
-";
-
-$stmt = $pdo->prepare($query);
-$stmt->execute([$user_id, $user_id]);
-$conversations = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-$result = [];
-
-foreach ($conversations as $conv) {
-    $conversation_id = $conv['conversation_id'];
-    
-    // Get last message that is NOT deleted by this user
-    $lastMsgQuery = $pdo->prepare("
-        SELECT message, created_at FROM messages 
-        WHERE conversation_id = ? 
-        AND ((sender_id = ? AND sender_deleted = 0) OR (receiver_id = ? AND receiver_deleted = 0))
-        ORDER BY created_at DESC LIMIT 1
-    ");
-    $lastMsgQuery->execute([$conversation_id, $user_id, $user_id]);
-    $lastMsg = $lastMsgQuery->fetch(PDO::FETCH_ASSOC);
-    
-    // Count unread messages for this user
-    $unreadQuery = $pdo->prepare("
-        SELECT COUNT(*) as unread_count FROM messages 
-        WHERE conversation_id = ? 
-        AND receiver_id = ? 
-        AND is_read = 0 
-        AND receiver_deleted = 0
-    ");
-    $unreadQuery->execute([$conversation_id, $user_id]);
-    $unread = $unreadQuery->fetch(PDO::FETCH_ASSOC);
-    
-    // Get other department info
-    $otherUserId = ($conv['user_id'] == $user_id) ? $conv['admin_id'] : $conv['user_id'];
-    $otherDeptQuery = $pdo->prepare("SELECT u.department_id, d.name as department_name 
-                                     FROM users u 
-                                     LEFT JOIN departments d ON u.department_id = d.id 
-                                     WHERE u.id = ?");
-    $otherDeptQuery->execute([$otherUserId]);
-    $otherDept = $otherDeptQuery->fetch(PDO::FETCH_ASSOC);
-    
-    $result[] = [
-        'conversation_id' => $conversation_id,
-        'subject' => $conv['subject'],
-        'last_message' => $lastMsg ? $lastMsg['message'] : null,
-        'last_message_time' => $lastMsg ? $lastMsg['created_at'] : $conv['updated_at'],
-        'unread_count' => $unread ? (int)$unread['unread_count'] : 0,
-        'other_department_id' => $otherDept ? (int)$otherDept['department_id'] : 1,
-        'other_department_name' => $otherDept ? $otherDept['department_name'] : 'Super Admin'
-    ];
-}
-
-echo json_encode(["success" => true, "data" => $result]);
 ?>
