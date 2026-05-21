@@ -1,123 +1,65 @@
 <?php
+// backend/api/delete_report.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
 require_once '../config/database.php';
 
 $database = new Database();
-$db = $database->getConnection();
+$conn = $database->getConnection();
 
-$data = json_decode(file_get_contents("php://input"));
-
-// Log for debugging
-error_log("Delete report received: " . print_r($data, true));
-
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'No data received']);
-    exit;
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    http_response_code(200);
+    exit();
 }
 
-// Check for different parameter names that dashboards might send
-$report_id = null;
-
-if (isset($data->report_id)) {
-    $report_id = intval($data->report_id);
-} elseif (isset($data->id)) {
-    $report_id = intval($data->id);
+if ($_SERVER['REQUEST_METHOD'] != 'POST' && $_SERVER['REQUEST_METHOD'] != 'DELETE') {
+    echo json_encode(['success' => false, 'message' => 'Only POST/DELETE method allowed']);
+    exit();
 }
+
+$input = json_decode(file_get_contents('php://input'), true);
+
+$report_id = isset($input['report_id']) ? intval($input['report_id']) : (isset($input['id']) ? intval($input['id']) : 0);
+$department_id = isset($input['department_id']) ? intval($input['department_id']) : 0;
+$user_id = isset($input['user_id']) ? intval($input['user_id']) : 0;
+$is_admin = isset($input['is_admin']) ? intval($input['is_admin']) : 0;
+
+// Soft delete parameters
+$deleted_by_department = isset($input['deleted_by_department']) ? intval($input['deleted_by_department']) : 0;
+$deleted_by_admin = isset($input['deleted_by_admin']) ? intval($input['deleted_by_admin']) : 0;
 
 if (!$report_id) {
-    echo json_encode(['success' => false, 'message' => 'Report ID required']);
-    exit;
+    echo json_encode(['success' => false, 'message' => 'Report ID is required']);
+    exit();
 }
 
-$department_id = isset($data->department_id) ? intval($data->department_id) : null;
-$user_id = isset($data->user_id) ? intval($data->user_id) : null;
-$is_admin = isset($data->is_admin) ? intval($data->is_admin) : 0;
+// Check if report exists
+$checkStmt = $conn->prepare("SELECT * FROM reports WHERE id = ?");
+$checkStmt->execute([$report_id]);
+$report = $checkStmt->fetch(PDO::FETCH_ASSOC);
 
-// If department_id not provided, try to get from user_id
-if (!$department_id && $user_id) {
-    $userQuery = "SELECT department_id FROM users WHERE id = ?";
-    $userStmt = $db->prepare($userQuery);
-    $userStmt->execute([$user_id]);
-    $user = $userStmt->fetch(PDO::FETCH_ASSOC);
-    if ($user) {
-        $department_id = $user['department_id'];
-    }
+if (!$report) {
+    echo json_encode(['success' => false, 'message' => 'Report not found']);
+    exit();
 }
 
-try {
-    $db->beginTransaction();
-    
-    // Get report details
-    $reportQuery = "SELECT * FROM reports WHERE id = ?";
-    $reportStmt = $db->prepare($reportQuery);
-    $reportStmt->execute([$report_id]);
-    $report = $reportStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$report) {
-        echo json_encode(['success' => false, 'message' => 'Report not found']);
-        exit;
-    }
-    
-    // SOFT DELETE based on who is deleting
-    if ($is_admin == 1) {
-        // Admin soft delete
-        $updateQuery = "UPDATE reports SET deleted_by_admin = 1, deleted_at = NOW() WHERE id = ?";
-        $updateStmt = $db->prepare($updateQuery);
-        $updateStmt->execute([$report_id]);
-        
-        $deleteType = 'admin';
-        
-    } else if ($department_id) {
-        // Department soft delete - check if this department owns or received the report
-        if ($report['department_id'] == $department_id || $report['sent_to_department'] == $department_id || $report['sent_from_department'] == $department_id) {
-            $updateQuery = "UPDATE reports SET deleted_by_department = 1, deleted_at = NOW() WHERE id = ?";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$report_id]);
-            $deleteType = 'department';
-        } else {
-            echo json_encode(['success' => false, 'message' => 'You are not authorized to delete this report']);
-            exit;
-        }
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Department ID or Admin flag required']);
-        exit;
-    }
-    
-    // Insert into recycle bin for tracking (optional, skip if table doesn't exist)
-    try {
-        $recycleQuery = "INSERT INTO recycle_bin 
-                        (original_table, original_id, deleted_data, deleted_by_department_id, deleted_by_user_id, deleted_by_admin, deleted_at) 
-                        VALUES (?, ?, ?, ?, ?, ?, NOW())";
-        $recycleStmt = $db->prepare($recycleQuery);
-        $recycleStmt->execute([
-            'reports',
-            $report_id,
-            json_encode($report),
-            $department_id,
-            $user_id,
-            $is_admin
-        ]);
-    } catch (PDOException $e) {
-        // Recycle bin table might not exist, just log and continue
-        error_log("Recycle bin insert failed: " . $e->getMessage());
-    }
-    
-    $db->commit();
-    
-    echo json_encode([
-        'success' => true, 
-        'message' => 'Report moved to recycle bin',
-        'soft_deleted' => true,
-        'delete_type' => $deleteType,
-        'report_id' => $report_id
-    ]);
-    
-} catch (PDOException $e) {
-    $db->rollBack();
-    error_log("Delete report error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+// SOFT DELETE - only hide from the requesting department/admin
+if ($is_admin == 1) {
+    // Admin soft delete - hide from admin view only
+    $stmt = $conn->prepare("UPDATE reports SET deleted_by_admin = 1, deleted_by_user_id = ?, deleted_at = NOW() WHERE id = ?");
+    $stmt->execute([$user_id, $report_id]);
+    echo json_encode(['success' => true, 'message' => 'Report hidden from Admin view (other departments can still see it)']);
+} 
+else if ($department_id > 0) {
+    // Department soft delete - hide from this department only
+    $stmt = $conn->prepare("UPDATE reports SET deleted_by_department = 1, deleted_by_department_id = ?, deleted_at = NOW() WHERE id = ?");
+    $stmt->execute([$department_id, $report_id]);
+    echo json_encode(['success' => true, 'message' => 'Report hidden from your department view']);
+}
+else {
+    echo json_encode(['success' => false, 'message' => 'Invalid deletion parameters']);
 }
 ?>
