@@ -293,7 +293,7 @@
 
 <div id="pwdModal" class="modal"><div class="modal-content"><h3 class="text-lg font-bold mb-3"><i class="fas fa-key text-blue-500 mr-2"></i>Change Password</h3><div class="form-group"><label>Current Password</label><input type="password" id="oldPwd"></div><div class="form-group"><label>New Password</label><input type="password" id="newPwd"></div><div class="form-group"><label>Confirm Password</label><input type="password" id="confirmPwd"></div><div class="flex gap-3"><button onclick="changePassword()" class="flex-1 btn-primary py-1.5 rounded">Change</button><button onclick="closeModal('pwdModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button></div></div></div>
 
-<div id="backupModal" class="modal"><div class="modal-content"><h3 class="text-lg font-bold mb-3"><i class="fas fa-database text-green-500 mr-2"></i>Backup & Restore</h3><button onclick="createBackup()" class="w-full btn-success mb-2 py-2 rounded-lg text-sm"><i class="fas fa-download mr-2"></i> Backup Database</button><button onclick="restoreBackup()" class="w-full bg-orange-500 text-white py-2 rounded-lg text-sm"><i class="fas fa-upload mr-2"></i> Restore Database</button><button onclick="emptyRecycleBin()" class="w-full bg-red-500 text-white py-2 rounded-lg text-sm"><i class="fas fa-trash-alt mr-2"></i> Empty Recycle Bin</button><button onclick="closeModal('backupModal')" class="w-full bg-gray-200 py-2 rounded-lg">Close</button></div></div>
+<div id="backupModal" class="modal"><div class="modal-content"><h3 class="text-lg font-bold mb-3"><i class="fas fa-database text-green-500 mr-2"></i>Backup & Restore</h3><button onclick="createSQLBackup()" class="w-full btn-success mb-2 py-2 rounded-lg text-sm"><i class="fas fa-database mr-2"></i> Backup Database (SQL)</button><button onclick="restoreSQLBackup()" class="w-full bg-orange-500 text-white py-2 rounded-lg text-sm"><i class="fas fa-upload mr-2"></i> Restore SQL Backup</button><button onclick="emptyRecycleBin()" class="w-full bg-red-500 text-white py-2 rounded-lg text-sm"><i class="fas fa-trash-alt mr-2"></i> Empty Recycle Bin</button><button onclick="closeModal('backupModal')" class="w-full bg-gray-200 py-2 rounded-lg">Close</button></div></div>
 
 <script>
 // ==================== MONEY FORMATTING FUNCTIONS ====================
@@ -616,6 +616,311 @@ function getImageAsBase64(file) {
     }); 
 }
 
+// ==================== SQL BACKUP FUNCTIONS ====================
+function escapeSQLString(str) {
+    if (!str) return '';
+    return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+}
+
+function generateSQLBackup() {
+    const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    let sql = `-- ============================================\n`;
+    sql += `-- GeoTraverse Database Backup\n`;
+    sql += `-- Generated: ${timestamp}\n`;
+    sql += `-- Version: 2.1.0\n`;
+    sql += `-- ============================================\n\n`;
+    sql += `SET FOREIGN_KEY_CHECKS = 0;\n\n`;
+    
+    // ==================== EMPLOYEES TABLE ====================
+    sql += `DROP TABLE IF EXISTS employees;\n`;
+    sql += `CREATE TABLE employees (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  name VARCHAR(255) NOT NULL,\n`;
+    sql += `  email VARCHAR(255) NOT NULL,\n`;
+    sql += `  phone VARCHAR(50) DEFAULT NULL,\n`;
+    sql += `  department_id INT(11) DEFAULT 1,\n`;
+    sql += `  role VARCHAR(100) DEFAULT 'Staff',\n`;
+    sql += `  salary DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id),\n`;
+    sql += `  UNIQUE KEY email (email)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (employeesData.length > 0) {
+        sql += `INSERT INTO employees (id, name, email, phone, department_id, role, salary, created_at) VALUES\n`;
+        let vals = [];
+        employeesData.forEach(e => {
+            vals.push(`(${e.id}, '${escapeSQLString(e.name)}', '${escapeSQLString(e.email)}', '${escapeSQLString(e.phone || '')}', ${e.department_id || 1}, '${escapeSQLString(e.role || 'Staff')}', ${parseFloat(e.salary) || 0}, NOW())`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    // ==================== PROJECTS TABLE ====================
+    sql += `DROP TABLE IF EXISTS projects;\n`;
+    sql += `CREATE TABLE projects (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  name VARCHAR(255) NOT NULL,\n`;
+    sql += `  client_name VARCHAR(255) DEFAULT NULL,\n`;
+    sql += `  amount DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  location VARCHAR(255) DEFAULT NULL,\n`;
+    sql += `  description TEXT,\n`;
+    sql += `  status ENUM('pending','in_progress','completed') DEFAULT 'pending',\n`;
+    sql += `  progress INT(11) DEFAULT 0,\n`;
+    sql += `  department_id INT(11) DEFAULT 1,\n`;
+    sql += `  image TEXT,\n`;
+    sql += `  sent_from_dept INT(11) DEFAULT NULL,\n`;
+    sql += `  is_viewed_by_admin TINYINT(1) DEFAULT 0,\n`;
+    sql += `  deleted_by_admin TINYINT(1) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (projectsData.length > 0) {
+        sql += `INSERT INTO projects (id, name, client_name, amount, location, description, status, progress, department_id, image, sent_from_dept, is_viewed_by_admin, deleted_by_admin, created_at) VALUES\n`;
+        let vals = [];
+        projectsData.forEach(p => {
+            vals.push(`(${p.id}, '${escapeSQLString(p.name)}', '${escapeSQLString(p.client_name || '')}', ${parseFloat(p.amount) || 0}, '${escapeSQLString(p.location || '')}', '${escapeSQLString(p.description || '')}', '${p.status || 'pending'}', ${p.progress || 0}, ${p.department_id || 1}, '${escapeSQLString(p.image || '')}', ${p.sent_from_dept || 'NULL'}, ${p.is_viewed_by_admin || 0}, ${p.deleted_by_admin || 0}, NOW())`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    // ==================== DAILY WORK TABLE ====================
+    sql += `DROP TABLE IF EXISTS dailywork;\n`;
+    sql += `CREATE TABLE dailywork (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  date DATE NOT NULL,\n`;
+    sql += `  project_name VARCHAR(255) NOT NULL,\n`;
+    sql += `  work_description TEXT,\n`;
+    sql += `  income DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  expenses DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  paid_amount DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  status ENUM('pending','paid','partial') DEFAULT 'pending',\n`;
+    sql += `  department_id INT(11) DEFAULT 1,\n`;
+    sql += `  is_deleted TINYINT(1) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (dailyworkData.length > 0) {
+        sql += `INSERT INTO dailywork (id, date, project_name, work_description, income, expenses, paid_amount, status, department_id, is_deleted, created_at) VALUES\n`;
+        let vals = [];
+        dailyworkData.forEach(w => {
+            vals.push(`(${w.id}, '${w.date}', '${escapeSQLString(w.project_name)}', '${escapeSQLString(w.work_description || '')}', ${parseFloat(w.income) || 0}, ${parseFloat(w.expenses) || 0}, ${parseFloat(w.paid_amount) || 0}, '${w.status || 'pending'}', ${w.department_id || 1}, ${w.is_deleted || 0}, NOW())`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    // ==================== TRANSACTIONS TABLE ====================
+    sql += `DROP TABLE IF EXISTS transactions;\n`;
+    sql += `CREATE TABLE transactions (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  type ENUM('income','expense') NOT NULL,\n`;
+    sql += `  source VARCHAR(255) NOT NULL,\n`;
+    sql += `  amount DECIMAL(15,2) NOT NULL,\n`;
+    sql += `  paid_amount DECIMAL(15,2) DEFAULT 0.00,\n`;
+    sql += `  transaction_date DATE NOT NULL,\n`;
+    sql += `  status ENUM('paid','pending','partial') DEFAULT 'pending',\n`;
+    sql += `  description TEXT,\n`;
+    sql += `  department_id INT(11) DEFAULT 1,\n`;
+    sql += `  is_deleted TINYINT(1) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (transactionsData.length > 0) {
+        sql += `INSERT INTO transactions (id, type, source, amount, paid_amount, transaction_date, status, description, department_id, is_deleted, created_at) VALUES\n`;
+        let vals = [];
+        transactionsData.forEach(t => {
+            vals.push(`(${t.id}, '${t.type}', '${escapeSQLString(t.source)}', ${parseFloat(t.amount) || 0}, ${parseFloat(t.paid_amount) || 0}, '${t.transaction_date}', '${t.status || 'pending'}', '${escapeSQLString(t.description || '')}', ${t.department_id || 1}, ${t.is_deleted || 0}, NOW())`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    // ==================== REPORTS TABLE ====================
+    sql += `DROP TABLE IF EXISTS reports;\n`;
+    sql += `CREATE TABLE reports (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  title VARCHAR(255) NOT NULL,\n`;
+    sql += `  period VARCHAR(50) DEFAULT 'monthly',\n`;
+    sql += `  content TEXT NOT NULL,\n`;
+    sql += `  status ENUM('draft','sent') DEFAULT 'draft',\n`;
+    sql += `  department_id INT(11) DEFAULT 1,\n`;
+    sql += `  sent_from_department INT(11) DEFAULT NULL,\n`;
+    sql += `  is_viewed_by_admin TINYINT(1) DEFAULT 0,\n`;
+    sql += `  deleted_by_admin TINYINT(1) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (reportsData.length > 0) {
+        sql += `INSERT INTO reports (id, title, period, content, status, department_id, sent_from_department, is_viewed_by_admin, deleted_by_admin, created_at) VALUES\n`;
+        let vals = [];
+        reportsData.forEach(r => {
+            vals.push(`(${r.id}, '${escapeSQLString(r.title)}', '${r.period || 'monthly'}', '${escapeSQLString(r.content)}', '${r.status || 'draft'}', ${r.department_id || 1}, ${r.sent_from_department || 'NULL'}, ${r.is_viewed_by_admin || 0}, ${r.deleted_by_admin || 0}, NOW())`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    // ==================== CONVERSATIONS TABLE ====================
+    sql += `DROP TABLE IF EXISTS conversations;\n`;
+    sql += `CREATE TABLE conversations (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  user_id INT(11) NOT NULL,\n`;
+    sql += `  department_id INT(11) NOT NULL,\n`;
+    sql += `  last_message TEXT,\n`;
+    sql += `  last_message_time TIMESTAMP NULL,\n`;
+    sql += `  unread_count INT(11) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    // ==================== MESSAGES TABLE ====================
+    sql += `DROP TABLE IF EXISTS messages;\n`;
+    sql += `CREATE TABLE messages (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  conversation_id INT(11) NOT NULL,\n`;
+    sql += `  sender_type ENUM('user','department') NOT NULL,\n`;
+    sql += `  sender_id INT(11) NOT NULL,\n`;
+    sql += `  message TEXT NOT NULL,\n`;
+    sql += `  is_read TINYINT(1) DEFAULT 0,\n`;
+    sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    // ==================== RECYCLE BIN TABLE ====================
+    sql += `DROP TABLE IF EXISTS recycle_bin;\n`;
+    sql += `CREATE TABLE recycle_bin (\n`;
+    sql += `  id INT(11) NOT NULL AUTO_INCREMENT,\n`;
+    sql += `  item_id INT(11) NOT NULL,\n`;
+    sql += `  item_type VARCHAR(50) NOT NULL,\n`;
+    sql += `  item_name VARCHAR(255) NOT NULL,\n`;
+    sql += `  deleted_by VARCHAR(100) DEFAULT NULL,\n`;
+    sql += `  deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+    sql += `  PRIMARY KEY (id)\n`;
+    sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n`;
+    
+    if (recycleBinData.length > 0) {
+        sql += `INSERT INTO recycle_bin (id, item_id, item_type, item_name, deleted_by, deleted_at) VALUES\n`;
+        let vals = [];
+        recycleBinData.forEach(rb => {
+            vals.push(`(${rb.id}, ${rb.item_id}, '${rb.item_type}', '${escapeSQLString(rb.item_name)}', '${escapeSQLString(rb.deleted_by || 'System')}', '${rb.deleted_at || timestamp}')`);
+        });
+        sql += vals.join(',\n');
+        sql += `;\n\n`;
+    }
+    
+    sql += `SET FOREIGN_KEY_CHECKS = 1;\n`;
+    sql += `-- ============================================\n`;
+    sql += `-- End of backup\n`;
+    sql += `-- ============================================\n`;
+    
+    return sql;
+}
+
+async function createSQLBackup() {
+    showToast('Generating SQL backup from database...', false);
+    try {
+        // First fetch all data from API to ensure we have latest
+        await Promise.all([
+            apiCall('get_employees.php'),
+            apiCall('get_projects.php?department_id=1'),
+            apiCall('get_dailywork.php'),
+            apiCall('get_transactions.php'),
+            apiCall('get_reports.php?department_id=1'),
+            apiCall('get_conversations.php?user_id=1')
+        ]);
+        
+        const sql = generateSQLBackup();
+        const blob = new Blob([sql], { type: 'application/sql' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `geotraverse_backup_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('✅ SQL Backup saved successfully!', false);
+    } catch (error) {
+        showToast('❌ Backup failed: ' + error.message, true);
+    }
+    closeModal('backupModal');
+}
+
+function restoreSQLBackup() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.sql';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const sqlContent = evt.target.result;
+                showToast('Restoring SQL backup...', false);
+                const res = await apiCall('restore_sql_backup.php', 'POST', { sql: sqlContent });
+                if (res && res.success) {
+                    showToast('✅ Database restored! Reloading...', false);
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showManualImportInstructions(sqlContent);
+                }
+            } catch (err) {
+                showToast('❌ Restore failed: ' + err.message, true);
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+    closeModal('backupModal');
+}
+
+function showManualImportInstructions(sqlContent) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-[2000] p-4';
+    modal.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-5">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-lg font-bold text-green-600"><i class="fas fa-info-circle mr-2"></i>Manual Import Required</h3>
+                <button onclick="this.closest('.fixed').remove()" class="text-gray-500 text-2xl">&times;</button>
+            </div>
+            <div class="space-y-3 text-sm">
+                <div class="bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-500">
+                    <p class="font-semibold">📌 To import this backup into phpMyAdmin/XAMPP:</p>
+                    <ol class="list-decimal ml-5 mt-2 space-y-1">
+                        <li>Open <strong>phpMyAdmin</strong> (http://localhost/phpmyadmin)</li>
+                        <li>Select your database</li>
+                        <li>Click on <strong>Import</strong> tab</li>
+                        <li>Click <strong>Choose File</strong> and select the SQL file</li>
+                        <li>Click <strong>Go</strong> to execute</li>
+                    </ol>
+                </div>
+                <button onclick="downloadSQLFile('${escapeHtml(sqlContent)}')" class="w-full btn-success py-2 rounded-lg">
+                    <i class="fas fa-download mr-2"></i> Download SQL File
+                </button>
+                <button onclick="this.closest('.fixed').remove()" class="w-full bg-gray-300 py-2 rounded-lg">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    window.downloadSQLFile = (content) => {
+        const blob = new Blob([content], { type: 'application/sql' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `geotraverse_restore_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('SQL file downloaded! Import via phpMyAdmin', false);
+        modal.remove();
+    };
+}
+
 // ==================== DASHBOARD ====================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><i class="fas fa-spinner fa-spin text-blue-600 text-2xl"></i><span class="ml-3">Loading dashboard...</span></div>';
@@ -697,7 +1002,7 @@ function exportEmployeesToPDF() {
     }
     const printWindow = window.open('', '_blank');
     if (!printWindow) { showToast("Please allow popups", true); return; }
-    printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Employees Report</title><style>body{font-family:'Inter',Arial,sans-serif;padding:20px;max-width:1200px;margin:0 auto;}.container{border:2px solid #0f74ba;border-radius:10px;padding:20px;}h1{color:#0f74ba;text-align:center;font-size:20px;}.header-info{text-align:center;margin-bottom:15px;border:1px solid #ddd;padding:8px;background:#f9fafb;font-size:11px;}.employee-table{width:100%;border-collapse:collapse;font-size:10px;}.employee-table th,.employee-table td{border:1px solid #ddd;padding:6px;text-align:left;}.employee-table th{background:#0f74ba;color:white;}.footer{text-align:center;font-size:9px;color:#666;margin-top:15px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:15px;}.print-btn button{background:#0f74ba;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><div class="container"><h1>Employees Report</h1><div class="header-info"><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span><span><strong>Total Employees:</strong> ${employeesData.length}</span><span><strong>Department:</strong> Super Admin</span></div><table class="employee-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Department</th><th>Role</th><th class="text-right">Salary</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">GeoTraverse ERP System - Super Admin Dashboard</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF</button></div></div></body></html>`);
+    printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Employees Report</title><style>body{font-family:'Inter',Arial,sans-serif;padding:20px;max-width:1200px;margin:0 auto;}.container{border:2px solid #0f74ba;border-radius:10px;padding:20px;}h1{color:#0f74ba;text-align:center;font-size:20px;}.header-info{text-align:center;margin-bottom:15px;border:1px solid #ddd;padding:8px;background:#f9fafb;font-size:11px;}.employee-table{width:100%;border-collapse:collapse;font-size:10px;}.employee-table th,.employee-table td{border:1px solid #ddd;padding:6px;text-align:left;}.employee-table th{background:#0f74ba;color:white;}.footer{text-align:center;font-size:9px;color:#666;margin-top:15px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:15px;}.print-btn button{background:#0f74ba;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><div class="container"><h1>Employees Report</h1><div class="header-info"><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span><span><strong>Total Employees:</strong> ${employeesData.length}</span><span><strong>Department:</strong> Super Admin</span></div><table class="employee-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Department</th><th>Role</th><th class="text-right">Salary</th></tr></thead><tbody>${rows}</tbody></tr><div class="footer">GeoTraverse ERP System - Super Admin Dashboard</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF</button></div></div></body></html>`);
     printWindow.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
@@ -768,7 +1073,7 @@ function exportSingleProjectPDF(projectId) {
     let imageHtml = imageUrl ? `<div style="text-align:center; margin:15px 0;"><img src="${imageUrl}?t=${Date.now()}" style="max-width:200px; max-height:150px; border:2px solid #0f74ba; border-radius:8px;"></div>` : '<div style="text-align:center; margin:15px 0; padding:20px; background:#f9fafb; border-radius:8px;"><i class="fas fa-image" style="font-size:36px;"></i><p>No Image Available</p></div>';
     const printWindow = window.open('', '_blank');
     if (!printWindow) { showToast("Please allow popups", true); return; }
-    printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(p.name)} - Project</title><style>body{font-family:'Inter',Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;}.container{border:2px solid #0f74ba;border-radius:10px;padding:20px;}h1{color:#0f74ba;text-align:center;font-size:20px;border-bottom:2px solid #0f74ba;padding-bottom:10px;}.details-table{width:100%;border-collapse:collapse;margin:15px 0;}.details-table th,.details-table td{border:1px solid #0f74ba;padding:8px;text-align:left;font-size:12px;}.details-table th{background:#0f74ba;color:white;width:35%;}.footer{text-align:center;font-size:9px;color:#666;margin-top:15px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:15px;}.print-btn button{background:#0f74ba;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><div class="container"><h1>${escapeHtml(p.name)}</h1>${imageHtml}<table class="details-table"><tr><th>Project Name</th><td>${escapeHtml(p.name)}</td></tr><tr><th>Client Name</th><td>${escapeHtml(p.client_name || 'N/A')}</td></tr><tr><th>Amount</th><td style="font-weight:bold; color:#059669;">${formatMoney(p.amount)}</td></tr><tr><th>Status</th><td>${p.status}</td></tr><tr><th>Progress</th><td>${p.progress || 0}% Complete</td></tr><tr><th>Location</th><td>${escapeHtml(p.location || 'N/A')}</td></tr><tr><th>Description</th><td>${escapeHtml(p.description || 'No description')}</td></tr></table><div class="footer">GeoTraverse ERP System - Super Admin</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF</button></div></div></body></html>`);
+    printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(p.name)} - Project</title><style>body{font-family:'Inter',Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;}.container{border:2px solid #0f74ba;border-radius:10px;padding:20px;}h1{color:#0f74ba;text-align:center;font-size:20px;border-bottom:2px solid #0f74ba;padding-bottom:10px;}.details-table{width:100%;border-collapse:collapse;margin:15px 0;}.details-table th,.details-table td{border:1px solid #0f74ba;padding:8px;text-align:left;font-size:12px;}.details-table th{background:#0f74ba;color:white;width:35%;}.footer{text-align:center;font-size:9px;color:#666;margin-top:15px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:15px;}.print-btn button{background:#0f74ba;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><div class="container"><h1>${escapeHtml(p.name)}</h1>${imageHtml}<table class="details-table"><tr><th>Project Name</th><td>${escapeHtml(p.name)}</td</tr><tr><th>Client Name</th><td>${escapeHtml(p.client_name || 'N/A')}</td</tr><tr><th>Amount</th><td style="font-weight:bold; color:#059669;">${formatMoney(p.amount)}</td</tr><tr><th>Status</th><td>${p.status}</td</tr><tr><th>Progress</th><td>${p.progress || 0}% Complete</td</tr><tr><th>Location</th><td>${escapeHtml(p.location || 'N/A')}</td</tr><tr><th>Description</th><td>${escapeHtml(p.description || 'No description')}</td</tr></table><div class="footer">GeoTraverse ERP System - Super Admin</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF</button></div></div></body></html>`);
     printWindow.document.close();
 }
 
@@ -1009,7 +1314,7 @@ async function loadCashflow(highlightId = null) {
     for (let t of transactionsData) { 
         let statusClass = t.status === 'paid' ? 'status-paid' : (t.status === 'partial' ? 'status-partial' : 'status-pending');
         const isHighlighted = highlightId && t.id === highlightId;
-        html += `<tr id="trans-row-${t.id}" class="${isHighlighted ? 'search-highlight' : ''}"><td class="p-2">${t.transaction_date}</td><td class="p-2"><span class="status-badge ${t.type==='income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} text-[9px] py-0.5">${t.type}</span></td><td class="p-2">${departmentNames[t.department_id] || t.department_id}</td><td class="p-2 font-medium">${escapeHtml(t.source)}<\/td><td class="text-right ${t.type==='income' ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(t.amount)}<\/td><td class="p-2"><span class="status-badge ${statusClass} text-[9px] py-0.5">${t.status}</span><\/td><td class="text-center"><div class="flex gap-1 justify-center"><button onclick="viewTransaction(${t.id})" class="action-btn view"><i class="fas fa-eye"></i><\/button><button onclick="editTransaction(${t.id})" class="action-btn edit"><i class="fas fa-edit"></i><\/button><button onclick="deleteTransaction(${t.id})" class="action-btn delete"><i class="fas fa-trash"></i><\/button><\/div><\/td><\/tr>`;
+        html += `<tr id="trans-row-${t.id}" class="${isHighlighted ? 'search-highlight' : ''}"><td class="p-2">${t.transaction_date}</td><td class="p-2"><span class="status-badge ${t.type==='income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} text-[9px] py-0.5">${t.type}</span></td><td class="p-2">${departmentNames[t.department_id] || t.department_id}</td><td class="p-2 font-medium">${escapeHtml(t.source)}</td><td class="text-right ${t.type==='income' ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(t.amount)}</td><td class="p-2"><span class="status-badge ${statusClass} text-[9px] py-0.5">${t.status}</span></td><td class="text-center"><div class="flex gap-1 justify-center"><button onclick="viewTransaction(${t.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editTransaction(${t.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteTransaction(${t.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td></tr>`;
     }
     html += `</tbody></div>`;
     document.getElementById('cashflowPage').innerHTML = html;
@@ -1049,8 +1354,6 @@ async function loadMessages(highlightId = null) {
         const isUnread = conv.unread_count > 0; 
         const preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages'; 
         let otherDeptId = conv.other_department_id || 1; 
-        const icon = departmentIcons[otherDeptId] || 'fa-building'; 
-        const color = departmentColors[otherDeptId] || '#0f74ba';
         const isHighlighted = highlightId && conv.conversation_id === highlightId;
         msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
             <div class="card-header"><h4>${escapeHtml(conv.other_department_name || 'Department')}</h4><p>${isUnread ? `${conv.unread_count} new` : 'Conversation'}</p></div>
@@ -1211,60 +1514,6 @@ function loadSettings() {
 function changeSidebarColor(color, el) { document.querySelectorAll('.color-option').forEach(opt => opt.classList.remove('selected')); el.classList.add('selected'); document.getElementById('mainSidebar').style.background = color; localStorage.setItem('sidebar_color', color); showToast('Sidebar color changed'); }
 async function changePassword() { let oldPwd = document.getElementById('oldPwd').value, newPwd = document.getElementById('newPwd').value, confirmPwd = document.getElementById('confirmPwd').value; if (!newPwd) { showToast('Enter new password', true); return; } if (newPwd.length < 4) { showToast('Password must be at least 4 characters', true); return; } if (newPwd !== confirmPwd) { showToast('Passwords do not match', true); return; } let res = await apiCall('change_password.php', 'POST', { current_password: oldPwd, new_password: newPwd }); if (res.success) { showToast('Password changed'); closeModal('pwdModal'); } else showToast(res.message || 'Failed', true); }
 
-// FULL DATABASE BACKUP
-async function createBackup() { 
-    showToast('Starting database backup...', false);
-    const backup = {
-        metadata: { version: "2.1.0", generated: new Date().toISOString(), generated_by: "Super Admin", timezone: "Africa/Dar_es_Salaam" },
-        data: { employees: employeesData, projects: projectsData, dailywork: dailyworkData, transactions: transactionsData, reports: reportsData, messages: messagesData, timestamp: new Date().toISOString() }
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `geotraverse_full_backup_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('Full database backup created successfully!');
-    closeModal('backupModal');
-}
-
-function restoreBackup() { 
-    let inp = document.createElement("input"); 
-    inp.type = "file"; 
-    inp.accept = "application/json"; 
-    inp.onchange = async (e) => { 
-        let file = e.target.files[0]; 
-        if(!file) return; 
-        let reader = new FileReader(); 
-        reader.onload = async (evt) => { 
-            try { 
-                let data = JSON.parse(evt.target.result); 
-                if(data.data) {
-                    if(data.data.employees) employeesData = data.data.employees;
-                    if(data.data.projects) projectsData = data.data.projects;
-                    if(data.data.dailywork) dailyworkData = data.data.dailywork;
-                    if(data.data.transactions) transactionsData = data.data.transactions;
-                    if(data.data.reports) reportsData = data.data.reports;
-                } else {
-                    if(data.employees) employeesData = data.employees; 
-                    if(data.projects) projectsData = data.projects; 
-                    if(data.dailywork) dailyworkData = data.dailywork; 
-                    if(data.transactions) transactionsData = data.transactions; 
-                    if(data.reports) reportsData = data.reports; 
-                }
-                showToast("Backup restored! Reloading..."); 
-                setTimeout(() => location.reload(), 1500); 
-            } catch(err) { 
-                showToast("Invalid backup file", true); 
-            } 
-        }; 
-        reader.readAsText(file); 
-    }; 
-    inp.click(); 
-    closeModal('backupModal'); 
-}
-
 // ==================== RECYCLE BIN ====================
 async function loadRecycleBinFromDB() {
     const res = await apiCall('get_recycle_bin.php');
@@ -1361,7 +1610,7 @@ window.deleteConversation = deleteConversation; window.deleteMessage = deleteMes
 window.viewReportDetails = viewReportDetails; window.exportSingleReportExcel = exportSingleReportExcel; window.exportSingleReportPDF = exportSingleReportPDF;
 window.exportAllReportsToExcel = exportAllReportsToExcel; window.exportAllReportsToPDF = exportAllReportsToPDF;
 window.editReport = editReport; window.saveReport = saveReport; window.markReportAsViewed = markReportAsViewed; window.sendReportToDept = sendReportToDept;
-window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor; window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.emptyRecycleBin = emptyRecycleBin;
+window.changePassword = changePassword; window.changeSidebarColor = changeSidebarColor; window.createSQLBackup = createSQLBackup; window.restoreSQLBackup = restoreSQLBackup; window.emptyRecycleBin = emptyRecycleBin;
 window.logout = logout; window.closeMobileSidebar = closeMobileSidebar; window.openDepartmentDashboard = openDepartmentDashboard;
 window.showFullImage = showFullImage; window.closeFullImageModal = closeFullImageModal; window.restoreFromRecycleBin = restoreFromRecycleBin; window.permanentlyDeleteItem = permanentlyDeleteItem;
 

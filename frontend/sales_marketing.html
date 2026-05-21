@@ -87,9 +87,34 @@
             background: #ea580c;
             padding: 12px 14px;
             color: white;
+            position: relative;
         }
         .card-header h4 { font-weight: bold; margin: 0; font-size: 14px; }
         .card-header p { font-size: 9px; opacity: 0.8; margin: 2px 0 0; }
+        
+        /* Delete button inside header - top right corner */
+        .delete-btn-header {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            z-index: 15;
+            font-size: 11px;
+            border: none;
+        }
+        .delete-btn-header:hover {
+            background: #dc2626;
+            transform: scale(1.05);
+        }
         
         .message-unread { background: #fff7ed; border-left: 4px solid #ea580c; }
         .report-unviewed { background: #fff7ed; border-left: 4px solid #ea580c; }
@@ -99,7 +124,7 @@
         @media (max-width: 1024px) { .messages-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 640px) { .messages-grid { grid-template-columns: 1fr; } }
         
-        .new-badge { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 20px; padding: 2px 8px; font-size: 8px; font-weight: bold; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .new-badge { position: absolute; top: 10px; right: 40px; background: #ef4444; color: white; border-radius: 20px; padding: 2px 8px; font-size: 8px; font-weight: bold; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         .new-text { background: #ef4444; color: white; font-size: 9px; padding: 2px 8px; border-radius: 20px; font-weight: bold; margin-left: 8px; }
         
         .chat-bubble { max-width: 80%; padding: 10px 14px; border-radius: 12px; margin-bottom: 8px; }
@@ -168,6 +193,10 @@
         
         .recycle-bin-item { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin-bottom: 10px; border-radius: 10px; }
         .money-amount { font-family: monospace; font-weight: 600; }
+        
+        .color-option { width: 42px; height: 42px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: all 0.2s; display: inline-block; margin: 5px; }
+        .color-option:hover { transform: scale(1.1); }
+        .color-option.selected { border-color: white; box-shadow: 0 0 0 2px #333; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -346,6 +375,16 @@ function toggleSendDropdown(dropdownId) {
     if(dropdown) dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block'; 
 }
 
+// Close modal when clicking outside
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('modal')) {
+        closeModal(e.target.id);
+    }
+    if (!e.target.closest('.send-dropdown')) {
+        document.querySelectorAll('.send-dropdown-content').forEach(d => d.style.display = 'none');
+    }
+});
+
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 3;
@@ -356,6 +395,16 @@ const allDepartmentsForSend = [
     { id: 5, name: "Secretary" }, { id: 6, name: "Bricks & Timber" }, { id: 7, name: "Aluminium" }, 
     { id: 8, name: "Town Planning" }, { id: 9, name: "Architectural" }, { id: 10, name: "Survey" }, 
     { id: 11, name: "Construction" }, { id: 12, name: "Hatimiliki" }
+];
+
+// Sidebar Colors - 6 Colors
+const sidebarColorOptions = [
+    { name: 'Orange', value: '#ea580c' },
+    { name: 'Blue', value: '#2563eb' },
+    { name: 'Purple', value: '#7c3aed' },
+    { name: 'Green', value: '#065f46' },
+    { name: 'Red', value: '#dc2626' },
+    { name: 'Teal', value: '#0d9488' }
 ];
 
 let campaigns = [];
@@ -430,7 +479,7 @@ async function restoreFromRecycleBin(recycleId, itemType) {
         else if (itemType === 'transaction') await loadBudget();
         else if (itemType === 'report') await loadReports();
         else if (itemType === 'conversation') await loadMessages();
-        else if (itemType === 'message') { await loadMessages(); if (currentChatWith) await openChatWith(currentChatWith); }
+        else if (itemType === 'message') { await loadMessages(); if (currentChatWith) await openChat(currentChatWith); }
         loadSettings();
     } else showToast(res.message || 'Failed to restore', true);
 }
@@ -527,13 +576,12 @@ function renderCampaignsGrid() {
         let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled';
         let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : c.campaign_type === 'social_media' ? 'Social Media' : c.campaign_type === 'tv_radio' ? 'TV/Radio' : c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar';
         gridHtml += `<div class="campaign-card" id="campaign-card-${c.id}">
-            <div class="delete-campaign-btn" onclick="event.stopPropagation(); deleteCampaign(${c.id})"><i class="fas fa-trash-alt"></i></div>
-            <div class="card-header"><h4>${escapeHtml(c.campaign_name)}</h4><p>${typeText}</p></div>
+            <div class="card-header"><h4>${escapeHtml(c.campaign_name)}</h4><p>${typeText}</p><button class="delete-btn-header" onclick="event.stopPropagation(); deleteCampaign(${c.id})"><i class="fas fa-trash-alt"></i></button></div>
             <div class="p-4" onclick="viewCampaign(${c.id})">
                 <div class="flex justify-between items-start mb-2"><span class="px-2 py-0.5 rounded-full text-[9px] ${statusClass}">${c.status}</span></div>
                 <div class="grid grid-cols-2 gap-2 mt-2"><div><p class="text-[9px] text-gray-400">Budget</p><p class="text-xs font-semibold text-green-600">${formatMoney(c.budget)}</p></div><div><p class="text-[9px] text-gray-400">Spent</p><p class="text-xs font-semibold text-orange-600">${formatMoney(c.spent)}</p></div></div>
                 <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Usage</span><span>${spentPercent}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="${spentPercent < 50 ? 'bg-green-500' : (spentPercent < 80 ? 'bg-yellow-500' : 'bg-red-500')} h-1 rounded-full" style="width: ${Math.min(spentPercent, 100)}%"></div></div></div>
-                <div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewCampaign(${c.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editCampaign(${c.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="event.stopPropagation(); deleteCampaign(${c.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
+                <div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewCampaign(${c.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editCampaign(${c.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button></div>
             </div>
         </div>`;
     }
@@ -552,17 +600,27 @@ function setupInfiniteScroll() {
 
 async function deleteCampaign(id) { if(confirm("Delete this campaign? It will be moved to Recycle Bin.")) { const c = campaigns.find(c => c.id === id); if(c) await addToRecycleBin(id, 'campaign', c.campaign_name); let res = await deleteCampaignAPI(id); if(res.success) { showToast("Campaign deleted and moved to Recycle Bin"); await loadCampaignsInfinite(true); await loadDashboard(); } else showToast(res.message || "Failed", true); } }
 
-// ==================== CAMPAIGN PDF EXPORTS (NEW WINDOW) ====================
+// ==================== CAMPAIGN EXPORTS ====================
+function exportCampaignExcel(campaignId) {
+    const c = campaigns.find(c => c.id === campaignId);
+    if (!c) return;
+    let ws = [["Campaign Name","Type","Budget","Spent","Remaining","Status","Start Date","End Date","Target Audience","Description"]];
+    ws.push([c.campaign_name, c.campaign_type, c.budget, c.spent, c.budget - c.spent, c.status, c.start_date, c.end_date, c.target_audience, c.description]);
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), "Campaign");
+    XLSX.writeFile(wb, `campaign_${c.id}.xlsx`);
+    showToast("Exported to Excel");
+}
+
 function exportCampaignPDFNewWindow(campaignId) {
     const c = campaigns.find(c => c.id === campaignId);
     if (!c) return;
     const win = window.open('', '_blank');
     if (!win) { showToast('Please allow popups', true); return; }
     let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
-    let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled';
     win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(c.campaign_name)} - Campaign Report</title><style>
-        *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:40px;}.container{max-width:900px;margin:0 auto;background:white;border-radius:16px;padding:30px;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #ea580c;}h1{color:#ea580c;border-bottom:3px solid #ea580c;padding-bottom:15px;margin-bottom:25px;}.summary{background:#f9fafb;padding:20px;border-radius:12px;margin-bottom:25px;display:grid;grid-template-columns:repeat(2,1fr);gap:15px;}.summary-item{text-align:center;}.summary-label{font-size:12px;color:#6b7280;}.summary-value{font-size:20px;font-weight:bold;color:#ea580c;}.info-table{width:100%;border-collapse:collapse;margin:20px 0;}.info-table th,.info-table td{padding:12px;border:1px solid #e5e7eb;text-align:left;vertical-align:top;}.info-table th{background:#fef3c7;width:35%;}.progress-bar{background:#e5e7eb;border-radius:10px;height:10px;width:100%;margin-top:8px;}.progress-fill{background:#ea580c;border-radius:10px;height:10px;width:${spentPercent}%;}.footer{text-align:center;margin-top:30px;padding-top:15px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;}.print-btn{background:#ea580c;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;margin-top:20px;font-weight:bold;}@media print{.print-btn{display:none;}body{padding:0;background:white;}.container{box-shadow:none;padding:20px;}}</style></head><body>
-        <div class="container"><h1>${escapeHtml(c.campaign_name)}</h1><div class="summary"><div class="summary-item"><div class="summary-label">Campaign Type</div><div class="summary-value">${c.campaign_type}</div></div><div class="summary-item"><div class="summary-label">Status</div><div class="summary-value">${c.status}</div></div><div class="summary-item"><div class="summary-label">Start Date</div><div class="summary-value">${c.start_date || 'N/A'}</div></div><div class="summary-item"><div class="summary-label">End Date</div><div class="summary-value">${c.end_date || 'N/A'}</div></div></div>
+        *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:30px;}.container{max-width:900px;margin:0 auto;background:white;border-radius:16px;padding:25px;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #ea580c;}h1{color:#ea580c;border-bottom:3px solid #ea580c;padding-bottom:12px;margin-bottom:20px;}.summary{background:#f9fafb;padding:15px;border-radius:12px;margin-bottom:20px;display:grid;grid-template-columns:repeat(2,1fr);gap:15px;}.info-table{width:100%;border-collapse:collapse;margin:20px 0;}.info-table th,.info-table td{padding:10px;border:1px solid #e5e7eb;text-align:left;}.info-table th{background:#fef3c7;width:35%;}.progress-bar{background:#e5e7eb;border-radius:10px;height:10px;width:100%;margin-top:8px;}.progress-fill{background:#ea580c;border-radius:10px;height:10px;width:${spentPercent}%;}.footer{text-align:center;margin-top:25px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;}.print-btn{background:#ea580c;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;margin-top:15px;font-weight:bold;}@media print{.print-btn{display:none;}body{padding:0;background:white;}}</style></head><body>
+        <div class="container"><h1>${escapeHtml(c.campaign_name)}</h1><div class="summary"><div><strong>Type:</strong> ${c.campaign_type}</div><div><strong>Status:</strong> ${c.status}</div><div><strong>Start Date:</strong> ${c.start_date || 'N/A'}</div><div><strong>End Date:</strong> ${c.end_date || 'N/A'}</div></div>
         <table class="info-table"><tr><th>Budget</th><td>${formatMoney(c.budget)}</td></tr><tr><th>Amount Spent</th><td>${formatMoney(c.spent)}</td></tr><tr><th>Remaining Budget</th><td>${formatMoney(c.budget - c.spent)}</td></tr><tr><th>Budget Usage</th><td><div class="progress-bar"><div class="progress-fill"></div></div>${spentPercent}%</td></tr><tr><th>Target Audience</th><td>${escapeHtml(c.target_audience || 'N/A')}</td></tr><tr><th>Description</th><td>${escapeHtml(c.description || 'No description')}</td></tr><tr><th>Created Date</th><td>${formatDateTime(c.created_at)}</td></tr></table>
         <div class="footer">GeoTraverse ERP System - Sales Department | Generated on ${new Date().toLocaleString()}</div>
         <div style="text-align:center;"><button class="print-btn" onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></div>
@@ -575,10 +633,10 @@ function exportAllCampaignsPDFNewWindow() {
     if (!win) { showToast('Please allow popups', true); return; }
     let campaignsHtml = campaigns.map(c => {
         let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
-        return `<div style="margin-bottom:30px; border-bottom:2px solid #ea580c; padding-bottom:20px;"><h3 style="color:#ea580c;">${escapeHtml(c.campaign_name)}</h3><p><strong>Type:</strong> ${c.campaign_type} | <strong>Status:</strong> ${c.status}</p><p><strong>Budget:</strong> ${formatMoney(c.budget)} | <strong>Spent:</strong> ${formatMoney(c.spent)} | <strong>Remaining:</strong> ${formatMoney(c.budget - c.spent)}</p><div class="progress-bar" style="background:#e5e7eb;border-radius:10px;height:8px;width:100%;margin:8px 0;"><div style="background:#ea580c;border-radius:10px;height:8px;width:${spentPercent}%;"></div></div><p><strong>Target Audience:</strong> ${escapeHtml(c.target_audience || 'N/A')}</p><p><strong>Description:</strong> ${escapeHtml(c.description || 'No description')}</p><p><strong>Created:</strong> ${formatDateTime(c.created_at)}</p></div>`;
+        return `<div style="margin-bottom:25px; border-bottom:2px solid #ea580c; padding-bottom:15px;"><h3 style="color:#ea580c;">${escapeHtml(c.campaign_name)}</h3><p><strong>Type:</strong> ${c.campaign_type} | <strong>Status:</strong> ${c.status}</p><p><strong>Budget:</strong> ${formatMoney(c.budget)} | <strong>Spent:</strong> ${formatMoney(c.spent)} | <strong>Remaining:</strong> ${formatMoney(c.budget - c.spent)}</p><div style="background:#e5e7eb;border-radius:10px;height:8px;width:100%;margin:8px 0;"><div style="background:#ea580c;border-radius:10px;height:8px;width:${spentPercent}%;"></div></div><p><strong>Target Audience:</strong> ${escapeHtml(c.target_audience || 'N/A')}</p><p><strong>Description:</strong> ${escapeHtml(c.description || 'No description')}</p><p><strong>Created:</strong> ${formatDateTime(c.created_at)}</p></div>`;
     }).join('');
     win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>All Marketing Campaigns Report</title><style>
-        *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:40px;}.container{max-width:1000px;margin:0 auto;background:white;border-radius:16px;padding:30px;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #ea580c;}h1{color:#ea580c;border-bottom:3px solid #ea580c;padding-bottom:15px;margin-bottom:25px;text-align:center;}.footer{text-align:center;margin-top:30px;padding-top:15px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;}.print-btn{background:#ea580c;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;margin-top:20px;font-weight:bold;}@media print{.print-btn{display:none;}body{padding:0;background:white;}.container{box-shadow:none;}}</style></head><body>
+        *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:30px;}.container{max-width:1000px;margin:0 auto;background:white;border-radius:16px;padding:25px;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #ea580c;}h1{color:#ea580c;border-bottom:3px solid #ea580c;padding-bottom:12px;margin-bottom:20px;text-align:center;}.footer{text-align:center;margin-top:25px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;}.print-btn{background:#ea580c;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;margin-top:15px;font-weight:bold;}@media print{.print-btn{display:none;}body{padding:0;background:white;}}</style></head><body>
         <div class="container"><h1>All Marketing Campaigns Report</h1><p style="text-align:center;margin-bottom:20px;">Generated: ${new Date().toLocaleString()}</p>${campaignsHtml}<div class="footer">GeoTraverse ERP System - Sales Department</div>
         <div style="text-align:center;"><button class="print-btn" onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></div>
     </body></html>`);
@@ -596,10 +654,11 @@ async function addBudgetAPI(data) { data.department_id = DEPARTMENT_ID; return a
 async function updateBudgetAPI(id, data) { return await apiCall('update_transaction.php', 'POST', { ...data, id }); }
 async function deleteBudgetAPI(id) { return await apiCall('delete_transaction.php', 'POST', { id, is_deleted: 1 }); }
 
-// ==================== BUDGET PDF EXPORTS (NEW WINDOW) ====================
+// ==================== BUDGET PDF EXPORTS (FIXED - CORRECT COLUMN ALIGNMENT) ====================
 function exportBudgetToPDFNewWindow() {
     const win = window.open('', '_blank');
     if (!win) { showToast('Please allow popups', true); return; }
+    
     let totalIncome = 0, totalExpenses = 0, totalPending = 0;
     budgets.forEach(t => {
         let amount = parseFloat(t.amount) || 0, paid = parseFloat(t.paid_amount) || 0;
@@ -612,19 +671,177 @@ function exportBudgetToPDFNewWindow() {
             else if (t.status === 'partial') totalExpenses += paid;
         }
     });
+    
     let rows = budgets.map(t => {
-        let amount = parseFloat(t.amount) || 0, paid = parseFloat(t.paid_amount) || 0, pending = (t.type === 'income' && t.status !== 'paid') ? (amount - paid) : 0;
-        return `<tr><td>${t.transaction_date}</td><td>${t.type}</td><td>${escapeHtml(t.source)}</td><td class="text-right">${formatMoney(amount)}</td><td class="text-right">${paid > 0 ? formatMoney(paid) : '-'}</td><td class="text-right">${pending > 0 ? formatMoney(pending) : '-'}</td><td>${t.status}</td><td>${escapeHtml((t.description || '').substring(0,40))}${(t.description || '').length > 40 ? '...' : ''}</td></tr>`;
+        let amount = parseFloat(t.amount) || 0;
+        let paid = parseFloat(t.paid_amount) || 0;
+        let pending = (t.type === 'income' && t.status !== 'paid') ? (amount - paid) : 0;
+        let statusText = t.status === 'paid' ? 'Paid' : (t.status === 'partial' ? 'Partial' : 'Pending');
+        let statusClass = t.status === 'paid' ? 'status-paid' : (t.status === 'partial' ? 'status-partial' : 'status-pending');
+        
+        return `<tr style="border-bottom: 1px solid #e5e7eb; ${t.type === 'income' ? 'background-color: #f0fdf4;' : 'background-color: #fef2f2;'}">
+            <td style="padding: 10px 8px; border: 1px solid #ddd; white-space: nowrap;">${t.transaction_date || '-'}</td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd;">
+                <span style="background: ${t.type === 'income' ? '#d1fae5' : '#fee2e2'}; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500;">${t.type}</span>
+            </td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd; font-weight: 500;">${escapeHtml(t.source)}</td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; font-weight: 600; ${t.type === 'income' ? 'color: #059669;' : 'color: #dc2626;'}">${formatMoney(amount)}</td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; color: #2563eb; font-weight: 500;">${paid > 0 ? formatMoney(paid) : '-'}</td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; ${pending > 0 ? 'color: #d97706; font-weight: 600;' : 'color: #9ca3af;'}">${pending > 0 ? formatMoney(pending) : '-'}</td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd;">
+                <span style="background: ${statusClass === 'status-paid' ? '#d1fae5' : (statusClass === 'status-partial' ? '#fef3c7' : '#fee2e2')}; padding: 4px 10px; border-radius: 20px; font-size: 11px;">${statusText}</span>
+            </td>
+            <td style="padding: 10px 8px; border: 1px solid #ddd; max-width: 200px; word-wrap: break-word;" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || '').substring(0, 50))}${(t.description || '').length > 50 ? '...' : ''}</td>
+        </tr>`;
     }).join('');
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Budget Report - Sales Department</title><style>
-        *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:40px;}.container{max-width:1200px;margin:0 auto;background:white;border-radius:16px;padding:25px;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #ea580c;}h1{color:#ea580c;border-bottom:3px solid #ea580c;padding-bottom:15px;margin-bottom:20px;}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:25px;}.summary-card{background:linear-gradient(135deg,#10b981,#059669);color:white;padding:15px;border-radius:12px;text-align:center;}.summary-card:nth-child(2){background:linear-gradient(135deg,#ef4444,#dc2626);}.summary-card:nth-child(3){background:linear-gradient(135deg,#3b82f6,#2563eb);}.summary-card:nth-child(4){background:linear-gradient(135deg,#f59e0b,#d97706);}.summary-card h4{font-size:12px;opacity:0.9;margin-bottom:8px;}.summary-card p{font-size:18px;font-weight:bold;}table{width:100%;border-collapse:collapse;margin-top:15px;}.transactions-table th,.transactions-table td{border:1px solid #e5e7eb;padding:10px;text-align:left;}.transactions-table th{background:#fef3c7;font-weight:bold;}.text-right{text-align:right;}.footer{text-align:center;margin-top:25px;padding-top:15px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;}.print-btn{background:#ea580c;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;margin-top:20px;font-weight:bold;}@media print{.print-btn{display:none;}body{padding:0;background:white;}.container{box-shadow:none;}}</style></head><body>
-        <div class="container"><h1>Budget Report - Sales Department</h1>
-        <div class="summary"><div class="summary-card"><h4>Total Income</h4><p>${formatMoney(totalIncome)}</p></div><div class="summary-card"><h4>Total Expenses</h4><p>${formatMoney(totalExpenses)}</p></div><div class="summary-card"><h4>Net Profit</h4><p>${formatMoney(totalIncome - totalExpenses)}</p></div><div class="summary-card"><h4>Pending Payments</h4><p>${formatMoney(totalPending)}</p></div></div>
-        <p><strong>Total Transactions:</strong> ${budgets.length} | <strong>Generated:</strong> ${new Date().toLocaleString()}</p>
-        <table class="transactions-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th class="text-right">Amount</th><th class="text-right">Paid</th><th class="text-right">Pending</th><th>Status</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="footer">GeoTraverse ERP System - Sales Department | Official Budget Report</div>
-        <div style="text-align:center;"><button class="print-btn" onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></div>
-    </body></html>`);
+    
+    win.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Budget Report - Sales Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: 'Segoe UI', 'Inter', Arial, sans-serif; 
+                background: #f0f2f5; 
+                padding: 30px;
+            }
+            .container {
+                max-width: 1300px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 16px;
+                padding: 25px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                border: 2px solid #ea580c;
+            }
+            h1 {
+                color: #ea580c;
+                border-bottom: 3px solid #ea580c;
+                padding-bottom: 12px;
+                margin-bottom: 20px;
+                font-size: 24px;
+            }
+            .summary-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 15px;
+                margin-bottom: 25px;
+            }
+            .summary-card {
+                padding: 15px;
+                border-radius: 12px;
+                text-align: center;
+                color: white;
+            }
+            .summary-card:nth-child(1) { background: linear-gradient(135deg, #10b981, #059669); }
+            .summary-card:nth-child(2) { background: linear-gradient(135deg, #ef4444, #dc2626); }
+            .summary-card:nth-child(3) { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+            .summary-card:nth-child(4) { background: linear-gradient(135deg, #f59e0b, #d97706); }
+            .summary-card h4 { font-size: 12px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-card p { font-size: 18px; font-weight: bold; }
+            .info-bar {
+                background: #f8fafc;
+                padding: 10px 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                display: flex;
+                justify-content: space-between;
+                font-size: 13px;
+                border: 1px solid #e5e7eb;
+            }
+            .transaction-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 13px;
+            }
+            .transaction-table th {
+                background: #fef3c7;
+                padding: 12px 8px;
+                text-align: left;
+                font-weight: 700;
+                border: 1px solid #ddd;
+                position: sticky;
+                top: 0;
+            }
+            .transaction-table th.text-right { text-align: right; }
+            .transaction-table td { vertical-align: middle; }
+            .footer {
+                text-align: center;
+                margin-top: 25px;
+                padding-top: 15px;
+                border-top: 1px solid #e5e7eb;
+                font-size: 10px;
+                color: #9ca3af;
+            }
+            .print-btn {
+                background: #ea580c;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+                margin-top: 20px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            .print-btn:hover { background: #c2410c; transform: translateY(-1px); transition: all 0.2s; }
+            @media print {
+                .print-btn { display: none; }
+                body { padding: 0; background: white; }
+                .container { box-shadow: none; padding: 15px; border: 1px solid #ccc; }
+                .summary-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .transaction-table th { background: #fef3c7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1><i class="fas fa-wallet" style="margin-right: 10px;"></i> Budget Report - Sales Department</h1>
+            
+            <div class="summary-grid">
+                <div class="summary-card"><h4>Total Income</h4><p>${formatMoney(totalIncome)}</p></div>
+                <div class="summary-card"><h4>Total Expenses</h4><p>${formatMoney(totalExpenses)}</p></div>
+                <div class="summary-card"><h4>Net Profit</h4><p>${formatMoney(totalIncome - totalExpenses)}</p></div>
+                <div class="summary-card"><h4>Pending Payments</h4><p>${formatMoney(totalPending)}</p></div>
+            </div>
+            
+            <div class="info-bar">
+                <span><strong>Total Transactions:</strong> ${budgets.length}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+            
+            <table class="transaction-table">
+                <thead>
+                    <tr>
+                        <th style="width: 90px;">Date</th>
+                        <th style="width: 80px;">Type</th>
+                        <th>Source</th>
+                        <th style="width: 130px;" class="text-right">Amount (TZS)</th>
+                        <th style="width: 130px;" class="text-right">Paid (TZS)</th>
+                        <th style="width: 130px;" class="text-right">Pending (TZS)</th>
+                        <th style="width: 90px;">Status</th>
+                        <th style="width: 180px;">Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+            
+            <div class="footer">
+                GeoTraverse ERP System - Sales Department | Official Budget Report
+            </div>
+            
+            <div style="text-align: center;">
+                <button class="print-btn" onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                    <i class="fas fa-print"></i> Save as PDF / Print
+                </button>
+            </div>
+        </div>
+    </body>
+    </html>`);
     win.document.close();
 }
 
@@ -746,7 +963,7 @@ async function openCampaignModal() { document.getElementById("editCampaignId").v
 
 async function saveCampaign() { let id = document.getElementById("editCampaignId").value; let name = document.getElementById("campaignName").value.trim(); if (!name) { showToast("Campaign name required", true); return; } let data = { campaign_name: name, campaign_type: document.getElementById("campaignType").value, budget: parseMoneyValue(document.getElementById("campaignBudget").value), spent: parseMoneyValue(document.getElementById("campaignSpent").value), start_date: document.getElementById("campaignStartDate").value, end_date: document.getElementById("campaignEndDate").value, target_audience: document.getElementById("campaignTarget").value, description: document.getElementById("campaignDescription").value, status: document.getElementById("campaignStatus").value }; let res = id ? await updateCampaignAPI(parseInt(id), data) : await addCampaignAPI(data); if (res.success) { showToast(id ? "Campaign updated" : "Campaign added"); addLog(`${id ? "Updated" : "Added"} campaign: ${name}`); closeModal('campaignModal'); await loadCampaignsInfinite(true); await loadDashboard(); } else showToast(res.message || "Failed", true); }
 
-async function viewCampaign(id) { let c = campaigns.find(c => c.id === id); if (c) { let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0; let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : c.campaign_type === 'social_media' ? 'Social Media' : c.campaign_type === 'tv_radio' ? 'TV/Radio' : c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar'; let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled'; document.getElementById("viewCampaignContent").innerHTML = `<div class="space-y-3"><div class="border-b pb-2"><h4 class="font-bold text-base">${escapeHtml(c.campaign_name)}</h4><p class="text-xs text-gray-500">${typeText}</p></div><div class="grid grid-cols-2 gap-2 text-sm"><div class="font-semibold">Budget:</div><div class="text-green-600 font-bold">${formatMoney(c.budget)}</div><div class="font-semibold">Amount Spent:</div><div class="text-orange-600">${formatMoney(c.spent)}</div><div class="font-semibold">Remaining:</div><div class="${(c.budget - c.spent) < 0 ? 'text-red-600' : 'text-blue-600'}">${formatMoney(c.budget - c.spent)}</div><div class="font-semibold">Usage:</div><div><div class="w-full bg-gray-200 rounded-full h-1.5 mt-1"><div class="${spentPercent < 50 ? 'bg-green-500' : (spentPercent < 80 ? 'bg-yellow-500' : 'bg-red-500')} h-1.5 rounded-full" style="width: ${Math.min(spentPercent, 100)}%"></div></div><span class="text-[10px]">${spentPercent}%</span></div><div class="font-semibold">Status:</div><div><span class="px-2 py-0.5 rounded-full text-[10px] ${statusClass}">${c.status}</span></div><div class="font-semibold">Start Date:</div><div>${c.start_date || '-'}</div><div class="font-semibold">End Date:</div><div>${c.end_date || '-'}</div><div class="font-semibold">Target Audience:</div><div>${escapeHtml(c.target_audience || '-')}</div><div class="font-semibold">Description:</div><div>${escapeHtml(c.description || '-')}</div><div class="font-semibold">Created:</div><div>${formatDateTime(c.created_at)}</div></div></div>`; document.getElementById("viewCampaignButtons").innerHTML = `<button onclick="exportCampaignPDFNewWindow(${c.id})" class="btn-danger text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-pdf"></i> Export PDF</button>`; openModal('viewCampaignModal'); } }
+async function viewCampaign(id) { let c = campaigns.find(c => c.id === id); if (c) { let spentPercent = c.budget > 0 ? ((c.spent / c.budget) * 100).toFixed(1) : 0; let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : c.campaign_type === 'social_media' ? 'Social Media' : c.campaign_type === 'tv_radio' ? 'TV/Radio' : c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar'; let statusClass = c.status === 'planned' ? 'status-planned' : c.status === 'active' ? 'status-active' : c.status === 'completed' ? 'status-completed' : 'status-cancelled'; document.getElementById("viewCampaignContent").innerHTML = `<div class="space-y-3"><div class="border-b pb-2"><h4 class="font-bold text-base">${escapeHtml(c.campaign_name)}</h4><p class="text-xs text-gray-500">${typeText}</p></div><div class="grid grid-cols-2 gap-2 text-sm"><div class="font-semibold">Budget:</div><div class="text-green-600 font-bold">${formatMoney(c.budget)}</div><div class="font-semibold">Amount Spent:</div><div class="text-orange-600">${formatMoney(c.spent)}</div><div class="font-semibold">Remaining:</div><div class="${(c.budget - c.spent) < 0 ? 'text-red-600' : 'text-blue-600'}">${formatMoney(c.budget - c.spent)}</div><div class="font-semibold">Usage:</div><div><div class="w-full bg-gray-200 rounded-full h-1.5 mt-1"><div class="${spentPercent < 50 ? 'bg-green-500' : (spentPercent < 80 ? 'bg-yellow-500' : 'bg-red-500')} h-1.5 rounded-full" style="width: ${Math.min(spentPercent, 100)}%"></div></div><span class="text-[10px]">${spentPercent}%</span></div><div class="font-semibold">Status:</div><div><span class="px-2 py-0.5 rounded-full text-[10px] ${statusClass}">${c.status}</span></div><div class="font-semibold">Start Date:</div><div>${c.start_date || '-'}</div><div class="font-semibold">End Date:</div><div>${c.end_date || '-'}</div><div class="font-semibold">Target Audience:</div><div>${escapeHtml(c.target_audience || '-')}</div><div class="font-semibold">Description:</div><div>${escapeHtml(c.description || '-')}</div><div class="font-semibold">Created:</div><div>${formatDateTime(c.created_at)}</div></div></div>`; document.getElementById("viewCampaignButtons").innerHTML = `<button onclick="exportCampaignExcel(${c.id})" class="btn-success text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-excel"></i> Export Excel</button><button onclick="exportCampaignPDFNewWindow(${c.id})" class="btn-danger text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-pdf"></i> Export PDF</button>`; openModal('viewCampaignModal'); } }
 
 function editCampaign(id) { let c = campaigns.find(c => c.id === id); if(c) { document.getElementById("editCampaignId").value = c.id; document.getElementById("campaignName").value = c.campaign_name; document.getElementById("campaignType").value = c.campaign_type; document.getElementById("campaignBudget").value = c.budget.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); document.getElementById("campaignSpent").value = c.spent.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); document.getElementById("campaignStartDate").value = c.start_date || ''; document.getElementById("campaignEndDate").value = c.end_date || ''; document.getElementById("campaignTarget").value = c.target_audience || ''; document.getElementById("campaignDescription").value = c.description || ''; document.getElementById("campaignStatus").value = c.status; openModal('campaignModal'); } }
 
@@ -782,7 +999,7 @@ async function loadBudget(highlightId = null) {
         <div class="mt-3 w-full bg-gray-200 rounded-full h-1.5"><div class="${totalIncome>0 ? (totalExpenses/totalIncome*100 > 80 ? 'bg-red-500' : (totalExpenses/totalIncome*100 > 60 ? 'bg-yellow-500' : 'bg-green-500')) : 'bg-red-500'} h-1.5 rounded-full" style="width:${totalIncome>0?Math.min((totalExpenses/totalIncome)*100,100):0}%"></div></div>
         <p class="text-[9px] text-gray-500 text-center mt-1 mb-4">${totalIncome>0?((totalExpenses/totalIncome)*100).toFixed(1):0}% of budget used</p>
         <div class="transactions-table-container"><div class="table-responsive"><table class="transactions-table w-full"><thead class="bg-gray-50"><tr><th class="px-3 py-2">Date</th><th class="px-3 py-2">Type</th><th class="px-3 py-2">Source</th><th class="px-3 py-2 text-right">Total Amount</th><th class="px-3 py-2 text-right">Paid</th><th class="px-3 py-2 text-right">Pending</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-center">Actions</th></tr></thead><tbody>`;
-    if (paginated.length === 0) { html += `<tr><td colspan="8" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one. </tr`; }
+    if (paginated.length === 0) { html += `<td><td colspan="8" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one. </tr`; }
     else { for(let t of paginated) {
         let isHighlighted = highlightId && t.id === highlightId;
         let amount = parseFloat(t.amount) || 0, paidAmount = parseFloat(t.paid_amount) || 0, pendingAmount = (t.type === 'income' && t.status !== 'paid') ? (amount - paidAmount) : 0;
@@ -835,8 +1052,7 @@ async function loadMessages(highlightId = null) {
         let color = departmentColors[otherDeptId] || '#ea580c';
         let isHighlighted = highlightId && conv.conversation_id === highlightId;
         gridHtml += `<div class="message-card ${unread > 0 ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" onclick="openChat(${conv.conversation_id})">
-            <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversationSoft(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></div>
-            <div class="card-header"><h4>${escapeHtml(otherDeptName)}</h4><p>${unread > 0 ? `${unread} new` : 'Conversation'}</p></div>
+            <div class="card-header"><h4>${escapeHtml(otherDeptName)}</h4><p>${unread > 0 ? `${unread} new` : 'Conversation'}</p><button class="delete-btn-header" onclick="event.stopPropagation(); deleteConversationSoft(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></button></div>
             <div class="p-4"><div class="flex justify-between items-start mb-2"><div class="flex items-center gap-3"><div class="dept-icon" style="background: ${color}20; color: ${color}"><i class="fas ${icon}"></i></div></div><span class="text-[10px] text-gray-400">${conv.last_message_time ? formatDateTime(conv.last_message_time) : ''}</span></div><p class="text-xs text-gray-500 line-clamp-2">${escapeHtml(preview)}</p></div>
         </div>`;
     }
@@ -932,9 +1148,8 @@ async function loadReports(highlightId = null) {
         let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
         let shortContent = r.content && r.content.length > 100 ? r.content.substring(0, 100) + '...' : (r.content || '');
         gridHtml += `<div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}">
-            <div class="delete-report-btn" onclick="event.stopPropagation(); deleteReportSoft(${r.id})"><i class="fas fa-trash-alt"></i></div>
-            <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report${isUnviewed ? '<span class="new-text ml-2">NEW</span>' : ''}</p></div>
-            <div class="p-4" onclick="viewReportDetails(${r.id})"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">${formatDateTime(r.created_at)}</span><span class="status-badge ${statusClass} text-xs px-2 py-1 rounded-full">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div><div class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(shortContent)}</div><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="event.stopPropagation(); deleteReportSoft(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div></div>
+            <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report${isUnviewed ? '<span class="new-text ml-2">NEW</span>' : ''}</p><button class="delete-btn-header" onclick="event.stopPropagation(); deleteReportSoft(${r.id})"><i class="fas fa-trash-alt"></i></button></div>
+            <div class="p-4" onclick="viewReportDetails(${r.id})"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">${formatDateTime(r.created_at)}</span><span class="status-badge ${statusClass} text-xs px-2 py-1 rounded-full">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div><div class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(shortContent)}</div><div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button></div></div>
         </div>`;
     }
     document.getElementById("reportsGridContainer").innerHTML = gridHtml;
@@ -999,7 +1214,6 @@ function exportAllReportsToPDF() { let element = document.createElement("div"); 
 // ==================== SETTINGS SECTION ====================
 function loadSettings() {
     let logsHtml = activityLogs.slice(0, 15).map(l => `<div class="text-[10px] border-b py-1"><span>${escapeHtml(l.action)}</span><span class="float-right text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('');
-    let colors = [{ name: 'Orange', value: '#ea580c' }, { name: 'Blue', value: '#2563eb' }, { name: 'Purple', value: '#7c3aed' }, { name: 'Green', value: '#065f46' }, { name: 'Red', value: '#dc2626' }, { name: 'Teal', value: '#0d9488' }, { name: 'Pink', value: '#db2777' }, { name: 'Indigo', value: '#6366f1' }];
     let recycleHtml = `<div class="bg-white rounded-xl p-4 shadow-sm border mt-4"><div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-sm"><i class="fas fa-trash-restore text-orange-500 mr-2"></i>Recycle Bin (${recycleBinItems.length} items)</h3><button onclick="showRecycleBin()" class="btn-warning text-white px-3 py-1 rounded text-xs">View Bin</button></div><div class="text-center py-6 text-gray-400 text-xs"><i class="fas fa-trash-alt text-2xl mb-1 opacity-30"></i><p>Click "View Bin" to see deleted items</p></div></div>`;
     let html = `<div class="section-header"><h2><i class="fas fa-cog mr-2"></i>Settings</h2></div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1013,11 +1227,20 @@ function loadSettings() {
     if (container) {
         const savedColor = localStorage.getItem('sidebar_color') || '#ea580c';
         container.innerHTML = '';
-        colors.forEach(c => { const isSelected = savedColor === c.value; container.innerHTML += `<div class="color-option ${isSelected ? 'selected' : ''}" style="background: ${c.value}" onclick="changeColor('${c.value}', this)"></div>`; });
+        sidebarColorOptions.forEach(c => {
+            const isSelected = savedColor === c.value;
+            container.innerHTML += `<div class="color-option ${isSelected ? 'selected' : ''}" style="background: ${c.value}" onclick="changeColor('${c.value}', this)"></div>`;
+        });
     }
 }
 
-function changeColor(color, el) { document.querySelectorAll(".color-option").forEach(opt => opt.classList.remove("selected")); el.classList.add("selected"); document.getElementById("mainSidebar").style.background = color; localStorage.setItem("sidebar_color", color); showToast("Sidebar color changed"); }
+function changeColor(color, el) { 
+    document.querySelectorAll(".color-option").forEach(opt => opt.classList.remove("selected")); 
+    el.classList.add("selected"); 
+    document.getElementById("mainSidebar").style.background = color; 
+    localStorage.setItem("sidebar_color", color); 
+    showToast("Sidebar color changed"); 
+}
 
 function createBackup() { let backup = { campaigns, budgets, reportsList, activityLogs, timestamp: new Date().toISOString() }; let blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }); let a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `sales_backup_${new Date().toISOString().slice(0,19)}.json`; a.click(); showToast("Backup created"); closeModal('backupRestoreModal'); }
 
@@ -1108,7 +1331,7 @@ async function init() {
 
 window.showSection = showSection; window.closeModal = closeModal; window.openModal = openModal; window.toggleSendDropdown = toggleSendDropdown; window.goToMainWebsite = goToMainWebsite; window.logout = logout; window.closeMobileSidebar = closeMobileSidebar;
 window.openCampaignModal = openCampaignModal; window.saveCampaign = saveCampaign; window.viewCampaign = viewCampaign; window.editCampaign = editCampaign; window.deleteCampaign = deleteCampaign;
-window.exportCampaignPDFNewWindow = exportCampaignPDFNewWindow; window.exportAllCampaignsPDFNewWindow = exportAllCampaignsPDFNewWindow;
+window.exportCampaignExcel = exportCampaignExcel; window.exportCampaignPDFNewWindow = exportCampaignPDFNewWindow; window.exportAllCampaignsPDFNewWindow = exportAllCampaignsPDFNewWindow;
 window.openAddTransactionModal = openAddTransactionModal; window.saveBudget = saveBudget; window.viewTransactionDetail = viewTransactionDetail; window.editTransactionDetail = editTransactionDetail; window.deleteTransactionDetail = deleteTransactionDetail;
 window.exportBudgetToPDFNewWindow = exportBudgetToPDFNewWindow;
 window.openStartChatModal = () => openModal('startChatModal'); window.sendNewChat = sendNewChat; window.openChat = openChat; window.sendChatMessage = sendChatMessage; window.deleteConversationSoft = deleteConversationSoft; window.deleteSingleMessage = deleteSingleMessage;
