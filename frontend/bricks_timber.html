@@ -45,16 +45,11 @@
         
         .btn-primary { background: linear-gradient(135deg, #b45309, #92400e); transition: all 0.2s; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; color: white; }
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(180,83,9,0.4); }
-        .btn-success { background: #10b981; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-        .btn-success:hover { background: #059669; transform: translateY(-1px); }
-        .btn-danger { background: #ef4444; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-        .btn-danger:hover { background: #dc2626; transform: translateY(-1px); }
-        .btn-warning { background: #f59e0b; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-        .btn-warning:hover { background: #d97706; transform: translateY(-1px); }
-        .btn-purple { background: #8b5cf6; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-        .btn-purple:hover { background: #7c3aed; transform: translateY(-1px); }
-        .btn-info { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-        .btn-info:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn-success { background: #10b981; color: white; padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; }
+        .btn-danger { background: #ef4444; color: white; padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; }
+        .btn-warning { background: #f59e0b; color: white; padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; }
+        .btn-purple { background: #8b5cf6; color: white; padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; }
+        .btn-info { background: #3b82f6; color: white; padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; }
         
         .toast-notification { position: fixed; bottom: 20px; right: 20px; background: #10b981; color: white; padding: 10px 16px; border-radius: 10px; z-index: 1000; animation: slideInRight 0.3s ease; font-size: 12px; }
         .toast-notification.error { background: #ef4444; }
@@ -478,7 +473,7 @@ async function saveBudget() { let id = document.getElementById("editBudgetId").v
 async function deleteBudgetItem(id) { if(confirm("Delete this transaction?")) { let res = await deleteBudgetAPI(id); if(res.success) { showToast("Transaction deleted"); addLog(`Budget deleted: ID ${id}`); renderBudget(); renderDashboard(); } else showToast(res.message || "Failed", true); } }
 function exportBudgetToExcel() { let ws=[["Date","Type","Source","Amount","Paid","Pending","Status","Description"]]; budgetsData.forEach(b=>{ let amount = parseFloat(b.amount)||0, paid = parseFloat(b.paid_amount)||0, pending = (b.type === 'income' && b.status !== 'paid') ? amount - paid : 0; ws.push([b.transaction_date, b.type, b.source, amount, paid, pending, b.status, b.description||'']); }); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),"Budget"); XLSX.writeFile(wb,`budget_${new Date().toISOString().slice(0,10)}.xlsx`); showToast("Budget exported to Excel"); }
 
-// ==================== IMPROVED PDF EXPORT FOR BUDGET - PROFESSIONAL TABLE ====================
+// ==================== IMPROVED PDF EXPORT FOR BUDGET ====================
 function exportBudgetToPDFNewWindow() {
     if (budgetsData.length === 0) { showToast("No transactions to export", true); return; }
     let totalIncome = 0, totalExpenses = 0, totalPending = 0;
@@ -734,41 +729,34 @@ function exportBudgetToPDFNewWindow() {
     showToast("PDF preview opened - Click Print to save");
 }
 
-// ==================== MESSAGES API FUNCTIONS (FIXED) ====================
-async function fetchMessages() { 
-    const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`); 
-    console.log("Fetching conversations:", res);
-    if (res.success && res.data && Array.isArray(res.data)) { 
-        conversationsList = res.data; 
-        unreadMessagesCount = conversationsList.reduce((s, c) => s + (c.unread_count || 0), 0);
-    } else { 
-        conversationsList = []; 
+// ==================== MESSAGES API - RETURNS ALL CONVERSATIONS ====================
+// REPLACE in bricks_timber.html
+async function fetchMessages() {
+    try {
+        const res = await apiCall(`get_conversations.php?user_id=1`);
+        if (res.success && res.data && Array.isArray(res.data)) {
+            conversationsList = res.data;
+            unreadMessagesCount = conversationsList.reduce((s, c) => s + (c.unread_count || 0), 0);
+        } else {
+            conversationsList = [];
+            unreadMessagesCount = 0;
+        }
+        updateMessageBadge();
+        return conversationsList;
+    } catch(e) {
+        console.error("Error:", e);
+        conversationsList = [];
         unreadMessagesCount = 0;
+        return [];
     }
-    updateMessageBadge(); 
-    return conversationsList; 
 }
 
-function getUnreadMessagesCount() { 
-    return unreadMessagesCount;
-}
+function getUnreadMessagesCount() { return unreadMessagesCount; }
+function updateMessageBadge() { const badge = document.getElementById('msgBadge'); if (badge) badge.innerText = unreadMessagesCount; }
 
-function updateMessageBadge() { 
-    const badge = document.getElementById('msgBadge'); 
-    if (badge) badge.innerText = unreadMessagesCount; 
-}
-
-async function deleteMessageAPI(messageId) { 
-    return await apiCall('delete_message.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); 
-}
-
-async function deleteConversationAPI(conversationId) { 
-    return await apiCall('delete_conversation.php', 'POST', { conversation_id: conversationId, department_id: DEPARTMENT_ID }); 
-}
-
-async function markMessageRead(messageId) { 
-    return await apiCall('mark_message_read.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); 
-}
+async function deleteMessageAPI(messageId) { return await apiCall('delete_message.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); }
+async function deleteConversationAPI(conversationId) { return await apiCall('delete_conversation.php', 'POST', { conversation_id: conversationId, department_id: DEPARTMENT_ID }); }
+async function markMessageRead(messageId) { return await apiCall('mark_message_read.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); }
 
 async function renderMessages(highlightId = null) {
     await fetchMessages();
@@ -786,7 +774,6 @@ async function renderMessages(highlightId = null) {
         let unread = conv.unread_count || 0;
         let preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages';
         let isHighlighted = highlightId && conv.conversation_id === highlightId;
-        let otherDeptId = conv.other_department_id || 0;
         gridHtml += `<div class="message-card ${unread > 0 ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChatWithDept(${conv.conversation_id}, '${escapeHtml(otherDeptName)}')">
             <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversationWith(${conv.conversation_id})"><i class="fas fa-trash-alt text-[8px]"></i></div>
             <div class="message-header-bg"><div class="flex justify-between items-center"><span class="font-semibold text-sm">📩 ${escapeHtml(otherDeptName)}</span>${unread > 0 ? `<span class="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">${unread}</span>` : ''}</div></div>
