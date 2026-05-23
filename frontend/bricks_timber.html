@@ -733,10 +733,17 @@ function exportBudgetToPDFNewWindow() {
 // REPLACE in bricks_timber.html
 async function fetchMessages() {
     try {
-        const res = await apiCall(`get_conversations.php?user_id=1`);
+        const url = `../backend/api/get_conversations.php?department_id=${DEPARTMENT_ID}&_=${Date.now()}`;
+        console.log("Fetching conversations from:", url);
+        
+        const response = await fetch(url);
+        const res = await response.json();
+        
+        console.log("Conversations API Response:", res);
+        
         if (res.success && res.data && Array.isArray(res.data)) {
             conversationsList = res.data;
-            unreadMessagesCount = conversationsList.reduce((s, c) => s + (c.unread_count || 0), 0);
+            unreadMessagesCount = res.total_unread || 0;
         } else {
             conversationsList = [];
             unreadMessagesCount = 0;
@@ -744,7 +751,7 @@ async function fetchMessages() {
         updateMessageBadge();
         return conversationsList;
     } catch(e) {
-        console.error("Error:", e);
+        console.error("Error fetching messages:", e);
         conversationsList = [];
         unreadMessagesCount = 0;
         return [];
@@ -785,33 +792,89 @@ async function renderMessages(highlightId = null) {
 }
 
 async function openChatWithDept(conversationId, otherDeptName) {
+    console.log("Opening chat with ID:", conversationId);
     currentChatWith = conversationId;
     document.getElementById('chatModalTitle').innerHTML = `<i class="fas fa-comments text-amber-600 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`;
-    const res = await apiCall(`get_messages.php?conversation_id=${conversationId}&department_id=${DEPARTMENT_ID}`);
-    let messages = (res.success && res.data) ? res.data : [];
-    for (let m of messages) { if (m.receiver_dept == DEPARTMENT_ID && !m.is_read) await markMessageRead(m.id); }
-    await fetchMessages();
-    let chatHtml = '';
-    for (let m of messages) {
-        let isSent = (m.sender_dept == DEPARTMENT_ID);
-        chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
-            <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
-                <div class="chat-bubble text-xs">
-                    ${!isSent ? `<div class="chat-sender-name">${departmentNames[m.sender_dept] || m.sender_name || 'Department'}</div>` : ''}
-                    ${escapeHtml(m.message)}
-                    <div class="chat-time">${formatDateTime(m.created_at)}</div>
-                </div>
-            </div>
-            <button onclick="event.stopPropagation(); deleteSingleMessage(${m.id})" class="delete-msg-btn"><i class="fas fa-trash-alt text-[8px]"></i></button>
-        </div>`;
+    
+    try {
+        // Fetch messages with correct parameters
+        const url = `../backend/api/get_messages.php?conversation_id=${conversationId}&department_id=${DEPARTMENT_ID}&_=${Date.now()}`;
+        console.log("Fetching messages from:", url);
+        
+        const response = await fetch(url);
+        const res = await response.json();
+        console.log("Messages API Response:", res);
+        
+        let messages = (res.success && res.data) ? res.data : [];
+        
+        // Mark messages as read
+        for (let m of messages) { 
+            if (m.receiver_dept == DEPARTMENT_ID && !m.is_read) {
+                await apiCall('mark_message_read.php', 'POST', { 
+                    message_id: m.id, 
+                    department_id: DEPARTMENT_ID 
+                });
+            }
+        }
+        
+        // Refresh conversation list to update unread counts
+        await fetchMessages();
+        await renderMessages();
+        
+        // Build chat HTML
+        let chatHtml = '';
+        if (messages.length === 0) {
+            chatHtml = '<div class="text-center text-gray-400 py-8 text-sm">No messages yet. Send a message to start the conversation!</div>';
+        } else {
+            for (let m of messages) {
+                let isSent = (m.sender_dept == DEPARTMENT_ID);
+                let senderName = departmentNames[m.sender_dept] || 'Department';
+                let time = new Date(m.created_at).toLocaleString();
+                
+                chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
+                    <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
+                        <div class="chat-bubble">
+                            ${!isSent ? `<div class="chat-sender-name">${escapeHtml(senderName)}</div>` : ''}
+                            <div>${escapeHtml(m.message)}</div>
+                            <div class="chat-time">${time}</div>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteSingleMessage(${m.id})" class="delete-msg-btn">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>`;
+            }
+        }
+        
+        document.getElementById("chatMessagesArea").innerHTML = chatHtml;
+        document.getElementById("chatMessagesArea").scrollTop = document.getElementById("chatMessagesArea").scrollHeight;
+        openModal('chatModal');
+        
+    } catch(e) {
+        console.error("Error opening chat:", e);
+        showToast("Failed to load messages: " + e.message, true);
     }
-    document.getElementById("chatMessagesArea").innerHTML = chatHtml || '<div class="text-center text-gray-400 py-6 text-sm">No messages</div>';
-    openModal('chatModal');
 }
 
 async function sendChatMessage() { 
     let msg = document.getElementById("replyMsg").value.trim(); 
-    if (!msg || !currentChatWith) return; 
+    if (!msg) { 
+        showToast("Enter a message", true); 
+        return; 
+    }
+    if (!currentChatWith) { 
+        showToast("No conversation selected", true); 
+        return; 
+    }
+    
+    // Find the conversation to get receiver department
+    const currentConv = conversationsList.find(c => c.conversation_id === currentChatWith);
+    if (!currentConv) {
+        showToast("Conversation not found. Please refresh.", true);
+        return;
+    }
+    
+    const receiverDept = currentConv.other_department_id;
     
     const sendBtn = document.querySelector('#chatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
@@ -819,27 +882,71 @@ async function sendChatMessage() {
     sendBtn.disabled = true;
     
     try {
+        console.log("Sending message to conversation:", currentChatWith);
+        console.log("Receiver department:", receiverDept);
+        
         let res = await apiCall('send_message.php', 'POST', { 
-            conversation_id: currentChatWith, 
-            department_id: DEPARTMENT_ID, 
+            sender_dept: DEPARTMENT_ID,
+            receiver_dept: receiverDept,
+            conversation_id: currentChatWith,
             message: msg 
         }); 
-        if (res.success) { 
+        
+        console.log("Send response:", res);
+        
+        if (res && res.success) { 
             document.getElementById("replyMsg").value = ""; 
-            await openChatWithDept(currentChatWith, ''); 
+            
+            // Add message to chat window immediately
+            const newMessageHtml = `<div class="chat-message-wrapper justify-end">
+                <div class="chat-message chat-sent">
+                    <div class="chat-bubble">
+                        ${escapeHtml(msg)}
+                        <div class="chat-time">Just now</div>
+                    </div>
+                </div>
+            </div>`;
+            
+            const chatArea = document.getElementById("chatMessagesArea");
+            if (chatArea) {
+                // Remove "no messages" placeholder if exists
+                if (chatArea.innerHTML.includes('No messages yet')) {
+                    chatArea.innerHTML = newMessageHtml;
+                } else {
+                    chatArea.insertAdjacentHTML('beforeend', newMessageHtml);
+                }
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+            
+            // Refresh conversation list to update last message
             await fetchMessages(); 
-            renderMessages();
+            await renderMessages();
+            
+            showToast("✅ Sent");
         } else { 
-            showToast(res.message || "Failed", true); 
+            showToast(res?.message || "Failed", true); 
         }
-    } catch(e) { showToast("Network error", true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+    } catch(e) { 
+        console.error("Send error:", e);
+        showToast("Network error: " + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
 }
 
 async function sendNewChat() { 
     let to = document.getElementById("chatRecipientSelect").value; 
     let msg = document.getElementById("newChatMsg").value.trim(); 
-    if (!to || !msg) { showToast("Select department and enter message", true); return; } 
+    
+    if (!to) { 
+        showToast("Select department", true); 
+        return; 
+    }
+    if (!msg) { 
+        showToast("Enter message", true); 
+        return; 
+    }
     
     const sendBtn = document.querySelector('#startChatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
@@ -847,45 +954,93 @@ async function sendNewChat() {
     sendBtn.disabled = true;
     
     try {
+        console.log("Creating new chat to department:", to);
+        
         let res = await apiCall('send_message.php', 'POST', { 
-            from_department_id: DEPARTMENT_ID, 
-            to_department_id: parseInt(to), 
+            sender_dept: DEPARTMENT_ID,
+            receiver_dept: parseInt(to), 
             message: msg 
         }); 
-        if (res.success) { 
-            showToast(`✅ Message sent to ${departmentNames[to] || 'Department'}`); 
-            addLog(`Message sent to ${departmentNames[to]}`); 
+        
+        console.log("Send response:", res);
+        
+        if (res && res.success) { 
+            const deptName = departmentNames[to] || 'Department';
+            showToast(`✅ Message sent to ${deptName}`); 
+            addLog(`Message sent to ${deptName}`); 
             closeModal('startChatModal'); 
             document.getElementById("newChatMsg").value = ""; 
-            await fetchMessages();
-            renderMessages(); 
+            
+            // Wait a moment for database to update
+            setTimeout(async () => {
+                await fetchMessages();
+                await renderMessages(); 
+                
+                // Open the new conversation if created
+                if (res.data && res.data.conversation_id) {
+                    const conv = conversationsList.find(c => c.conversation_id === res.data.conversation_id);
+                    const otherDeptName = conv ? conv.other_department_name : deptName;
+                    await openChatWithDept(res.data.conversation_id, otherDeptName);
+                }
+            }, 500);
         } else { 
-            showToast(res.message || "Failed", true); 
+            showToast(res?.message || "Failed to send", true); 
         }
-    } catch(e) { showToast("Network error", true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+    } catch(e) { 
+        console.error("Send error:", e);
+        showToast("Network error: " + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
 }
 
 async function deleteSingleMessage(id) { 
     if (confirm("Delete this message?")) { 
-        let res = await deleteMessageAPI(id); 
-        if (res.success) { 
+        let res = await apiCall('delete_message.php', 'POST', { 
+            message_id: id, 
+            department_id: DEPARTMENT_ID 
+        }); 
+        if (res && res.success) { 
             showToast("Message deleted"); 
-            if (currentChatWith) await openChatWithDept(currentChatWith, ''); 
-            renderMessages(); 
-        } else showToast(res.message || "Failed", true); 
+            if (currentChatWith) {
+                // Refresh the current chat
+                const currentConv = conversationsList.find(c => c.conversation_id === currentChatWith);
+                if (currentConv) {
+                    await openChatWithDept(currentChatWith, currentConv.other_department_name);
+                }
+            }
+            await fetchMessages();
+            await renderMessages(); 
+        } else { 
+            showToast(res?.message || "Failed", true); 
+        } 
     } 
 }
 
 async function deleteConversationWith(conversationId) { 
     if (confirm("Delete this entire conversation?")) { 
-        let res = await deleteConversationAPI(conversationId); 
-        if (res.success) { 
-            showToast("Conversation deleted"); 
+        let res = await apiCall('delete_conversation.php', 'POST', { 
+            conversation_id: conversationId, 
+            department_id: DEPARTMENT_ID 
+        }); 
+        if (res && res.success) { 
+            showToast("Conversation deleted from your view"); 
             addLog(`Conversation deleted: ID ${conversationId}`); 
-            if (currentChatWith === conversationId) closeModal('chatModal'); 
-            renderMessages(); 
-        } else showToast(res.message || "Failed", true); 
+            
+            // Remove from local list
+            conversationsList = conversationsList.filter(c => c.conversation_id !== conversationId);
+            
+            if (currentChatWith === conversationId) { 
+                closeModal('chatModal'); 
+                currentChatWith = null; 
+            }
+            
+            // Refresh the messages grid
+            await renderMessages(); 
+        } else { 
+            showToast(res?.message || "Failed", true); 
+        } 
     } 
 }
 
