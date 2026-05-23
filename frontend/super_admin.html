@@ -1417,45 +1417,40 @@ async function sendNewMessage() {
     sendBtn.disabled = true; 
     
     try { 
-        // Kwanza angalia kama conversation tayari ipo na department hii
-        let existingConv = null;
-        for (let conv of messagesData) {
-            if (conv.other_department_id == departmentId) {
-                existingConv = conv;
-                break;
-            }
-        }
-        
-        // Ikiwa conversation ipo, tumia conversation_id yake
+        // FIXED: Use sender_dept and receiver_dept format that your API expects
         const payload = { 
-            user_id: 1, 
-            department_id: parseInt(departmentId), 
-            message: msg.trim(), 
-            subject: 'New Message from Super Admin' 
-        };
+            sender_dept: 1,  // Super Admin department ID is 1
+            receiver_dept: parseInt(departmentId), 
+            message: msg.trim(),
+            subject: 'Message from Super Admin'
+        }; 
         
-        if (existingConv) {
-            payload.conversation_id = existingConv.conversation_id;
-            console.log("Using existing conversation_id:", existingConv.conversation_id);
-        }
+        console.log("Sending payload:", payload); 
         
         const res = await apiCall('send_message.php', 'POST', payload); 
         
+        console.log("Send message response:", res); 
+        
         if (res && res.success) { 
-            showToast('✅ Message sent!'); 
+            showToast('✅ Message sent successfully!'); 
             closeModal('msgModal'); 
             document.getElementById('msgContent').value = ''; 
-            // Reload messages to show the updated conversation
+            
+            // Reload messages to show the new conversation
             await loadMessages();
-            // If we have a conversation_id, open it
+            
+            // If conversation was created, open it
             if (res.data && res.data.conversation_id) {
-                await openChat(res.data.conversation_id);
+                setTimeout(async () => {
+                    await openChat(res.data.conversation_id);
+                }, 500);
             }
         } else { 
-            showToast('❌ ' + (res?.message || 'Failed'), true); 
+            showToast('❌ ' + (res?.message || 'Failed to send'), true); 
         } 
     } catch (error) { 
-        showToast('❌ Network error', true); 
+        console.error("Send error:", error);
+        showToast('❌ Network error: ' + error.message, true); 
     } 
     finally { 
         sendBtn.innerHTML = originalText; 
@@ -1517,12 +1512,12 @@ async function sendChatMessage() {
     sendBtn.disabled = true;
     
     try {
+        // FIXED: Use sender_dept and receiver_dept format
         let res = await apiCall('send_message.php', 'POST', { 
-            user_id: 1,
+            sender_dept: 1,  // Super Admin department ID is 1
+            receiver_dept: receiverDept,
             conversation_id: currentConversationId,
-            department_id: receiverDept,  // Add receiver department
-            message: msg,
-            subject: 'Reply'
+            message: msg.trim()
         }); 
         
         if (res && res.success) { 
@@ -1534,7 +1529,8 @@ async function sendChatMessage() {
             showToast(res?.message || 'Failed', true); 
         }
     } catch(e) {
-        showToast('Network error', true);
+        console.error("Send error:", e);
+        showToast('Network error: ' + e.message, true);
     } finally {
         sendBtn.innerHTML = originalText;
         sendBtn.disabled = false;

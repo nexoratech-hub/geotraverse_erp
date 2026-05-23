@@ -174,7 +174,13 @@
         <div id="dashboardPage" class="section p-5 mb-20"></div>
         <div id="projectsPage" class="section p-5 hidden mb-20"></div>
         <div id="budgetPage" class="section p-5 hidden mb-20"></div>
-        <div id="messagesPage" class="section p-5 hidden mb-20"></div>
+        <div id="messagesPage" class="section p-5 hidden mb-20">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h2 class="text-xl font-bold"><i class="fas fa-envelope text-amber-600 mr-2"></i>Messages (<span id="msgCount">0</span> conversations)</h2>
+                <button onclick="openModal('startChatModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> New Chat</button>
+            </div>
+            <div id="messagesGridContainer" class="messages-grid"></div>
+        </div>
         <div id="reportsPage" class="section p-5 hidden mb-20"></div>
         <div id="settingsPage" class="section p-5 hidden mb-20"></div>
     </main>
@@ -190,7 +196,6 @@
 <div id="viewReportModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-file-alt text-purple-600 mr-2"></i>Report Details</h3><div id="viewReportContent"></div><div id="viewReportButtons" class="detail-buttons"></div><button onclick="closeModal('viewReportModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 <div id="chatModal" class="modal"><div class="modal-content" style="max-width:750px;"><div class="flex justify-between items-center mb-4"><h3 id="chatModalTitle" class="text-xl font-bold"><i class="fas fa-comments text-amber-600 mr-2"></i>Chat</h3><button onclick="closeModal('chatModal')" class="text-gray-400 text-2xl">&times;</button></div><div class="chat-container"><div id="chatMessagesArea" class="h-96 overflow-y-auto bg-gray-50 rounded-xl p-3 mb-3"></div><div class="flex gap-2"><textarea id="replyMsg" rows="2" placeholder="Type your message..." class="border rounded-lg p-2 flex-1 text-sm"></textarea><button onclick="sendChatMessage()" class="btn-primary">Send</button></div></div></div></div>
 <div id="startChatModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-plus-circle text-amber-600 mr-2"></i>Start New Chat</h3><div class="form-group"><label>Department</label><select id="chatRecipientSelect" class="w-full"><option value="">Select Department</option><option value="1">👑 Super Admin</option><option value="2">Finance</option><option value="3">Sales & Marketing</option><option value="4">Manager</option><option value="5">Secretary</option><option value="6">Bricks & Timber</option><option value="7">Aluminium</option><option value="8">Town Planning</option><option value="9">Architectural</option><option value="10">Survey</option><option value="12">Hatimiliki</option></select></div><div class="form-group"><label>Message</label><textarea id="newChatMsg" rows="4" placeholder="Type your message..."></textarea></div><div class="flex gap-3 pt-2"><button onclick="sendNewChat()" class="flex-1 btn-primary py-2 rounded-lg">Send</button><button onclick="closeModal('startChatModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
-<!-- backup modals removed -->
 
 <script>
 // ==================== MONEY FORMAT FUNCTIONS ====================
@@ -237,7 +242,14 @@ const departmentNames = {
 
 function showToast(msg, isError) { let t = document.createElement('div'); t.className = 'toast' + (isError ? ' error' : ''); t.innerHTML = '<i class="fas ' + (isError ? 'fa-exclamation-circle' : 'fa-check-circle') + ' mr-2"></i>' + msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
 function openModal(id) { document.getElementById(id).style.display = 'flex'; document.body.style.overflow = 'hidden'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; document.body.style.overflow = 'auto'; }
+function closeModal(id) { 
+    const modal = document.getElementById(id);
+    if (modal) modal.style.display = 'none'; 
+    document.body.style.overflow = 'auto';
+    if (id === 'chatModal') {
+        currentChatConversationId = null;
+    }
+}
 function closeMobileSidebar() { document.getElementById("mainSidebar").classList.remove("mobile-open"); document.getElementById("mobileMenuOverlay").classList.add("hidden"); }
 function toggleSendDropdown(dropdownId) { const dd = document.getElementById(dropdownId); document.querySelectorAll('.send-dropdown-content').forEach(d => { if (d.id !== dropdownId) d.style.display = 'none'; }); if (dd) dd.style.display = dd.style.display === 'block' ? 'none' : 'block'; }
 
@@ -262,12 +274,19 @@ document.addEventListener('DOMContentLoaded', function() {
 async function apiCall(endpoint, method = 'GET', data = null) {
     try {
         const url = API_BASE + endpoint;
-        const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' };
+        const opts = { 
+            method, 
+            headers: { 'Content-Type': 'application/json' }, 
+            credentials: 'include' 
+        };
         if (data && method !== 'GET') opts.body = JSON.stringify(data);
         const res = await fetch(url, opts);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
-    } catch(e) { console.error('API Error:', endpoint, e); return { success: false, message: e.message, data: [] }; }
+    } catch(e) { 
+        console.error('API Error:', endpoint, e); 
+        return { success: false, message: e.message, data: [] }; 
+    }
 }
 
 async function loadDepartments() {
@@ -281,7 +300,21 @@ function resetCountdown() { countdownSeconds = 5; }
 
 function updateProjectBadge() { const badge = document.getElementById('projectBadge'); if (badge) { if (unviewedProjectsCount > 0) { badge.classList.remove('hidden'); badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; } else { badge.classList.add('hidden'); } } }
 function updateReportBadge() { const badge = document.getElementById('reportBadge'); if (badge) { if (unviewedReportsCount > 0) { badge.classList.remove('hidden'); badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; } else { badge.classList.add('hidden'); } } }
-function updateMessageBadge() { const badge = document.getElementById('msgBadge'); if (badge) { if (unviewedMessagesCount > 0) { badge.classList.remove('hidden'); badge.innerText = unviewedMessagesCount > 99 ? '99+' : unviewedMessagesCount; } else { badge.classList.add('hidden'); } } }
+function updateMessageBadge() { 
+    const badge = document.getElementById('msgBadge'); 
+    if (badge) { 
+        if (unviewedMessagesCount > 0) { 
+            badge.classList.remove('hidden'); 
+            badge.innerText = unviewedMessagesCount > 99 ? '99+' : unviewedMessagesCount; 
+        } else { 
+            badge.classList.add('hidden'); 
+        } 
+    }
+    const msgCountSpan = document.getElementById('msgCount');
+    if (msgCountSpan && conversationsList) {
+        msgCountSpan.innerText = conversationsList.length;
+    }
+}
 
 async function markProjectAsViewed(projectId) { const res = await apiCall('mark_project_viewed.php', 'POST', { project_id: projectId, department_id: DEPARTMENT_ID, is_admin: 0 }); if (res.success) { unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); updateProjectBadge(); } }
 async function markReportAsViewed(reportId) { const res = await apiCall('mark_report_viewed.php', 'POST', { report_id: reportId, department_id: DEPARTMENT_ID, is_admin: 0 }); if (res.success) { unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); updateReportBadge(); } }
@@ -521,7 +554,7 @@ async function sendProjectToDept(projectId, deptId) {
     let p = projectsData.find(p => p.id === projectId);
     if (p) {
         let msg = `📋 PROJECT FROM CONSTRUCTION:\nProject: ${p.name}\nClient: ${p.client_name}\nAmount: ${formatMoney(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress}%`;
-        let res = await apiCall('send_message.php', 'POST', { department_id: DEPARTMENT_ID, to_department_id: deptId, message: msg, from_department_id: DEPARTMENT_ID, subject: 'Project from Construction' });
+        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: deptId, message: msg });
         if (res.success) showToast(`Project sent to ${allDepartments.find(d=>d.id===deptId)?.name || 'Department'}`);
         else showToast(res.message || 'Failed', true);
         toggleSendDropdown(`projSendDropdown-${projectId}`);
@@ -585,8 +618,8 @@ async function loadBudget() {
             <div class="summary-card"><h4>💵 NET PROFIT</h4><div class="amount ${totalIncome - totalExpense >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(totalIncome - totalExpense)}</div></div>
             <div class="summary-card"><h4>⏳ PENDING PAYMENTS</h4><div class="amount text-orange-600">${formatMoney(totalPending)}</div></div>
         </div>
-        <div class="bg-white rounded-xl p-3 overflow-x-auto"><table class="budget-table w-full"><thead class="bg-gray-50"><tr><th class="px-2 py-2 text-left">Date</th><th class="px-2 py-2 text-left">Type</th><th class="px-2 py-2 text-left">Source</th><th class="px-2 py-2 text-left">Amount</th><th class="px-2 py-2 text-left">Status</th><th class="px-2 py-2 text-left">Paid</th><th class="px-2 py-2 text-left">Pending</th><th class="px-2 py-2 text-left">Description</th><th class="px-2 py-2 text-center">Actions</th><tr></thead><tbody>`;
-    if (budgetsData.length === 0) { html += `<tr><td colspan="9" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one.</td</tr`; }
+        <div class="bg-white rounded-xl p-3 overflow-x-auto"><table class="budget-table w-full"><thead class="bg-gray-50"><tr><th class="px-2 py-2 text-left">Date</th><th class="px-2 py-2 text-left">Type</th><th class="px-2 py-2 text-left">Source</th><th class="px-2 py-2 text-left">Amount</th><th class="px-2 py-2 text-left">Status</th><th class="px-2 py-2 text-left">Paid</th><th class="px-2 py-2 text-left">Pending</th><th class="px-2 py-2 text-left">Description</th><th class="px-2 py-2 text-center">Actions</th></tr></thead><tbody>`;
+    if (budgetsData.length === 0) { html += `<td><td colspan="9" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one.</td</tr`; }
     else { for (let t of budgetsData) {
         let amount = parseFloat(t.amount) || 0, paidAmount = parseFloat(t.paid_amount) || 0, pendingAmount = (t.type === 'income' && t.status !== 'paid') ? (amount - paidAmount) : 0;
         let typeClass = t.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
@@ -603,7 +636,6 @@ async function saveBudget() { let id = document.getElementById('editBudgetId').v
 async function deleteBudgetItem(id) { if (confirm('⚠️ Delete this transaction?')) { if (await softDeleteItem('transaction', id)) { loadBudget(); loadDashboard(); } } }
 function exportBudgetToExcel() { let ws = [['Date','Type','Source','Amount','Status','Paid','Pending','Description']]; budgetsData.forEach(t => { let amount = parseFloat(t.amount) || 0, paid = parseFloat(t.paid_amount) || 0, pending = (t.type === 'income' && t.status !== 'paid') ? (amount - paid) : 0; ws.push([t.transaction_date, t.type, t.source, amount, t.status, paid, pending, t.description||'']); }); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Budget'); XLSX.writeFile(wb, `budget_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Budget exported to Excel'); }
 
-// ==================== BUDGET PDF - FIXED TABLE WITH CORRECT COLUMN ALIGNMENT ====================
 function exportBudgetToPDFNewWindow() {
     if (budgetsData.length === 0) { showToast('No transactions', true); return; }
     let totalIncome = 0, totalExpense = 0, totalPending = 0;
@@ -634,101 +666,338 @@ function exportBudgetToPDFNewWindow() {
     showToast('PDF opened');
 }
 
+// ==================== MESSAGES SECTION - FIXED ====================
+async function loadMessages() {
+    try {
+        const url = `../backend/api/get_conversations.php?department_id=${DEPARTMENT_ID}&_=${Date.now()}`;
+        const response = await fetch(url, { cache: 'no-cache' });
+        const res = await response.json();
+        
+        if (res.success && res.data && Array.isArray(res.data)) {
+            conversationsList = res.data;
+            unviewedMessagesCount = res.total_unread || 0;
+            updateMessageBadge();
+            
+            const msgCountSpan = document.getElementById('msgCount');
+            if (msgCountSpan) msgCountSpan.innerText = conversationsList.length;
+            
+            renderMessagesGrid();
+        } else {
+            conversationsList = [];
+            unviewedMessagesCount = 0;
+            updateMessageBadge();
+            const msgCountSpan = document.getElementById('msgCount');
+            if (msgCountSpan) msgCountSpan.innerText = '0';
+            renderMessagesGrid();
+        }
+    } catch(e) {
+        console.error("Error loading messages:", e);
+        conversationsList = [];
+        unviewedMessagesCount = 0;
+        updateMessageBadge();
+        renderMessagesGrid();
+    }
+}
 
-
-// ==================== MESSAGES SECTION ====================
-async function loadMessages() { 
-    const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`); 
-    if (res.success && res.data) { conversationsList = res.data.filter(c => !c.deleted_by_department); unviewedMessagesCount = conversationsList.reduce((sum, c) => sum + (c.unread_count || 0), 0); } else { conversationsList = []; unviewedMessagesCount = 0; }
-    updateMessageBadge();
-    let html = `<div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold"><i class="fas fa-envelope text-amber-600 mr-2"></i>Messages</h2><button onclick="openModal('startChatModal')" class="btn-primary">+ New Chat</button></div><div class="messages-grid" id="messagesGridContainer"></div>`;
-    document.getElementById('messagesPage').innerHTML = html;
-    if (conversationsList.length === 0) { document.getElementById('messagesGridContainer').innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400 bg-white rounded-xl">No messages found. Start a new chat!</div>'; return; }
-    conversationsList.sort((a, b) => { if (a.unread_count > 0 && b.unread_count === 0) return -1; if (a.unread_count === 0 && b.unread_count > 0) return 1; return new Date(b.last_message_time) - new Date(a.last_message_time); });
+function renderMessagesGrid() {
+    const container = document.getElementById('messagesGridContainer');
+    if (!container) return;
+    
+    if (!conversationsList || conversationsList.length === 0) {
+        container.innerHTML = `<div class="col-span-3 text-center py-12 text-gray-400 bg-white rounded-xl">
+            <i class="fas fa-comments text-4xl mb-3 opacity-30"></i>
+            <p class="text-sm">No messages found</p>
+            <p class="text-xs mt-1">Click "New Chat" to start a conversation</p>
+        </div>`;
+        return;
+    }
+    
+    conversationsList.sort((a, b) => new Date(b.last_message_time) - new Date(a.last_message_time));
+    
     let msgsHtml = '';
     for (let conv of conversationsList) {
         const isUnread = conv.unread_count > 0;
-        const preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages';
-        const otherDeptName = conv.other_department_name || 'Department';
-        msgsHtml += `<div class="message-card relative ${isUnread ? 'message-unread' : ''}" onclick="openChat(${conv.conversation_id})">
-            <div class="delete-conv-btn absolute top-2 right-2 bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center cursor-pointer opacity-0 hover:opacity-100 transition z-20" onclick="event.stopPropagation(); deleteConversationById(${conv.conversation_id})"><i class="fas fa-trash-alt text-xs"></i></div>
-            <div class="message-header"><span class="font-semibold">${escapeHtml(otherDeptName)}</span>${isUnread ? `<span class="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full ml-2">${conv.unread_count}</span>` : ''}</div>
-            <div class="p-3"><p class="text-sm text-gray-600 line-clamp-2">${escapeHtml(preview)}</p><p class="text-xs text-gray-400 mt-2">${conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : ''}</p></div>
+        // If last_message is null/empty, show "No messages"
+        const preview = conv.last_message && conv.last_message !== 'No messages' 
+            ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : ''))
+            : '✨ New conversation - Send a message to start';
+        const otherDeptName = conv.other_department_name || departmentNames[conv.other_department_id] || 'Department';
+        const lastTime = conv.last_message_time && conv.last_message_time !== '0000-00-00 00:00:00' 
+            ? new Date(conv.last_message_time).toLocaleString() 
+            : 'New';
+        
+        msgsHtml += `<div class="message-card relative ${isUnread ? 'message-unread' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
+            <div class="delete-conv-btn absolute top-2 right-2 bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center cursor-pointer opacity-0 hover:opacity-100 transition z-20" 
+                onclick="event.stopPropagation(); deleteConversationById(${conv.conversation_id})">
+                <i class="fas fa-trash-alt text-xs"></i>
+            </div>
+            <div class="message-header">
+                <span class="font-semibold">${escapeHtml(otherDeptName)}</span>
+                ${isUnread ? `<span class="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full ml-2">${conv.unread_count}</span>` : ''}
+            </div>
+            <div class="p-3">
+                <p class="text-sm text-gray-600 line-clamp-2">${escapeHtml(preview)}</p>
+                <p class="text-xs text-gray-400 mt-2">${lastTime}</p>
+            </div>
         </div>`;
     }
-    document.getElementById('messagesGridContainer').innerHTML = msgsHtml;
+    container.innerHTML = msgsHtml;
 }
 
-async function openChat(convId) { 
+async function openChat(convId) {
     currentChatConversationId = convId;
-    const convRes = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`);
-    const conversation = convRes.success ? convRes.data.find(c => c.conversation_id === convId) : null;
-    const otherDeptName = conversation ? conversation.other_department_name : 'Department';
+    
+    let conversation = conversationsList.find(c => c.conversation_id == convId);
+    if (!conversation) {
+        await loadMessages();
+        conversation = conversationsList.find(c => c.conversation_id == convId);
+        if (!conversation) {
+            showToast('Conversation not found', true);
+            return;
+        }
+    }
+    
+    const otherDeptName = conversation.other_department_name || departmentNames[conversation.other_department_id] || 'Department';
     document.getElementById('chatModalTitle').innerHTML = `<i class="fas fa-comments text-amber-600 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`;
-    const res = await apiCall(`get_messages.php?conversation_id=${convId}&department_id=${DEPARTMENT_ID}`); 
-    let msgs = res.success ? res.data : []; 
+    
+    // Get messages - this will return empty if all messages were deleted
+    const res = await apiCall(`get_messages.php?conversation_id=${convId}&department_id=${DEPARTMENT_ID}`);
+    let msgs = (res.success && res.data) ? res.data : [];
+    
+    // Mark as read
     await apiCall('mark_message_read.php', 'POST', { conversation_id: convId, department_id: DEPARTMENT_ID });
-    if (conversation && conversation.unread_count > 0) { conversation.unread_count = 0; unviewedMessagesCount = Math.max(0, unviewedMessagesCount - (conversation.unread_count || 0)); updateMessageBadge(); loadMessages(); }
-    let chatHtml = ''; 
-    for (let m of msgs) { 
-        const isSent = (m.sender_dept == DEPARTMENT_ID);
-        chatHtml += `<div class="chat-message-wrapper flex ${isSent ? 'justify-end' : 'justify-start'} mb-3">
-            <div class="chat-message max-w-[70%] ${isSent ? 'chat-sent' : 'chat-received'}">
-                <div class="chat-bubble rounded-xl p-3">${!isSent ? `<div class="text-xs opacity-75 mb-1 font-semibold">${departmentNames[m.sender_dept] || 'Department'}</div>` : ''}<div>${escapeHtml(m.message)}</div><div class="chat-time text-xs opacity-70 mt-1">${new Date(m.created_at).toLocaleString()}</div></div>
-            </div>
-            <button onclick="event.stopPropagation(); deleteSingleMessage(${m.id})" class="delete-msg-btn ml-2 bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center cursor-pointer opacity-0 hover:opacity-100 transition"><i class="fas fa-trash-alt text-xs"></i></button>
-        </div>`; 
-    } 
-    if (chatHtml === '') chatHtml = '<div class="text-center text-gray-400 py-6">No messages yet. Send a message to start the conversation!</div>';
-    document.getElementById('chatMessagesArea').innerHTML = chatHtml; document.getElementById('chatMessagesArea').scrollTop = document.getElementById('chatMessagesArea').scrollHeight;
-    openModal('chatModal'); 
+    
+    // Build chat HTML - this will be empty if no messages
+    let chatHtml = '';
+    if (msgs.length === 0) {
+        chatHtml = '<div class="text-center text-gray-400 py-8"><i class="fas fa-comments text-4xl mb-3 opacity-30"></i><p>No messages yet</p><p class="text-xs mt-1">Send a message to start the conversation!</p></div>';
+    } else {
+        for (let m of msgs) {
+            const isSent = (m.sender_dept == DEPARTMENT_ID);
+            const senderName = m.sender_dept_name || departmentNames[m.sender_dept] || 'Department';
+            const time = new Date(m.created_at).toLocaleString();
+            
+            chatHtml += `<div class="chat-message-wrapper flex ${isSent ? 'justify-end' : 'justify-start'} mb-3">
+                <div class="chat-message max-w-[70%] ${isSent ? 'chat-sent' : 'chat-received'}">
+                    <div class="chat-bubble rounded-xl p-3">
+                        ${!isSent ? `<div class="text-xs opacity-75 mb-1 font-semibold">${escapeHtml(senderName)}</div>` : ''}
+                        <div>${escapeHtml(m.message)}</div>
+                        <div class="chat-time text-xs opacity-70 mt-1">${time}</div>
+                    </div>
+                </div>
+                <button onclick="event.stopPropagation(); deleteSingleMessage(${m.id})" 
+                    class="delete-msg-btn ml-2 bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center cursor-pointer opacity-0 hover:opacity-100 transition">
+                    <i class="fas fa-trash-alt text-xs"></i>
+                </button>
+            </div>`;
+        }
+    }
+    
+    document.getElementById('chatMessagesArea').innerHTML = chatHtml;
+    document.getElementById('chatMessagesArea').scrollTop = document.getElementById('chatMessagesArea').scrollHeight;
+    openModal('chatModal');
 }
 
-async function sendChatMessage() { 
-    let msg = document.getElementById('replyMsg').value.trim(); 
-    if (!msg || !currentChatConversationId) return; 
+async function sendChatMessage() {
+    let msg = document.getElementById('replyMsg').value.trim();
+    if (!msg) { showToast('Enter a message', true); return; }
+    if (!currentChatConversationId) { showToast('No conversation selected', true); return; }
+    
+    let conversation = conversationsList.find(c => c.conversation_id === currentChatConversationId);
+    if (!conversation) {
+        await loadMessages();
+        conversation = conversationsList.find(c => c.conversation_id === currentChatConversationId);
+        if (!conversation) {
+            showToast('Conversation not found', true);
+            return;
+        }
+    }
+    
+    const receiverDept = conversation.other_department_id;
+    
     const sendBtn = document.querySelector('#chatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<span class="loading-spinner"></span>';
     sendBtn.disabled = true;
+    
     try {
-        let res = await apiCall('send_message.php', 'POST', { conversation_id: currentChatConversationId, department_id: DEPARTMENT_ID, message: msg, from_department_id: DEPARTMENT_ID });
-        if (res.success) { document.getElementById('replyMsg').value = ''; await openChat(currentChatConversationId); await loadMessages(); showToast('Sent'); }
-        else { showToast(res?.message || 'Failed', true); }
-    } catch(e) { showToast('Network error', true); } finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+        const payload = {
+            sender_dept: DEPARTMENT_ID,
+            receiver_dept: receiverDept,
+            conversation_id: currentChatConversationId,
+            message: msg
+        };
+        
+        let res = await apiCall('send_message.php', 'POST', payload);
+        
+        if (res && res.success) {
+            document.getElementById('replyMsg').value = '';
+            
+            const newMessageHtml = `<div class="chat-message-wrapper flex justify-end mb-3">
+                <div class="chat-message max-w-[70%] chat-sent">
+                    <div class="chat-bubble rounded-xl p-3">
+                        <div>${escapeHtml(msg)}</div>
+                        <div class="chat-time text-xs opacity-70 mt-1">Just now</div>
+                    </div>
+                </div>
+            </div>`;
+            
+            const chatArea = document.getElementById('chatMessagesArea');
+            if (chatArea) {
+                if (chatArea.innerHTML.includes('No messages yet')) {
+                    chatArea.innerHTML = newMessageHtml;
+                } else {
+                    chatArea.insertAdjacentHTML('beforeend', newMessageHtml);
+                }
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+            
+            if (conversation) {
+                conversation.last_message = msg;
+                conversation.last_message_time = new Date().toISOString();
+                
+                const msgCard = document.getElementById(`msg-card-${currentChatConversationId}`);
+                if (msgCard) {
+                    const previewP = msgCard.querySelector('.text-gray-600');
+                    if (previewP) previewP.innerHTML = escapeHtml(msg.substring(0, 70)) + (msg.length > 70 ? '...' : '');
+                    const timeSpan = msgCard.querySelector('.text-xs.text-gray-400.mt-2');
+                    if (timeSpan) timeSpan.innerHTML = 'Just now';
+                    const container = document.getElementById('messagesGridContainer');
+                    if (container && msgCard.parentNode === container) {
+                        container.insertBefore(msgCard, container.firstChild);
+                    }
+                }
+            }
+            
+            showToast('✅ Sent');
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
 
 async function deleteSingleMessage(messageId) {
-    if (!confirm('⚠️ Delete this message?')) return;
-    if (await softDeleteItem('message', messageId)) { 
-        if (currentChatConversationId) await openChat(currentChatConversationId); 
-        await loadMessages(); 
+    if (!confirm('⚠️ Delete this message? It will be hidden from your view.')) return;
+    
+    try {
+        const res = await apiCall('delete_message.php', 'POST', {
+            message_id: messageId,
+            department_id: DEPARTMENT_ID
+        });
+        
+        if (res.success) {
+            showToast('Message deleted');
+            if (currentChatConversationId) {
+                await openChat(currentChatConversationId);
+            }
+            await loadMessages();
+        } else {
+            showToast(res.message || 'Failed', true);
+        }
+    } catch(e) {
+        console.error("Delete error:", e);
+        showToast('Network error', true);
     }
 }
 
 async function deleteConversationById(conversationId) {
-    if (!confirm('⚠️ Delete this entire conversation?')) return;
-    if (await softDeleteItem('conversation', conversationId)) { 
-        if (currentChatConversationId === conversationId) { closeModal('chatModal'); currentChatConversationId = null; } 
-        await loadMessages(); 
+    if (!confirm('⚠️ Delete this entire conversation? This will remove it from your view completely.')) return;
+    
+    const deleteBtn = document.querySelector(`#msg-card-${conversationId} .delete-conv-btn`);
+    if (deleteBtn) deleteBtn.style.opacity = '0.5';
+    
+    try {
+        const res = await apiCall('delete_conversation.php', 'POST', {
+            conversation_id: conversationId,
+            department_id: DEPARTMENT_ID
+        });
+        
+        if (res.success) {
+            showToast('Conversation deleted');
+            
+            // Remove from local list
+            conversationsList = conversationsList.filter(c => c.conversation_id !== conversationId);
+            renderMessagesGrid();
+            updateMessageBadge();
+            
+            // Close chat modal if open
+            if (currentChatConversationId === conversationId) {
+                closeModal('chatModal');
+                currentChatConversationId = null;
+            }
+        } else {
+            showToast(res.message || 'Failed', true);
+        }
+    } catch(e) {
+        console.error("Delete error:", e);
+        showToast('Network error', true);
     }
 }
 
-async function sendNewChat() { 
-    let to = document.getElementById('chatRecipientSelect').value; 
-    let msg = document.getElementById('newChatMsg').value.trim(); 
-    if (!to || !msg) { showToast('Select department and enter message', true); return; } 
+async function sendNewChat() {
+    let to = document.getElementById('chatRecipientSelect').value;
+    let msg = document.getElementById('newChatMsg').value.trim();
+    
+    if (!to) {
+        showToast('Select department', true);
+        return;
+    }
+    if (!msg) {
+        showToast('Enter message', true);
+        return;
+    }
+    
     const sendBtn = document.querySelector('#startChatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
     sendBtn.disabled = true;
+    
     try {
-        let res = await apiCall('send_message.php', 'POST', { department_id: DEPARTMENT_ID, to_department_id: parseInt(to), message: msg, from_department_id: DEPARTMENT_ID, subject: 'Message from Construction' });
-        if (res.success) { showToast(`✅ Message sent to ${allDepartments.find(d=>d.id==parseInt(to))?.name}`); closeModal('startChatModal'); document.getElementById('newChatMsg').value = ''; loadMessages(); }
-        else { showToast('❌ ' + (res?.message || 'Failed'), true); }
-    } catch(e) { showToast('❌ Network error', true); } finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+        // ALWAYS create new conversation - don't include conversation_id
+        const payload = { 
+            sender_dept: DEPARTMENT_ID,
+            receiver_dept: parseInt(to), 
+            message: msg
+        };
+        
+        console.log("Creating NEW conversation:", payload);
+        
+        let res = await apiCall('send_message.php', 'POST', payload);
+        
+        console.log("Response:", res);
+        
+        if (res && res.success) {
+            const deptName = allDepartments.find(d => d.id == parseInt(to))?.name || 'Department';
+            showToast(`✅ New conversation started with ${deptName}`);
+            closeModal('startChatModal');
+            document.getElementById('newChatMsg').value = '';
+            
+            // Reload conversations list
+            await loadMessages();
+            
+            // Open the new conversation
+            if (res.data && res.data.conversation_id) {
+                setTimeout(async () => {
+                    await openChat(res.data.conversation_id);
+                }, 500);
+            }
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
-
 // ==================== REPORTS SECTION ====================
 async function loadReports() { 
     const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
@@ -790,7 +1059,7 @@ async function updateReport() { let id = parseInt(document.getElementById('editR
 async function addReport() { let title = document.getElementById('newReportTitle').value; let period = document.getElementById('newReportPeriod').value; let content = document.getElementById('newReportContent').value; if(!title||!content) { showToast('Title and content required', true); return; } let res = await apiCall('add_report.php', 'POST', { title, period, content, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Report added'); closeModal('addReportModal'); loadReports(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
 async function deleteReport(id) { if (confirm('⚠️ Delete this report?')) { if (await softDeleteItem('report', id)) { loadReports(); loadDashboard(); } } }
 
-// ==================== SETTINGS - NO BACKUP BUTTONS ====================
+// ==================== SETTINGS ====================
 function loadSettings() {
     const darkMode = document.body.classList.contains('dark-mode');
     const sidebarColors = [

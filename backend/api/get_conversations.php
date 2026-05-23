@@ -1,8 +1,4 @@
 <?php
-// ============================================
-// FILE: backend/api/get_conversations.php
-// ============================================
-
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -28,24 +24,18 @@ if ($conn->connect_error) {
 $conn->set_charset("utf8mb4");
 
 // Get parameters
-$department_id = null;
-$user_id = null;
+$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;
+$user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : null;
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;
-    $user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : null;
-    
-    if ($user_id == 1 && !$department_id) {
-        $department_id = 1;
-    }
+if ($user_id == 1 && !$department_id) {
+    $department_id = 1;
 }
 
 $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 100;
 $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
-$show_deleted = isset($_GET['show_deleted']) ? (int)$_GET['show_deleted'] : 0;
 
 if (!$department_id) {
-    echo json_encode(['success' => false, 'message' => 'department_id or user_id is required']);
+    echo json_encode(['success' => false, 'message' => 'department_id is required']);
     exit;
 }
 
@@ -75,7 +65,7 @@ $delete_column_map = [
 $delete_column = $delete_column_map[$department_id] ?? 'deleted_by_super_admin';
 
 try {
-    // Build query
+    // Get ALL conversations where this department is involved and not deleted by them
     $query = "
         SELECT 
             c.id as conversation_id,
@@ -91,13 +81,10 @@ try {
             END as other_department_id
         FROM conversations c
         WHERE (c.sender_dept = ? OR c.receiver_dept = ?)
+        AND (c.$delete_column != 1 OR c.$delete_column IS NULL)
+        ORDER BY c.updated_at DESC
+        LIMIT ? OFFSET ?
     ";
-    
-    if (!$show_deleted) {
-        $query .= " AND ($delete_column != 1 OR $delete_column IS NULL)";
-    }
-    
-    $query .= " ORDER BY c.updated_at DESC LIMIT ? OFFSET ?";
     
     $stmt = $conn->prepare($query);
     $stmt->bind_param("iiiii", $department_id, $department_id, $department_id, $limit, $offset);
@@ -111,27 +98,32 @@ try {
         $other_dept_id = $row['other_department_id'];
         $other_dept_name = $department_names[$other_dept_id] ?? 'Unknown';
         
-        // Get latest message
-        $msg_stmt = $conn->prepare("
+        // Get latest message from THIS conversation (not deleted by current user)
+        $msg_query = "
             SELECT message, created_at 
             FROM messages 
             WHERE conversation_id = ? 
+            AND ((sender_dept = ? AND sender_deleted != 1) OR (receiver_dept = ? AND receiver_deleted != 1))
             ORDER BY created_at DESC 
             LIMIT 1
-        ");
-        $msg_stmt->bind_param("i", $row['conversation_id']);
+        ";
+        $msg_stmt = $conn->prepare($msg_query);
+        $msg_stmt->bind_param("iii", $row['conversation_id'], $department_id, $department_id);
         $msg_stmt->execute();
         $msg_result = $msg_stmt->get_result();
         $latest_msg = $msg_result->fetch_assoc();
         
-        $last_message = $latest_msg['message'] ?? 'No messages';
-        $last_message_time = $latest_msg['created_at'] ?? $row['updated_at'];
+        $last_message = $latest_msg['message'] ?? 'No messages yet';
+        $last_message_time = $latest_msg['created_at'] ?? $row['created_at'];
         
-        // Get unread count
+        // Get unread count for this conversation
         $unread_stmt = $conn->prepare("
             SELECT COUNT(*) as unread 
             FROM messages 
-            WHERE conversation_id = ? AND receiver_dept = ? AND is_read = 0
+            WHERE conversation_id = ? 
+            AND receiver_dept = ? 
+            AND is_read = 0
+            AND receiver_deleted != 1
         ");
         $unread_stmt->bind_param("ii", $row['conversation_id'], $department_id);
         $unread_stmt->execute();
@@ -155,28 +147,11 @@ try {
         ];
     }
     
-    // Get total count
-    $count_query = "
-        SELECT COUNT(*) as total 
-        FROM conversations c
-        WHERE (c.sender_dept = ? OR c.receiver_dept = ?)
-    ";
-    if (!$show_deleted) {
-        $count_query .= " AND ($delete_column != 1 OR $delete_column IS NULL)";
-    }
-    
-    $count_stmt = $conn->prepare($count_query);
-    $count_stmt->bind_param("ii", $department_id, $department_id);
-    $count_stmt->execute();
-    $count_result = $count_stmt->get_result();
-    $total_count = $count_result->fetch_assoc()['total'] ?? 0;
-    
     echo json_encode([
         'success' => true,
         'data' => $conversations,
         'total_unread' => $total_unread,
-        'total_count' => (int)$total_count,
-        'has_more' => ($offset + $limit) < $total_count
+        'total_count' => count($conversations)
     ]);
     
 } catch (Exception $e) {
