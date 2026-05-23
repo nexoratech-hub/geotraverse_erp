@@ -999,25 +999,57 @@ async function deleteMessage(messageId) {
     }
 }
 
+// Tafuta function hii kwenye manager dashboard na uibadilishe
 async function sendNewMessage() {
     const departmentId = document.getElementById('msgTo').value;
     const msg = document.getElementById('msgContent').value;
-    if (!departmentId) { showToast('Please select a department', true); return; }
-    if (!msg.trim()) { showToast('Please enter a message', true); return; }
+    
+    console.log("Manager sendNewMessage - departmentId:", departmentId, "msg:", msg);
+    
+    if (!departmentId) {
+        showToast('Please select a department', true);
+        return;
+    }
+    if (!msg.trim()) {
+        showToast('Please enter a message', true);
+        return;
+    }
+    
     const sendBtn = document.querySelector('#msgModal .btn-primary');
     const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
     sendBtn.disabled = true;
+    
     try {
-        const res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: parseInt(departmentId), message: msg.trim(), subject: 'New Message from Manager' });
+        // Tumia sender_dept na receiver_dept
+        const payload = {
+            sender_dept: DEPARTMENT_ID,  // Manager department = 4
+            receiver_dept: parseInt(departmentId),
+            message: msg.trim(),
+            subject: 'New Message from Manager'
+        };
+        
+        console.log("Sending payload:", payload);
+        
+        const res = await apiCall('send_message.php', 'POST', payload);
+        
+        console.log("API Response:", res);
+        
         if (res && res.success) {
-            showToast('✅ Message sent!');
+            showToast('✅ Message sent to ' + (res.data?.to_department_name || 'Department'));
             closeModal('msgModal');
             document.getElementById('msgContent').value = '';
-            loadMessages();
-        } else { showToast('❌ ' + (res?.message || 'Failed'), true); }
-    } catch (error) { showToast('❌ Network error', true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+            await loadMessages();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send message'), true);
+        }
+    } catch (error) {
+        console.error("Send error:", error);
+        showToast('❌ Network error: ' + error.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
 
 async function openChat(conversationId) {
@@ -1049,17 +1081,64 @@ async function openChat(conversationId) {
     } else { openModal('chatModal'); }
 }
 
+// Tafuta function hii kwenye manager dashboard
 async function sendChatMessage() {
     let msg = document.getElementById('replyMsg').value;
-    if (!msg.trim()) { showToast('Enter a message', true); return; }
-    if (!currentConversationId) { showToast('No conversation', true); return; }
-    let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, conversation_id: currentConversationId, message: msg });
-    if (res && res.success) {
-        document.getElementById('replyMsg').value = '';
-        openChat(currentConversationId);
-        loadMessages();
-        showToast('Sent');
-    } else { showToast(res?.message || 'Failed', true); }
+    if (!msg.trim()) {
+        showToast('Enter a message', true);
+        return;
+    }
+    if (!currentConversationId) {
+        showToast('No conversation', true);
+        return;
+    }
+    
+    // Tafuta receiver department
+    const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
+    if (!currentConv) {
+        showToast('Conversation not found', true);
+        return;
+    }
+    
+    const receiverDept = currentConv.other_department_id;
+    
+    console.log("Manager sendChatMessage - convId:", currentConversationId, "receiver:", receiverDept, "msg:", msg);
+    
+    const sendBtn = document.querySelector('#chatModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span>';
+    sendBtn.disabled = true;
+    
+    try {
+        const payload = {
+            sender_dept: DEPARTMENT_ID,  // Manager = 4
+            receiver_dept: receiverDept,
+            conversation_id: currentConversationId,
+            message: msg.trim(),
+            subject: 'Reply'
+        };
+        
+        console.log("Sending payload:", payload);
+        
+        const res = await apiCall('send_message.php', 'POST', payload);
+        
+        console.log("API Response:", res);
+        
+        if (res && res.success) {
+            document.getElementById('replyMsg').value = '';
+            await openChat(currentConversationId);
+            await loadMessages();
+            showToast('Sent');
+        } else {
+            showToast(res?.message || 'Failed', true);
+        }
+    } catch (error) {
+        console.error("Send error:", error);
+        showToast('Network error', true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
 
 // ==================== REPORTS ====================

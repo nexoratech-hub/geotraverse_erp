@@ -1,81 +1,137 @@
 <?php
-error_reporting(0);
-ini_set('display_errors', 0);
-
+// /geotraverse/backend/api/get_projects_universal.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+require_once '../config/database.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$method = $_SERVER['REQUEST_METHOD'];
+
+if ($method === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
-$host = "localhost";
-$db_name = "geotraverse_erp";
-$username = "root";
-$password = "";
-
-try {
-    $pdo = new PDO("mysql:host=" . $host . ";dbname=" . $db_name . ";charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(["success" => false, "message" => "Database connection failed", "data" => []]);
-    exit();
-}
-
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-
-// If user_id provided, get department from user
-if ($user_id > 0 && $department_id === 0) {
-    $userQuery = $pdo->prepare("SELECT department_id FROM users WHERE id = ?");
-    $userQuery->execute([$user_id]);
-    $user = $userQuery->fetch(PDO::FETCH_ASSOC);
-    $department_id = $user ? $user['department_id'] : 0;
-}
-
-if ($department_id === 0) {
-    echo json_encode(["success" => false, "message" => "Department ID required", "data" => []]);
-    exit();
-}
-
-// SUPER ADMIN (department_id = 1) - sees ALL projects (except those deleted by admin)
-if ($department_id == 1) {
-    $query = "SELECT p.*, d.name as department_name 
-              FROM projects p
-              LEFT JOIN departments d ON p.department_id = d.id
-              WHERE (p.deleted_by_admin = 0 OR p.deleted_by_admin IS NULL)
-              ORDER BY p.id DESC";
-    $stmt = $pdo->prepare($query);
-    $stmt->execute();
-    $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+if ($method === 'GET') {
+    $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
     
-    $unviewedCount = 0;
-    if (!empty($projects)) {
-        $unviewedQuery = "SELECT COUNT(*) as unviewed FROM projects 
-                          WHERE (is_viewed_by_admin = 0 OR is_viewed_by_admin IS NULL)
-                          AND department_id != 1
-                          AND (deleted_by_admin = 0 OR deleted_by_admin IS NULL)";
-        $unviewedStmt = $pdo->prepare($unviewedQuery);
-        $unviewedStmt->execute();
-        $unviewedCount = $unviewedStmt->fetch(PDO::FETCH_ASSOC)['unviewed'];
+    if ($department_id === 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Department ID is required'
+        ]);
+        exit();
     }
-} 
-// OTHER DEPARTMENTS - see projects created by them OR sent to them
-else {
+    
+    // Get projects for specific department
     $query = "SELECT p.*, d.name as department_name 
-              FROM projects p
-              LEFT JOIN departments d ON p.department_id = d.id
-              WHERE (p.department_id = ? OR p.sent_to_department = ?)
+              FROM projects p 
+              LEFT JOIN departments d ON p.department_id = d.id 
+              WHERE p.department_id = :department_id 
               AND (p.deleted_by_department = 0 OR p.deleted_by_department IS NULL)
-              ORDER BY p.id DESC";
-    $stmt = $pdo->prepare($query);
-    $stmt->execute([$department_id, $department_id]);
-    $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $unviewedCount = 0;
+              AND (p.deleted_by_admin = 0 OR p.deleted_by_admin IS NULL)
+              ORDER BY p.created_at DESC";
+    
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':department_id', $department_id);
+    $stmt->execute();
+    
+    $projects = [];
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $projects[] = [
+            'id' => $row['id'],
+            'name' => $row['name'],
+            'client_name' => $row['client_name'],
+            'amount' => $row['amount'],
+            'status' => $row['status'],
+            'progress' => $row['progress'],
+            'location' => $row['location'],
+            'description' => $row['description'],
+            'image' => $row['image'],
+            'start_date' => $row['start_date'],
+            'end_date' => $row['end_date'],
+            'department_id' => $row['department_id'],
+            'department_name' => $row['department_name'],
+            'sent_from_dept' => $row['sent_from_dept'],
+            'is_viewed_by_department' => $row['is_viewed_by_department'],
+            'is_viewed_by_admin' => $row['is_viewed_by_admin'],
+            'created_at' => $row['created_at']
+        ];
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $projects,
+        'total' => count($projects),
+        'department_id' => $department_id
+    ]);
+    
+} elseif ($method === 'POST') {
+    // Add new project
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$data) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Invalid data'
+        ]);
+        exit();
+    }
+    
+    $department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
+    $name = isset($data['name']) ? trim($data['name']) : '';
+    $client_name = isset($data['client_name']) ? trim($data['client_name']) : '';
+    $amount = isset($data['amount']) ? floatval($data['amount']) : 0;
+    $location = isset($data['location']) ? trim($data['location']) : '';
+    $description = isset($data['description']) ? trim($data['description']) : '';
+    $status = isset($data['status']) ? $data['status'] : 'pending';
+    $progress = isset($data['progress']) ? intval($data['progress']) : 0;
+    $start_date = isset($data['start_date']) ? $data['start_date'] : null;
+    $end_date = isset($data['end_date']) ? $data['end_date'] : null;
+    $image = isset($data['image']) ? $data['image'] : '';
+    
+    if (empty($name)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Project name is required'
+        ]);
+        exit();
+    }
+    
+    $query = "INSERT INTO projects (name, client_name, amount, location, description, status, progress, start_date, end_date, department_id, image, created_at) 
+              VALUES (:name, :client_name, :amount, :location, :description, :status, :progress, :start_date, :end_date, :department_id, :image, NOW())";
+    
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':name', $name);
+    $stmt->bindParam(':client_name', $client_name);
+    $stmt->bindParam(':amount', $amount);
+    $stmt->bindParam(':location', $location);
+    $stmt->bindParam(':description', $description);
+    $stmt->bindParam(':status', $status);
+    $stmt->bindParam(':progress', $progress);
+    $stmt->bindParam(':start_date', $start_date);
+    $stmt->bindParam(':end_date', $end_date);
+    $stmt->bindParam(':department_id', $department_id);
+    $stmt->bindParam(':image', $image);
+    
+    if ($stmt->execute()) {
+        $id = $db->lastInsertId();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Project added successfully',
+            'id' => $id
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Failed to add project'
+        ]);
+    }
 }
-
-echo json_encode(["success" => true, "data" => $projects, "unviewed_count" => (int)$unviewedCount]);
 ?>

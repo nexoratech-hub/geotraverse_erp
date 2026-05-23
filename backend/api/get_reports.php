@@ -1,69 +1,72 @@
 <?php
-// backend/api/get_reports.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
 require_once '../config/database.php';
 
 $database = new Database();
-$conn = $database->getConnection();
+$db = $database->getConnection();
 
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-$is_admin = isset($_GET['is_admin']) ? intval($_GET['is_admin']) : 0;
+$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
+$user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+$report_id = isset($_GET['report_id']) ? (int)$_GET['report_id'] : 0;
 
-$query = "SELECT r.*, d.name as department_name 
-          FROM reports r 
-          LEFT JOIN departments d ON r.department_id = d.id 
-          WHERE 1=1";
-
-$params = [];
-
-// Admin can see all non-deleted reports
-if ($is_admin == 1) {
-    $query .= " AND r.deleted_by_admin = 0";
-} 
-// Department user - only see reports not deleted by their department
-else if ($department_id > 0) {
-    $query .= " AND r.deleted_by_department = 0";
-    $query .= " AND (r.department_id = ? OR r.department_id IS NULL)";
-    $params[] = $department_id;
+try {
+    if ($report_id > 0) {
+        $query = "SELECT r.*, d.name as department_name 
+                  FROM reports r
+                  LEFT JOIN departments d ON r.department_id = d.id
+                  WHERE r.id = ?";
+        $stmt = $db->prepare($query);
+        $stmt->execute([$report_id]);
+        
+        if ($stmt->rowCount() > 0) {
+            echo json_encode(['success' => true, 'data' => $stmt->fetch(PDO::FETCH_ASSOC)]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Report not found']);
+        }
+        exit();
+    }
+    
+    // Get all reports for department
+    $query = "SELECT r.*, d.name as department_name 
+              FROM reports r
+              LEFT JOIN departments d ON r.department_id = d.id
+              WHERE r.deleted_by_admin = 0 AND r.deleted_by_department = 0
+              ORDER BY r.created_at DESC";
+    
+    $stmt = $db->prepare($query);
+    $stmt->execute();
+    
+    $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Filter by department if specified
+    if ($department_id > 0) {
+        $reports = array_filter($reports, function($r) use ($department_id) {
+            return $r['department_id'] == $department_id;
+        });
+        $reports = array_values($reports);
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $reports,
+        'total' => count($reports),
+        'department_id' => $department_id
+    ]);
+    
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false, 
+        'message' => 'Database error: ' . $e->getMessage(),
+        'data' => []
+    ]);
 }
-// Fallback
-else {
-    $query .= " AND r.deleted_by_department = 0 AND r.deleted_by_admin = 0";
-}
-
-$query .= " ORDER BY r.created_at DESC";
-
-$stmt = $conn->prepare($query);
-$stmt->execute($params);
-$reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Count unviewed reports for this user/department
-$unviewed_query = "SELECT COUNT(*) as unviewed_count FROM reports r 
-                   WHERE (r.is_viewed_by_department = 0 OR r.is_viewed_by_department IS NULL)";
-$unviewed_params = [];
-
-if ($is_admin == 1) {
-    $unviewed_query .= " AND r.deleted_by_admin = 0 AND r.department_id != 1";
-} else if ($department_id > 0) {
-    $unviewed_query .= " AND r.department_id = ? AND r.deleted_by_department = 0 AND r.deleted_by_admin = 0";
-    $unviewed_params[] = $department_id;
-} else {
-    $unviewed_query .= " AND r.deleted_by_department = 0 AND r.deleted_by_admin = 0";
-}
-
-$unviewed_stmt = $conn->prepare($unviewed_query);
-$unviewed_stmt->execute($unviewed_params);
-$unviewed_count = $unviewed_stmt->fetchColumn();
-
-echo json_encode([
-    'success' => true,
-    'data' => $reports,
-    'unviewed_count' => intval($unviewed_count),
-    'total' => count($reports)
-]);
 ?>

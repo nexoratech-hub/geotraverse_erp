@@ -1,60 +1,90 @@
 <?php
-// backend/api/add_report.php
+/**
+ * API: Add a new Report
+ * Method: POST
+ * Parameters: 
+ *   - title (required)
+ *   - period (daily/weekly/monthly/quarterly/annual)
+ *   - content (required)
+ *   - department_id (required)
+ *   - status (draft/sent) - optional, default 'draft'
+ * 
+ * Response: { "success": true, "message": "Report added successfully", "report_id": 123 }
+ */
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 require_once '../config/database.php';
 
 $database = new Database();
-$conn = $database->getConnection();
+$db = $database->getConnection();
 
-if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-    http_response_code(200);
-    exit();
+$data = json_decode(file_get_contents('php://input'), true);
+
+if (!$data) {
+    echo json_encode(['success' => false, 'message' => 'Invalid JSON data']);
+    exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] != 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Only POST method allowed']);
-    exit();
-}
-
-$input = json_decode(file_get_contents('php://input'), true);
-
-$title = trim($input['title'] ?? '');
-$period = $input['period'] ?? 'monthly';
-$content = trim($input['content'] ?? '');
-$department_id = isset($input['department_id']) ? intval($input['department_id']) : 1;
-$status = $input['status'] ?? 'draft';
+$title = isset($data['title']) ? trim($data['title']) : '';
+$period = isset($data['period']) ? $data['period'] : 'monthly';
+$content = isset($data['content']) ? trim($data['content']) : '';
+$department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
+$status = isset($data['status']) ? $data['status'] : 'draft';
 
 if (empty($title)) {
-    echo json_encode(['success' => false, 'message' => 'Title is required']);
-    exit();
+    echo json_encode(['success' => false, 'message' => 'Report title is required']);
+    exit;
 }
 
 if (empty($content)) {
-    echo json_encode(['success' false, 'message' => 'Content is required']);
-    exit();
+    echo json_encode(['success' => false, 'message' => 'Report content is required']);
+    exit;
 }
 
-$stmt = $conn->prepare("INSERT INTO reports (title, period, content, department_id, status, created_at) 
-                        VALUES (?, ?, ?, ?, ?, NOW())");
-$stmt->execute([$title, $period, $content, $department_id, $status]);
+if ($department_id <= 0) {
+    echo json_encode(['success' => false, 'message' => 'Department ID is required']);
+    exit;
+}
 
-$report_id = $conn->lastInsertId();
+// Validate period
+$allowedPeriods = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+if (!in_array($period, $allowedPeriods)) {
+    $period = 'monthly';
+}
 
-echo json_encode([
-    'success' => true,
-    'message' => 'Report added successfully',
-    'report_id' => $report_id,
-    'data' => [
-        'id' => $report_id,
-        'title' => $title,
-        'period' => $period,
-        'content' => $content,
-        'department_id' => $department_id,
-        'status' => $status
-    ]
-]);
+// Validate status
+$allowedStatus = ['draft', 'sent'];
+if (!in_array($status, $allowedStatus)) {
+    $status = 'draft';
+}
+
+try {
+    $query = "INSERT INTO reports (title, period, content, status, department_id, created_at) 
+              VALUES (:title, :period, :content, :status, :department_id, NOW())";
+    
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':title', $title);
+    $stmt->bindParam(':period', $period);
+    $stmt->bindParam(':content', $content);
+    $stmt->bindParam(':status', $status);
+    $stmt->bindParam(':department_id', $department_id);
+    
+    if ($stmt->execute()) {
+        $report_id = $db->lastInsertId();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Report added successfully',
+            'report_id' => $report_id
+        ]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to add report']);
+    }
+} catch (PDOException $e) {
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+}
 ?>

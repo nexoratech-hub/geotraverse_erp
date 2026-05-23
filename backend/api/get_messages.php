@@ -1,115 +1,139 @@
 <?php
+// ============================================
+// FILE: backend/api/get_messages.php
+// ============================================
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-require_once '../config/database.php';
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
-$database = new Database();
-$db = $database->getConnection();
+$host = 'localhost';
+$user = 'root';
+$password = '';
+$database = 'geotraverse_erp';
 
-$conversation_id = isset($_GET['conversation_id']) ? intval($_GET['conversation_id']) : null;
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : null;
-$from_department = isset($_GET['from_department']) ? intval($_GET['from_department']) : null;
-$user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : null;
+$conn = new mysqli($host, $user, $password, $database);
 
-$departmentNames = [
-    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing', 4 => 'Manager',
-    5 => 'Secretary', 6 => 'Bricks & Timber', 7 => 'Aluminium', 8 => 'Town Planning',
-    9 => 'Architectural', 10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
+if ($conn->connect_error) {
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit;
+}
+
+$conn->set_charset("utf8mb4");
+
+// Get parameters
+$conversation_id = isset($_GET['conversation_id']) ? (int)$_GET['conversation_id'] : null;
+$department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;
+$user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : null;
+
+// If user_id is provided, get department from users table
+if ($user_id && !$department_id) {
+    $user_stmt = $conn->prepare("SELECT department_id FROM users WHERE id = ?");
+    $user_stmt->bind_param("i", $user_id);
+    $user_stmt->execute();
+    $user_result = $user_stmt->get_result();
+    if ($user_row = $user_result->fetch_assoc()) {
+        $department_id = $user_row['department_id'];
+    }
+}
+
+if (!$conversation_id || !$department_id) {
+    echo json_encode(['success' => false, 'message' => 'conversation_id and department_id/user_id are required']);
+    exit;
+}
+
+$department_names = [
+    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing',
+    4 => 'Manager', 5 => 'Secretary', 6 => 'Bricks & Timber',
+    7 => 'Aluminium', 8 => 'Town Planning', 9 => 'Architectural',
+    10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
 ];
 
 try {
-    if ($conversation_id) {
-        // Get messages for a specific conversation
-        $query = "SELECT 
-                    m.id,
-                    m.message,
-                    m.is_read,
-                    m.status,
-                    m.created_at,
-                    m.sender_dept,
-                    m.receiver_dept,
-                    m.sender_id,
-                    m.receiver_id,
-                    m.sender_deleted,
-                    m.receiver_deleted,
-                    u_sender.name as sender_name,
-                    u_receiver.name as receiver_name,
-                    d_sender.name as sender_department_name,
-                    d_receiver.name as receiver_department_name
-                  FROM messages m
-                  LEFT JOIN users u_sender ON m.sender_id = u_sender.id
-                  LEFT JOIN users u_receiver ON m.receiver_id = u_receiver.id
-                  LEFT JOIN departments d_sender ON m.sender_dept = d_sender.id
-                  LEFT JOIN departments d_receiver ON m.receiver_dept = d_receiver.id
-                  WHERE m.conversation_id = ?
-                    AND m.sender_deleted = 0 
-                    AND m.receiver_deleted = 0
-                  ORDER BY m.created_at ASC";
+    // Get messages
+    $query = "
+        SELECT 
+            m.id,
+            m.conversation_id,
+            m.sender_dept,
+            m.receiver_dept,
+            m.message,
+            m.is_read,
+            m.status,
+            m.created_at,
+            CASE 
+                WHEN m.sender_dept = 1 THEN 'Super Admin'
+                WHEN m.sender_dept = 2 THEN 'Finance'
+                WHEN m.sender_dept = 3 THEN 'Sales & Marketing'
+                WHEN m.sender_dept = 4 THEN 'Manager'
+                WHEN m.sender_dept = 5 THEN 'Secretary'
+                WHEN m.sender_dept = 6 THEN 'Bricks & Timber'
+                WHEN m.sender_dept = 7 THEN 'Aluminium'
+                WHEN m.sender_dept = 8 THEN 'Town Planning'
+                WHEN m.sender_dept = 9 THEN 'Architectural'
+                WHEN m.sender_dept = 10 THEN 'Survey'
+                WHEN m.sender_dept = 11 THEN 'Construction'
+                WHEN m.sender_dept = 12 THEN 'Hatimiliki'
+                ELSE 'Unknown'
+            END as sender_dept_name
+        FROM messages m
+        WHERE m.conversation_id = ?
+        AND ((m.sender_dept = ? AND m.sender_deleted != 1) OR (m.receiver_dept = ? AND m.receiver_deleted != 1))
+        ORDER BY m.created_at ASC
+    ";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("iii", $conversation_id, $department_id, $department_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $messages = [];
+    $unread_ids = [];
+    
+    while ($row = $result->fetch_assoc()) {
+        $is_sent_by_current = ($row['sender_dept'] == $department_id);
         
-        $stmt = $db->prepare($query);
-        $stmt->execute([$conversation_id]);
-        $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Mark messages as read if user_id provided
-        if ($user_id) {
-            $updateQuery = "UPDATE messages SET is_read = 1, read_at = NOW() 
-                           WHERE conversation_id = ? AND receiver_id = ? AND is_read = 0";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$conversation_id, $user_id]);
-        } else if ($department_id) {
-            $updateQuery = "UPDATE messages SET is_read = 1, read_at = NOW() 
-                           WHERE conversation_id = ? AND receiver_dept = ? AND is_read = 0";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$conversation_id, $department_id]);
+        if (!$is_sent_by_current && $row['is_read'] == 0) {
+            $unread_ids[] = $row['id'];
         }
         
-        // Add department names for display
-        foreach ($messages as &$msg) {
-            if ($msg['sender_dept']) {
-                $msg['sender_department'] = isset($departmentNames[$msg['sender_dept']]) ? $departmentNames[$msg['sender_dept']] : 'Department ' . $msg['sender_dept'];
-            } else if ($msg['sender_name']) {
-                $msg['sender_department'] = $msg['sender_name'];
-            } else {
-                $msg['sender_department'] = 'Unknown';
-            }
-        }
-        
-        echo json_encode(['success' => true, 'data' => $messages]);
-        
-    } else if ($department_id && $from_department) {
-        // Get messages between two departments
-        $query = "SELECT 
-                    m.id,
-                    m.message,
-                    m.is_read,
-                    m.status,
-                    m.created_at,
-                    m.sender_dept,
-                    m.receiver_dept,
-                    m.sender_id,
-                    m.receiver_id,
-                    m.sender_deleted,
-                    m.receiver_deleted
-                  FROM messages m
-                  WHERE ((m.sender_dept = ? AND m.receiver_dept = ?) OR (m.sender_dept = ? AND m.receiver_dept = ?))
-                    AND m.sender_deleted = 0 
-                    AND m.receiver_deleted = 0
-                  ORDER BY m.created_at ASC";
-        
-        $stmt = $db->prepare($query);
-        $stmt->execute([$department_id, $from_department, $from_department, $department_id]);
-        $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        echo json_encode(['success' => true, 'data' => $messages]);
-        
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Conversation ID or department parameters required', 'data' => []]);
+        $messages[] = [
+            'id' => (int)$row['id'],
+            'conversation_id' => (int)$row['conversation_id'],
+            'sender_dept' => (int)$row['sender_dept'],
+            'sender_dept_name' => $row['sender_dept_name'],
+            'receiver_dept' => (int)$row['receiver_dept'],
+            'message' => $row['message'],
+            'is_read' => (int)$row['is_read'],
+            'is_sent_by_current' => $is_sent_by_current,
+            'status' => $row['status'],
+            'created_at' => $row['created_at']
+        ];
     }
     
-} catch (PDOException $e) {
-    error_log("Get messages error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => $e->getMessage(), 'data' => []]);
+    // Mark unread messages as read
+    if (!empty($unread_ids)) {
+        $placeholders = implode(',', array_fill(0, count($unread_ids), '?'));
+        $update_stmt = $conn->prepare("UPDATE messages SET is_read = 1, read_at = NOW() WHERE id IN ($placeholders)");
+        $update_stmt->bind_param(str_repeat('i', count($unread_ids)), ...$unread_ids);
+        $update_stmt->execute();
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $messages,
+        'total_count' => count($messages)
+    ]);
+    
+} catch (Exception $e) {
+    echo json_encode(['success' => false, 'message' => 'Failed: ' . $e->getMessage()]);
+} finally {
+    if (isset($conn)) $conn->close();
 }
 ?>

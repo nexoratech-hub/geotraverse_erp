@@ -1,58 +1,60 @@
 <?php
+// /geotraverse/backend/api/mark_message_read_universal.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
 require_once '../config/database.php';
 
 $database = new Database();
 $db = $database->getConnection();
 
-$data = json_decode(file_get_contents("php://input"));
+$method = $_SERVER['REQUEST_METHOD'];
 
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'No data received']);
-    exit;
+if ($method === 'OPTIONS') {
+    http_response_code(200);
+    exit();
 }
 
-$message_id = isset($data->message_id) ? intval($data->message_id) : null;
-$department_id = isset($data->department_id) ? intval($data->department_id) : null;
-$conversation_id = isset($data->conversation_id) ? intval($data->conversation_id) : null;
-$user_id = isset($data->user_id) ? intval($data->user_id) : null;
-
-try {
-    if ($message_id) {
-        // Mark single message as read
-        $query = "UPDATE messages SET is_read = 1, read_at = NOW() WHERE id = ?";
-        $stmt = $db->prepare($query);
-        $stmt->execute([$message_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'Message marked as read']);
-        
-    } else if ($conversation_id && $department_id) {
-        // Mark all messages in conversation as read for this department
-        $query = "UPDATE messages SET is_read = 1, read_at = NOW() 
-                  WHERE conversation_id = ? AND receiver_dept = ? AND is_read = 0";
-        $stmt = $db->prepare($query);
-        $stmt->execute([$conversation_id, $department_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'All messages marked as read']);
-        
-    } else if ($conversation_id && $user_id) {
-        // Mark all messages in conversation as read for this user
-        $query = "UPDATE messages SET is_read = 1, read_at = NOW() 
-                  WHERE conversation_id = ? AND receiver_id = ? AND is_read = 0";
-        $stmt = $db->prepare($query);
-        $stmt->execute([$conversation_id, $user_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'All messages marked as read']);
-        
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Message ID or Conversation ID with Department/User ID required']);
+if ($method === 'POST') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$data) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Invalid data'
+        ]);
+        exit();
     }
     
-} catch (PDOException $e) {
-    error_log("Mark message read error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    $message_id = isset($data['message_id']) ? intval($data['message_id']) : 0;
+    $department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
+    $user_id = isset($data['user_id']) ? intval($data['user_id']) : 0;
+    
+    if ($message_id === 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Message ID is required'
+        ]);
+        exit();
+    }
+    
+    // Mark message as read
+    $query = "UPDATE messages SET is_read = 1, read_at = NOW(), status = 'read' WHERE id = :msg_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':msg_id', $message_id);
+    
+    if ($stmt->execute()) {
+        echo json_encode([
+            'success' => true,
+            'message' => 'Message marked as read'
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Failed to mark message as read'
+        ]);
+    }
 }
 ?>

@@ -1241,23 +1241,64 @@ async function openChat(conversationId) {
     } else { openModal('chatModal'); } 
 }
 
-async function sendChatMessage() { 
-    let msg = document.getElementById('replyMsg').value.trim(); 
-    if (!msg || !currentConversationId) { showToast('Enter a message', true); return; } 
+// Tafuta function hii kwenye manager dashboard
+async function sendChatMessage() {
+    let msg = document.getElementById('replyMsg').value;
+    if (!msg.trim()) {
+        showToast('Enter a message', true);
+        return;
+    }
+    if (!currentConversationId) {
+        showToast('No conversation', true);
+        return;
+    }
+    
+    // Tafuta receiver department
+    const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
+    if (!currentConv) {
+        showToast('Conversation not found', true);
+        return;
+    }
+    
+    const receiverDept = currentConv.other_department_id;
+    
+    console.log("Manager sendChatMessage - convId:", currentConversationId, "receiver:", receiverDept, "msg:", msg);
+    
     const sendBtn = document.querySelector('#chatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
+    sendBtn.innerHTML = '<span class="loading-spinner"></span>';
     sendBtn.disabled = true;
+    
     try {
-        let res = await apiCall('send_message.php', 'POST', { conversation_id: currentConversationId, message: msg, department_id: DEPARTMENT_ID }); 
-        if (res && res.success) { 
-            document.getElementById('replyMsg').value = ''; 
-            await openChat(currentConversationId); 
-            await loadMessages(); 
-            showToast('Sent'); 
-        } else { showToast(res?.message || 'Failed', true); } 
-    } catch(e) { showToast('Network error', true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+        const payload = {
+            sender_dept: DEPARTMENT_ID,  // Manager = 4
+            receiver_dept: receiverDept,
+            conversation_id: currentConversationId,
+            message: msg.trim(),
+            subject: 'Reply'
+        };
+        
+        console.log("Sending payload:", payload);
+        
+        const res = await apiCall('send_message.php', 'POST', payload);
+        
+        console.log("API Response:", res);
+        
+        if (res && res.success) {
+            document.getElementById('replyMsg').value = '';
+            await openChat(currentConversationId);
+            await loadMessages();
+            showToast('Sent');
+        } else {
+            showToast(res?.message || 'Failed', true);
+        }
+    } catch (error) {
+        console.error("Send error:", error);
+        showToast('Network error', true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
 
 // ==================== REPORTS WITH SOFT DELETE ====================

@@ -1,136 +1,163 @@
 <?php
-// backend/api/send_report.php
-error_reporting(0);
-ini_set('display_errors', 0);
+/**
+ * API: Send Report to Another Department
+ * Method: POST
+ * 
+ * Parameters:
+ *   - report_id (required) - ID of report to send
+ *   - to_department_id (required) - Department receiving the report
+ *   - from_department_id (optional) - Department sending the report
+ *   - department_id (optional) - Alternative for from_department_id
+ *   - user_id (optional) - User sending the report
+ * 
+ * Response: { "success": true, "message": "Report sent successfully" }
+ */
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-
-if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 require_once '../config/database.php';
 
 $database = new Database();
-$conn = $database->getConnection();
+$db = $database->getConnection();
 
-// Get input
-$raw_input = file_get_contents('php://input');
-$input = json_decode($raw_input, true);
+$data = json_decode(file_get_contents('php://input'), true);
 
-if (!$input) {
-    echo json_encode(['success' => false, 'message' => 'Invalid JSON input']);
-    exit();
+if (!$data) {
+    echo json_encode(['success' => false, 'message' => 'Invalid JSON data']);
+    exit;
 }
 
-// Get parameters (support multiple naming conventions)
-$report_id = $input['report_id'] ?? $input['id'] ?? null;
-$to_department_id = $input['to_department_id'] ?? $input['receiver_dept'] ?? $input['department_id'] ?? null;
-$from_department_id = $input['from_department_id'] ?? $input['sender_dept'] ?? 4;
-$sender_id = $input['sender_id'] ?? $input['user_id'] ?? 6;
+$report_id = isset($data['report_id']) ? intval($data['report_id']) : 0;
 
-// Validate
-if (!$report_id) {
+if ($report_id <= 0) {
     echo json_encode(['success' => false, 'message' => 'Report ID is required']);
-    exit();
+    exit;
 }
 
-if (!$to_department_id) {
-    echo json_encode(['success' => false, 'message' => 'Destination department ID is required']);
-    exit();
+// Determine receiver department (to_department_id)
+$to_department_id = 0;
+if (isset($data['to_department_id'])) {
+    $to_department_id = intval($data['to_department_id']);
+} elseif (isset($data['department_id']) && !isset($data['from_department_id'])) {
+    // For Finance dashboard pattern: department_id is the receiver
+    $to_department_id = intval($data['department_id']);
 }
 
-// Get report details
-$stmt = $conn->prepare("SELECT * FROM reports WHERE id = ?");
-$stmt->execute([$report_id]);
-$report = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$report) {
-    echo json_encode(['success' => false, 'message' => 'Report not found']);
-    exit();
+if ($to_department_id <= 0) {
+    echo json_encode(['success' => false, 'message' => 'To department ID is required']);
+    exit;
 }
 
-// Get sender department name
-$sender_name = "Manager Department";
-$stmt2 = $conn->prepare("SELECT name FROM departments WHERE id = ?");
-$stmt2->execute([$from_department_id]);
-$dept = $stmt2->fetch(PDO::FETCH_ASSOC);
-if ($dept) $sender_name = $dept['name'];
+// Determine sender department (from_department_id)
+$from_department_id = null;
 
-// Get receiver department name
-$receiver_name = "Department";
-$stmt3 = $conn->prepare("SELECT name FROM departments WHERE id = ?");
-$stmt3->execute([$to_department_id]);
-$receiver = $stmt3->fetch(PDO::FETCH_ASSOC);
-if ($receiver) $receiver_name = $receiver['name'];
-
-// Create unique share ID (allows multiple sends)
-$share_id = date('YmdHis') . '-' . rand(1000, 9999) . '-' . rand(100, 999);
-$timestamp = date('Y-m-d H:i:s');
-
-// Build message content
-$message = "📊 REPORT SHARED\n";
-$message .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-$message .= "📄 Title: " . ($report['title'] ?? 'Untitled') . "\n";
-$message .= "📅 Period: " . ($report['period'] ?? 'N/A') . "\n";
-$message .= "👤 From: $sender_name\n";
-$message .= "🕒 Sent: $timestamp\n";
-$message .= "🆔 Share ID: $share_id\n";
-$message .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-$message .= "📝 CONTENT:\n";
-$message .= ($report['content'] ?? 'No content') . "\n";
-$message .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-$message .= "🔁 Multiple sharing allowed - this is share #$share_id\n";
-
-// Get or create conversation
-$convStmt = $conn->prepare("SELECT id FROM conversations 
-                           WHERE (sender_dept = ? AND receiver_dept = ?) 
-                           OR (sender_dept = ? AND receiver_dept = ?)");
-$convStmt->execute([$from_department_id, $to_department_id, $to_department_id, $from_department_id]);
-$conversation = $convStmt->fetch(PDO::FETCH_ASSOC);
-
-$conversation_id = null;
-if ($conversation) {
-    $conversation_id = $conversation['id'];
-    $updateConv = $conn->prepare("UPDATE conversations SET updated_at = NOW() WHERE id = ?");
-    $updateConv->execute([$conversation_id]);
-} else {
-    $newConv = $conn->prepare("INSERT INTO conversations (sender_dept, receiver_dept, subject, status, created_at, updated_at) 
-                              VALUES (?, ?, ?, 'active', NOW(), NOW())");
-    $newConv->execute([$from_department_id, $to_department_id, "Report: " . substr($report['title'], 0, 50)]);
-    $conversation_id = $conn->lastInsertId();
+if (isset($data['from_department_id'])) {
+    $from_department_id = intval($data['from_department_id']);
+} elseif (isset($data['department_id']) && isset($data['to_department_id'])) {
+    // For Manager pattern: department_id is the sender
+    $from_department_id = intval($data['department_id']);
+} elseif (isset($data['user_id'])) {
+    // For Super Admin pattern: get department from user
+    $user_id = intval($data['user_id']);
+    $userQuery = "SELECT department_id FROM users WHERE id = :id";
+    $userStmt = $db->prepare($userQuery);
+    $userStmt->bindParam(':id', $user_id, PDO::PARAM_INT);
+    $userStmt->execute();
+    if ($userStmt->rowCount() > 0) {
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        $from_department_id = $user['department_id'];
+    }
 }
 
-// Insert message - THIS ALLOWS MULTIPLE SENDS!
-$insertStmt = $conn->prepare("INSERT INTO messages 
-                              (conversation_id, sender_dept, receiver_dept, sender_id, message, is_read, status, created_at) 
-                              VALUES (?, ?, ?, ?, ?, 0, 'sent', NOW())");
-$insertStmt->execute([$conversation_id, $from_department_id, $to_department_id, $sender_id, $message]);
-
-if ($insertStmt->rowCount() > 0) {
-    // Update report status only once (does not block multiple sends)
-    $checkStmt = $conn->prepare("SELECT status FROM reports WHERE id = ?");
-    $checkStmt->execute([$report_id]);
-    $currentStatus = $checkStmt->fetchColumn();
+try {
+    // Get the original report
+    $getQuery = "SELECT id, title, period, content, status, department_id FROM reports WHERE id = :id AND deleted_by_admin = 0 AND deleted_by_department = 0";
+    $getStmt = $db->prepare($getQuery);
+    $getStmt->bindParam(':id', $report_id, PDO::PARAM_INT);
+    $getStmt->execute();
     
-    if ($currentStatus !== 'sent') {
-        $updateStmt = $conn->prepare("UPDATE reports SET status = 'sent' WHERE id = ?");
-        $updateStmt->execute([$report_id]);
+    if ($getStmt->rowCount() == 0) {
+        echo json_encode(['success' => false, 'message' => 'Report not found or has been deleted']);
+        exit;
     }
     
+    $report = $getStmt->fetch(PDO::FETCH_ASSOC);
+    
+    // If from_department_id still not set, use report's original department
+    if ($from_department_id === null) {
+        $from_department_id = $report['department_id'];
+    }
+    
+    // Check if report already sent to this department (using sent_from_dept and sent_to_department)
+    $checkDuplicate = "SELECT id FROM reports WHERE sent_to_department = :to_dept AND sent_from_dept = :from_dept AND title = :title AND deleted_by_department = 0";
+    $checkStmt = $db->prepare($checkDuplicate);
+    $checkStmt->bindParam(':to_dept', $to_department_id, PDO::PARAM_INT);
+    $checkStmt->bindParam(':from_dept', $from_department_id, PDO::PARAM_INT);
+    $checkStmt->bindParam(':title', $report['title'], PDO::PARAM_STR);
+    $checkStmt->execute();
+    
+    if ($checkStmt->rowCount() > 0) {
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Report has already been sent to this department',
+            'already_sent' => true
+        ]);
+        exit;
+    }
+    
+    // Insert a copy as a sent report to the target department
+    // Using correct column names from your database: sent_from_dept, sent_to_department
+    $insertQuery = "INSERT INTO reports (title, period, content, status, department_id, sent_from_dept, sent_to_department, is_viewed_by_department, created_at) 
+                    VALUES (:title, :period, :content, 'sent', :to_dept, :from_dept, :to_dept, 0, NOW())";
+    
+    $insertStmt = $db->prepare($insertQuery);
+    $insertStmt->bindParam(':title', $report['title'], PDO::PARAM_STR);
+    $insertStmt->bindParam(':period', $report['period'], PDO::PARAM_STR);
+    $insertStmt->bindParam(':content', $report['content'], PDO::PARAM_STR);
+    $insertStmt->bindParam(':to_dept', $to_department_id, PDO::PARAM_INT);
+    $insertStmt->bindParam(':from_dept', $from_department_id, PDO::PARAM_INT);
+    
+    if ($insertStmt->execute()) {
+        // Also update original report status to 'sent' if not already
+        if ($report['status'] !== 'sent') {
+            $updateQuery = "UPDATE reports SET status = 'sent' WHERE id = :id";
+            $updateStmt = $db->prepare($updateQuery);
+            $updateStmt->bindParam(':id', $report_id, PDO::PARAM_INT);
+            $updateStmt->execute();
+        }
+        
+        // Get department name for response message
+        $deptQuery = "SELECT name FROM departments WHERE id = :id";
+        $deptStmt = $db->prepare($deptQuery);
+        $deptStmt->bindParam(':id', $to_department_id, PDO::PARAM_INT);
+        $deptStmt->execute();
+        $deptName = $deptStmt->rowCount() > 0 ? $deptStmt->fetch(PDO::FETCH_ASSOC)['name'] : 'Department ' . $to_department_id;
+        
+        echo json_encode([
+            'success' => true,
+            'message' => "Report sent successfully to {$deptName}",
+            'data' => [
+                'report_id' => $report_id,
+                'to_department_id' => $to_department_id,
+                'to_department_name' => $deptName,
+                'sent_at' => date('Y-m-d H:i:s')
+            ]
+        ]);
+    } else {
+        $errorInfo = $insertStmt->errorInfo();
+        echo json_encode([
+            'success' => false, 
+            'message' => 'Failed to send report - database insert error: ' . $errorInfo[2]
+        ]);
+    }
+} catch (PDOException $e) {
+    error_log("send_report.php error: " . $e->getMessage());
     echo json_encode([
-        'success' => true,
-        'message' => "✅ Report sent successfully to $receiver_name",
-        'report_id' => $report_id,
-        'to_department' => $receiver_name,
-        'share_id' => $share_id,
-        'conversation_id' => $conversation_id
+        'success' => false, 
+        'message' => 'Database error: ' . $e->getMessage()
     ]);
-} else {
-    echo json_encode(['success' => false, 'message' => 'Failed to send report']);
 }
 ?>

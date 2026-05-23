@@ -1,11 +1,13 @@
 <?php
 /**
- * mark_report_viewed.php - Mark a report as viewed
+ * API: Mark Report as Viewed (Remove NEW Badge)
+ * Method: POST
+ * Parameters:
+ *   - report_id (required)
+ *   - department_id (required)
+ *   - is_admin (0 or 1)
  * 
- * POST Parameters:
- * - report_id: ID of the report (required)
- * - is_admin: 1 for admin, 0 for department (default 0)
- * - user_id: ID of user marking as viewed (optional)
+ * Response: { "success": true, "message": "Report marked as viewed" }
  */
 
 header('Content-Type: application/json');
@@ -18,40 +20,60 @@ require_once '../config/database.php';
 $database = new Database();
 $db = $database->getConnection();
 
-$input = json_decode(file_get_contents('php://input'), true);
-if (!$input) {
-    $input = $_POST;
+$data = json_decode(file_get_contents('php://input'), true);
+
+if (!$data) {
+    echo json_encode(['success' => false, 'message' => 'Invalid JSON data']);
+    exit;
 }
 
-$reportId = isset($input['report_id']) ? intval($input['report_id']) : 0;
-$isAdmin = isset($input['is_admin']) ? intval($input['is_admin']) : 0;
-$userId = isset($input['user_id']) ? intval($input['user_id']) : 0;
+$report_id = isset($data['report_id']) ? intval($data['report_id']) : 0;
+$department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
+$is_admin = isset($data['is_admin']) ? intval($data['is_admin']) : 0;
 
-if ($reportId === 0) {
-    echo json_encode(['success' => false, 'message' => 'report_id is required']);
+if ($report_id <= 0) {
+    echo json_encode(['success' => false, 'message' => 'Report ID is required']);
     exit;
 }
 
 try {
-    if ($isAdmin == 1) {
-        $query = "UPDATE reports SET is_viewed_by_admin = 1, updated_at = NOW() WHERE id = :id";
+    if ($is_admin == 1) {
+        $query = "UPDATE reports SET is_viewed_by_admin = 1 WHERE id = :id";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':id', $report_id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => 'Report marked as viewed by Admin']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Failed to update']);
+        }
     } else {
-        $query = "UPDATE reports SET is_viewed_by_department = 1, updated_at = NOW() WHERE id = :id";
+        // Verify this report belongs to this department (sent to them)
+        $checkQuery = "SELECT id FROM reports 
+                       WHERE id = :id 
+                       AND sent_to_department = :dept_id 
+                       AND is_viewed_by_department = 0";
+        $checkStmt = $db->prepare($checkQuery);
+        $checkStmt->bindParam(':id', $report_id);
+        $checkStmt->bindParam(':dept_id', $department_id);
+        $checkStmt->execute();
+        
+        if ($checkStmt->rowCount() == 0) {
+            echo json_encode(['success' => false, 'message' => 'Report not found or already viewed']);
+            exit;
+        }
+        
+        $query = "UPDATE reports SET is_viewed_by_department = 1 WHERE id = :id";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':id', $report_id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => 'Report marked as viewed']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Failed to update']);
+        }
     }
-    
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':id', $reportId);
-    $stmt->execute();
-    
-    echo json_encode([
-        'success' => true,
-        'message' => 'Report marked as viewed'
-    ]);
-    
 } catch (PDOException $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Database error: ' . $e->getMessage()
-    ]);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 ?>

@@ -1,102 +1,113 @@
 <?php
+// ============================================
+// FILE: backend/api/delete_message.php
+// ============================================
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-require_once '../config/database.php';
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
-$database = new Database();
-$db = $database->getConnection();
+// Database connection
+$host = 'localhost';
+$user = 'root';
+$password = '';
+$database = 'geotraverse_erp';
 
-$data = json_decode(file_get_contents("php://input"));
+$conn = new mysqli($host, $user, $password, $database);
 
-if (!$data || !isset($data->message_id)) {
-    echo json_encode(['success' => false, 'message' => 'Message ID required']);
+if ($conn->connect_error) {
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
     exit;
 }
 
-$message_id = $data->message_id;
-$department_id = isset($data->department_id) ? intval($data->department_id) : null;
-$user_id = isset($data->user_id) ? intval($data->user_id) : null;
+$conn->set_charset("utf8mb4");
+
+// Get input data
+$data = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw_input = file_get_contents('php://input');
+    $data = json_decode($raw_input, true);
+    if (!$data) {
+        $data = $_POST;
+    }
+} else {
+    $data = $_GET;
+}
+
+// Get parameters
+$message_id = isset($data['message_id']) ? (int)$data['message_id'] : null;
+$user_id = isset($data['user_id']) ? (int)$data['user_id'] : null;
+$department_id = isset($data['department_id']) ? (int)$data['department_id'] : null;
+
+// Super Admin user_id = 1
+if ($user_id == 1 && !$department_id) {
+    $department_id = 1;
+}
+
+if (!$message_id) {
+    echo json_encode(['success' => false, 'message' => 'message_id is required']);
+    exit;
+}
+
+if (!$department_id) {
+    echo json_encode(['success' => false, 'message' => 'department_id or user_id is required']);
+    exit;
+}
 
 try {
-    $db->beginTransaction();
+    // First, check who the sender and receiver are
+    $check_stmt = $conn->prepare("
+        SELECT sender_dept, receiver_dept FROM messages WHERE id = ?
+    ");
+    $check_stmt->bind_param("i", $message_id);
+    $check_stmt->execute();
+    $result = $check_stmt->get_result();
     
-    // Get message details
-    $msgQuery = "SELECT * FROM messages WHERE id = ?";
-    $msgStmt = $db->prepare($msgQuery);
-    $msgStmt->execute([$message_id]);
-    $message = $msgStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$message) {
+    if ($result->num_rows === 0) {
         echo json_encode(['success' => false, 'message' => 'Message not found']);
         exit;
     }
     
-    // Check if message is already deleted
-    if ($message['sender_deleted'] == 1 && $message['receiver_deleted'] == 1) {
-        echo json_encode(['success' => false, 'message' => 'Message already deleted']);
-        exit;
-    }
+    $msg = $result->fetch_assoc();
     
-    // SOFT DELETE: Mark as deleted by the appropriate party
-    if ($department_id) {
-        // Delete by department
-        if ($message['sender_dept'] == $department_id) {
-            $updateQuery = "UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$message_id]);
-        } else if ($message['receiver_dept'] == $department_id) {
-            $updateQuery = "UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$message_id]);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'You are not authorized to delete this message']);
-            exit;
-        }
-    } else if ($user_id) {
-        // Delete by user
-        if ($message['sender_id'] == $user_id) {
-            $updateQuery = "UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$message_id]);
-        } else if ($message['receiver_id'] == $user_id) {
-            $updateQuery = "UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?";
-            $updateStmt = $db->prepare($updateQuery);
-            $updateStmt->execute([$message_id]);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'You are not authorized to delete this message']);
-            exit;
-        }
+    // Soft delete based on who is deleting
+    if ($msg['sender_dept'] == $department_id) {
+        // Sender is deleting - mark sender_deleted = 1
+        $update_stmt = $conn->prepare("
+            UPDATE messages SET sender_deleted = 1, deleted_at = NOW() WHERE id = ?
+        ");
     } else {
-        echo json_encode(['success' => false, 'message' => 'Department ID or User ID required']);
-        exit;
+        // Receiver is deleting - mark receiver_deleted = 1
+        $update_stmt = $conn->prepare("
+            UPDATE messages SET receiver_deleted = 1, deleted_at = NOW() WHERE id = ?
+        ");
     }
     
-    // Insert into recycle bin for tracking
-    $recycleQuery = "INSERT INTO recycle_bin 
-                    (original_table, original_id, deleted_data, deleted_by_department_id, deleted_by_user_id, deleted_by_admin, deleted_at) 
-                    VALUES (?, ?, ?, ?, ?, 0, NOW())";
-    $recycleStmt = $db->prepare($recycleQuery);
-    $recycleStmt->execute([
-        'messages',
-        $message_id,
-        json_encode($message),
-        $department_id,
-        $user_id
-    ]);
+    $update_stmt->bind_param("i", $message_id);
+    $update_stmt->execute();
     
-    $db->commit();
+    // Also add to recycle bin for Super Admin
+    if ($department_id == 1) {
+        $recycle_stmt = $conn->prepare("
+            INSERT INTO recycle_bin (original_table, original_id, deleted_data, deleted_by_department_id, deleted_by_admin, deleted_at) 
+            SELECT 'messages', ?, JSON_OBJECT('message', message, 'sender_dept', sender_dept, 'receiver_dept', receiver_dept), ?, 1, NOW()
+            FROM messages WHERE id = ?
+        ");
+        $recycle_stmt->bind_param("iii", $message_id, $department_id, $message_id);
+        $recycle_stmt->execute();
+    }
     
-    echo json_encode([
-        'success' => true, 
-        'message' => 'Message moved to recycle bin',
-        'soft_deleted' => true
-    ]);
+    echo json_encode(['success' => true, 'message' => 'Message deleted successfully']);
     
-} catch (PDOException $e) {
-    $db->rollBack();
-    error_log("Delete message error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+} catch (Exception $e) {
+    echo json_encode(['success' => false, 'message' => 'Failed to delete message: ' . $e->getMessage()]);
+} finally {
+    if (isset($conn)) $conn->close();
 }
 ?>
