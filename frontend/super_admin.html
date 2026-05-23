@@ -1491,19 +1491,18 @@ async function openChat(conversationId) {
     } 
 }
 
-// Tafuta function hii kwenye manager dashboard
-async function sendChatMessage() {
-    let msg = document.getElementById('replyMsg').value;
-    if (!msg.trim()) {
-        showToast('Enter a message', true);
-        return;
-    }
-    if (!currentConversationId) {
-        showToast('No conversation', true);
-        return;
-    }
+async function sendChatMessage() { 
+    let msg = document.getElementById('replyMsg').value; 
+    if (!msg.trim()) { 
+        showToast('Enter a message', true); 
+        return; 
+    } 
+    if (!currentConversationId) { 
+        showToast('No conversation', true); 
+        return; 
+    } 
     
-    // Tafuta receiver department
+    // Tafuta receiver department kutoka kwenye conversation
     const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
     if (!currentConv) {
         showToast('Conversation not found', true);
@@ -1512,38 +1511,29 @@ async function sendChatMessage() {
     
     const receiverDept = currentConv.other_department_id;
     
-    console.log("Manager sendChatMessage - convId:", currentConversationId, "receiver:", receiverDept, "msg:", msg);
-    
     const sendBtn = document.querySelector('#chatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span>';
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
     sendBtn.disabled = true;
     
     try {
-        const payload = {
-            sender_dept: DEPARTMENT_ID,  // Manager = 4
-            receiver_dept: receiverDept,
+        let res = await apiCall('send_message.php', 'POST', { 
+            user_id: 1,
             conversation_id: currentConversationId,
-            message: msg.trim(),
+            department_id: receiverDept,  // Add receiver department
+            message: msg,
             subject: 'Reply'
-        };
+        }); 
         
-        console.log("Sending payload:", payload);
-        
-        const res = await apiCall('send_message.php', 'POST', payload);
-        
-        console.log("API Response:", res);
-        
-        if (res && res.success) {
-            document.getElementById('replyMsg').value = '';
-            await openChat(currentConversationId);
-            await loadMessages();
-            showToast('Sent');
-        } else {
-            showToast(res?.message || 'Failed', true);
+        if (res && res.success) { 
+            document.getElementById('replyMsg').value = ''; 
+            await openChat(currentConversationId); 
+            await loadMessages(); 
+            showToast('Sent'); 
+        } else { 
+            showToast(res?.message || 'Failed', true); 
         }
-    } catch (error) {
-        console.error("Send error:", error);
+    } catch(e) {
         showToast('Network error', true);
     } finally {
         sendBtn.innerHTML = originalText;
