@@ -237,8 +237,19 @@
             <div id="dashboardSection" class="section"></div>
             <div id="projectsSection" class="section hidden"></div>
             <div id="budgetSection" class="section hidden"></div>
-            <div id="messagesSection" class="section hidden"></div>
-            <div id="reportsSection" class="section hidden"></div>
+            <div id="messagesSection" class="section hidden">
+    <div class="flex justify-between flex-wrap gap-3 mb-4">
+        <h2 class="text-xl font-bold">
+            <i class="fas fa-envelope text-pink-600 mr-2"></i> 
+            Messages (<span id="msgCount">0</span> conversations)
+        </h2>
+        <button onclick="openModal('msgModal')" class="btn-primary">
+            <i class="fas fa-paper-plane mr-1"></i> New Message
+        </button>
+    </div>
+    <div id="messagesGrid" class="messages-grid"></div>
+</div>
+<div id="reportsSection" class="section hidden"></div>
             <div id="settingsSection" class="section hidden"></div>
         </div>
     </main>
@@ -412,8 +423,24 @@
         updateMessageBadge();
     }
     
-    function updateMessageBadge() { const unread = messagesData.reduce((s,c) => s + (c.unread_count || 0), 0); const badge = document.getElementById('msgBadge'); if(badge) { if(unread > 0) { badge.classList.remove('hidden'); badge.innerText = unread > 99 ? '99+' : unread; } else badge.classList.add('hidden'); } }
+    function updateMessageBadge(totalUnread = null) {
+    // Calculate unread count from messagesData if not provided
+    let unreadCount = totalUnread;
+    if (unreadCount === null && messagesData && Array.isArray(messagesData)) {
+        unreadCount = messagesData.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+    }
     
+    const badge = document.getElementById('msgBadge');
+    if (badge) {
+        if (unreadCount > 0) {
+            badge.classList.remove('hidden');
+            badge.innerText = unreadCount > 99 ? '99+' : unreadCount;
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+}
+
     // ==================== PROJECTS ====================
     async function loadProjects(highlightId = null) {
         const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
@@ -617,55 +644,205 @@
     }
     
     // ==================== MESSAGES (FIXED - SENT ON RIGHT, RECEIVED ON LEFT) ====================
-    async function loadMessages(highlightId = null) {
-        const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`);
-        messagesData = res.success ? res.data : [];
-        updateMessageBadge();
-        let html = `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-envelope text-pink-600 mr-2"></i>Messages</h2><button onclick="openModal('msgModal')" class="btn-primary"><i class="fas fa-paper-plane mr-1"></i> New Message</button></div><div class="messages-grid" id="messagesGrid"></div>`;
-        document.getElementById('messagesSection').innerHTML = html;
-        if(messagesData.length === 0) { document.getElementById('messagesGrid').innerHTML = '<div class="col-span-2 text-center py-12 text-gray-400">No messages found</div>'; return; }
-        let msgsHtml = '';
-        for(let m of messagesData) {
-            let unreadClass = m.unread_count > 0 ? 'message-unread' : '';
-            let isHighlighted = highlightId && m.conversation_id === highlightId;
-            msgsHtml += `<div class="message-card ${unreadClass} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${m.conversation_id}" data-conv-id="${m.conversation_id}">
-                <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${m.conversation_id})"><i class="fas fa-trash-alt"></i></div>
-                <div class="message-header-bg" onclick="openChat(${m.conversation_id}, '${escapeHtml(m.other_department_name)}')">
-                    <div class="flex justify-between items-center"><span class="font-semibold">💬 ${escapeHtml(m.other_department_name)}</span>${m.unread_count > 0 ? `<span class="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">${m.unread_count}</span>` : ''}</div>
-                </div>
-                <div class="p-3" onclick="openChat(${m.conversation_id}, '${escapeHtml(m.other_department_name)}')">
-                    <p class="text-sm text-gray-600 truncate">${escapeHtml(m.last_message || 'No messages')}</p>
-                    <p class="text-xs text-gray-400 mt-1">${m.last_message_time ? formatDateTime(m.last_message_time) : ''}</p>
-                </div>
-            </div>`;
+async function loadMessages(highlightId = null) {
+    try {
+        const url = `../backend/api/get_conversations.php?department_id=${DEPARTMENT_ID}&_=${Date.now()}`;
+        console.log("Fetching conversations from:", url);
+        
+        const response = await fetch(url);
+        const res = await response.json();
+        
+        console.log("Conversations API Response:", res);
+        
+        if (res.success && res.data && Array.isArray(res.data)) {
+            messagesData = res.data;
+            // Store total_unread from API response
+            const totalUnread = res.total_unread || 0;
+            updateMessageBadge(totalUnread);
+            
+            // Update the count in the header
+            const msgCountSpan = document.getElementById('msgCount');
+            if (msgCountSpan) {
+                msgCountSpan.innerText = messagesData.length;
+            }
+        } else {
+            messagesData = [];
+            updateMessageBadge(0);
+            const msgCountSpan = document.getElementById('msgCount');
+            if (msgCountSpan) {
+                msgCountSpan.innerText = '0';
+            }
         }
-        document.getElementById('messagesGrid').innerHTML = msgsHtml;
-        if (highlightId) { const el = document.getElementById(`msg-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+        
+        renderMessagesGrid(highlightId);
+        
+    } catch(e) {
+        console.error("Error loading messages:", e);
+        messagesData = [];
+        updateMessageBadge(0);
+        const msgCountSpan = document.getElementById('msgCount');
+        if (msgCountSpan) {
+            msgCountSpan.innerText = '0';
+        }
+        renderMessagesGrid(highlightId);
+        showToast('Error loading messages: ' + e.message, true);
+    }
+}
+   
+
+function renderMessagesGrid(highlightId = null) {
+    const container = document.getElementById('messagesGrid');
+    if (!container) {
+        console.error("messagesGrid not found");
+        return;
     }
     
-    async function deleteConversation(convId) { 
-        if(confirm('Delete this conversation?')) { 
-            let res = await apiCall('delete_conversation.php', 'POST', { conversation_id: convId, department_id: DEPARTMENT_ID }); 
-            if(res.success) { showToast('Conversation deleted'); messagesData = messagesData.filter(c => c.conversation_id !== convId); loadMessages(); if(currentChatId === convId) closeModal('chatModal'); } 
-            else showToast(res.message || 'Failed', true); 
-        } 
+    if (messagesData.length === 0) {
+        container.innerHTML = '<div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl">No messages found</div>';
+        return;
     }
     
-    async function sendMessage() { 
-        let toDept = document.getElementById('msgTo').value; 
-        let msg = document.getElementById('msgContent').value.trim(); 
-        if(!toDept || !msg) { showToast('Select department and enter message', true); return; } 
-        const sendBtn = document.querySelector('#msgModal .btn-primary');
-        const originalText = sendBtn.innerHTML;
-        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
-        sendBtn.disabled = true;
+    // Sort by latest message first, unread first
+    messagesData.sort((a, b) => {
+        if (a.unread_count > 0 && b.unread_count === 0) return -1;
+        if (a.unread_count === 0 && b.unread_count > 0) return 1;
+        return new Date(b.last_message_time) - new Date(a.last_message_time);
+    });
+    
+    let msgsHtml = '';
+    for (let conv of messagesData) {
+        const isUnread = conv.unread_count > 0;
+        const preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages';
+        const otherDeptName = conv.other_department_name || departmentNames[conv.other_department_id] || 'Department';
+        const lastTime = conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : '';
+        const isHighlighted = highlightId && conv.conversation_id === highlightId;
+        
+        msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id}, '${escapeHtml(otherDeptName)}')">
+            <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></div>
+            <div class="message-header-bg">
+                <div class="flex justify-between items-center">
+                    <span class="font-semibold">💬 ${escapeHtml(otherDeptName)}</span>
+                    ${isUnread ? `<span class="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">${conv.unread_count}</span>` : ''}
+                </div>
+            </div>
+            <div class="p-3">
+                <p class="text-sm text-gray-600 truncate">${escapeHtml(preview)}</p>
+                <p class="text-xs text-gray-400 mt-1">${lastTime}</p>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = msgsHtml;
+    
+    if (highlightId) {
+        const el = document.getElementById(`msg-card-${highlightId}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => el.classList.remove('search-highlight'), 3000);
+        }
+    }
+}
+
+
+async function deleteConversation(convId) { 
+    if(confirm('Delete this conversation? It will be hidden from your view.')) { 
         try {
-            let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: parseInt(toDept), message: msg, subject: 'Message from Architectural' }); 
-            if(res.success) { showToast('Message sent'); closeModal('msgModal'); document.getElementById('msgContent').value = ''; await loadMessages(); } 
-            else { showToast(res.message || 'Failed', true); }
-        } catch(e) { showToast('Network error', true); }
-        finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+            const res = await apiCall('delete_conversation.php', 'POST', { 
+                conversation_id: convId, 
+                department_id: DEPARTMENT_ID 
+            }); 
+            
+            if(res && res.success) { 
+                showToast('Conversation deleted from your view'); 
+                
+                // Remove from local array
+                messagesData = messagesData.filter(c => c.conversation_id !== convId); 
+                
+                // Update the count display
+                const msgCountSpan = document.getElementById('msgCount');
+                if (msgCountSpan) {
+                    msgCountSpan.innerText = messagesData.length;
+                }
+                
+                // Re-render the grid
+                renderMessagesGrid(); 
+                
+                // Close chat modal if open
+                if(currentChatId === convId) {
+                    closeModal('chatModal'); 
+                    currentChatId = null;
+                }
+                
+                // Update badge
+                updateMessageBadge();
+            } else { 
+                showToast(res?.message || 'Failed to delete', true); 
+            }
+        } catch(e) {
+            console.error("Delete error:", e);
+            showToast('Network error', true);
+        }
+    } 
+}
+    
+async function sendMessage() { 
+    let toDept = document.getElementById('msgTo').value; 
+    let msg = document.getElementById('msgContent').value.trim(); 
+    
+    if(!toDept || !msg) { 
+        showToast('Select department and enter message', true); 
+        return; 
     }
+    
+    // Check if sending to self
+    if(parseInt(toDept) === DEPARTMENT_ID) {
+        showToast('You cannot send a message to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#msgModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+    sendBtn.disabled = true;
+    
+    try {
+        const payload = { 
+            sender_dept: DEPARTMENT_ID, 
+            receiver_dept: parseInt(toDept), 
+            message: msg, 
+            subject: 'Message from Architectural Department'
+        };
+        
+        console.log("Sending message payload:", payload);
+        
+        let res = await apiCall('send_message.php', 'POST', payload); 
+        
+        console.log("Send message response:", res);
+        
+        if(res && res.success) { 
+            showToast('✅ Message sent successfully'); 
+            closeModal('msgModal'); 
+            document.getElementById('msgContent').value = ''; 
+            
+            // Reload messages to show the new conversation
+            await loadMessages(); 
+            
+            // If conversation was created, open it
+            if(res.data && res.data.conversation_id) {
+                setTimeout(async () => {
+                    await openChat(res.data.conversation_id, '');
+                }, 500);
+            }
+        } else { 
+            showToast(res?.message || 'Failed to send', true); 
+        }
+    } catch(e) { 
+        console.error("Send error:", e);
+        showToast('Network error: ' + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    } 
+}
     
     async function openChat(convId, otherDeptName) { 
         currentChatId = convId; 
@@ -701,23 +878,77 @@
         } 
     }
     
-    async function sendChatMessage() { 
-        let msg = document.getElementById('replyMsg').value.trim(); 
-        if(!msg || !currentChatId) { showToast('Enter a message', true); return; }
-        const currentConv = messagesData.find(c => c.conversation_id === currentChatId);
-        if(!currentConv) { showToast('Conversation not found', true); return; }
-        const receiverDept = currentConv.other_department_id;
-        const sendBtn = document.querySelector('#chatModal .btn-primary');
-        const originalText = sendBtn.innerHTML;
-        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        sendBtn.disabled = true;
-        try {
-            let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: receiverDept, conversation_id: currentChatId, message: msg, subject: 'Reply' }); 
-            if(res.success) { document.getElementById('replyMsg').value = ''; await openChat(currentChatId, ''); await loadMessages(); showToast('Sent'); } 
-            else { showToast(res.message || 'Failed', true); }
-        } catch(e) { showToast('Network error', true); }
-        finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+async function sendChatMessage() { 
+    let msg = document.getElementById('replyMsg').value.trim(); 
+    if(!msg) { 
+        showToast('Enter a message', true); 
+        return; 
     }
+    if(!currentChatId) { 
+        showToast('No conversation selected', true); 
+        return; 
+    }
+    
+    // Find the conversation to get receiver department
+    const currentConv = messagesData.find(c => c.conversation_id === currentChatId);
+    if(!currentConv) { 
+        showToast('Conversation not found', true); 
+        return; 
+    }
+    
+    const receiverDept = currentConv.other_department_id;
+    
+    const sendBtn = document.querySelector('#chatModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    sendBtn.disabled = true;
+    
+    try {
+        let res = await apiCall('send_message.php', 'POST', { 
+            sender_dept: DEPARTMENT_ID, 
+            receiver_dept: receiverDept, 
+            conversation_id: currentChatId, 
+            message: msg, 
+            subject: 'Reply' 
+        }); 
+        
+        if(res && res.success) { 
+            document.getElementById('replyMsg').value = ''; 
+            
+            // Add message to chat window immediately
+            const newMessageHtml = `<div class="chat-message-wrapper justify-end">
+                <div class="chat-message chat-sent">
+                    <div class="chat-bubble">
+                        <div>${escapeHtml(msg)}</div>
+                        <div class="chat-time">Just now</div>
+                    </div>
+                </div>
+            </div>`;
+            
+            const chatArea = document.getElementById('chatMessagesArea');
+            if (chatArea) {
+                if (chatArea.innerHTML.includes('No messages yet')) {
+                    chatArea.innerHTML = newMessageHtml;
+                } else {
+                    chatArea.insertAdjacentHTML('beforeend', newMessageHtml);
+                }
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+            
+            // Reload messages to update conversation list
+            await loadMessages(); 
+            showToast('✅ Sent'); 
+        } else { 
+            showToast(res?.message || 'Failed to send', true); 
+        }
+    } catch(e) { 
+        console.error("Send error:", e);
+        showToast('Network error: ' + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    } 
+}
     
     // ==================== REPORTS ====================
     async function loadReports(highlightId = null) {

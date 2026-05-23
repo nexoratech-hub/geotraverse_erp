@@ -580,7 +580,11 @@ function updateReportBadge() {
 }
 
 function updateMessageBadge() { 
-    const unreadCount = messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0); 
+    let unreadCount = 0;
+    if (messagesData && Array.isArray(messagesData)) {
+        unreadCount = messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+    }
+    
     const badge = document.getElementById('msgBadge'); 
     if (badge) { 
         if (unreadCount > 0) { 
@@ -1358,43 +1362,138 @@ async function deleteTransaction(id) { if(confirm('Delete this transaction?')) {
 
 // ==================== MESSAGES SECTION ====================
 async function loadMessages(highlightId = null) {
-    try { const userId = 1; const res = await apiCall(`get_conversations.php?user_id=${userId}`); messagesData = (res.success && res.data) ? res.data : []; } catch(e) { messagesData = []; }
-    updateMessageBadge();
-    let html = `<div class="flex flex-wrap justify-between items-center gap-3 mb-3"><h2 class="text-lg font-bold"><i class="fas fa-envelope text-blue-600 mr-2"></i>Messages (${messagesData.length} conversations)</h2><button onclick="openModal('msgModal')" class="btn-primary"><i class="fas fa-paper-plane mr-1"></i> New Message</button></div><div class="messages-grid" id="messagesGridContainer"></div>`;
-    document.getElementById('messagesPage').innerHTML = html;
-    if (messagesData.length === 0) { document.getElementById('messagesGridContainer').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-lg">No messages found.</div>'; return; }
-    let msgsHtml = '';
-    for (let conv of messagesData) { 
-        const isUnread = conv.unread_count > 0; 
-        const preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages'; 
-        let otherDeptId = conv.other_department_id || 1; 
-        const isHighlighted = highlightId && conv.conversation_id === highlightId;
-        msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
-            <div class="card-header"><h4>${escapeHtml(conv.other_department_name || 'Department')}</h4><p>${isUnread ? `${conv.unread_count} new` : 'Conversation'}</p></div>
-            <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></div>
-            <div class="p-3"><div class="flex justify-between items-center mb-1"><span class="text-[9px] text-gray-400">${conv.last_message_time ? formatDateTime(conv.last_message_time) : ''}</span>${isUnread ? `<span class="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full ml-1">${conv.unread_count}</span>` : ''}</div><p class="text-xs text-gray-600">${escapeHtml(preview)}</p></div>
-        </div>`;
+    try { 
+        const res = await apiCall(`get_conversations.php?user_id=1`); 
+        
+        if (res.success && res.data && Array.isArray(res.data)) { 
+            messagesData = res.data; 
+        } else { 
+            messagesData = []; 
+        }
+        
+        updateMessageBadge();
+        
+        let html = `<div class="flex flex-wrap justify-between items-center gap-3 mb-3">
+            <h2 class="text-lg font-bold"><i class="fas fa-envelope text-blue-600 mr-2"></i>Messages (${messagesData.length} conversations)</h2>
+            <button onclick="openModal('msgModal')" class="btn-primary"><i class="fas fa-paper-plane mr-1"></i> New Message</button>
+        </div>
+        <div class="messages-grid" id="messagesGridContainer"></div>`;
+        
+        document.getElementById('messagesPage').innerHTML = html;
+        
+        if (messagesData.length === 0) { 
+            document.getElementById('messagesGridContainer').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-lg">No messages found.</div>'; 
+            return; 
+        }
+        
+        messagesData.sort((a, b) => {
+            if (a.unread_count > 0 && b.unread_count === 0) return -1;
+            if (a.unread_count === 0 && b.unread_count > 0) return 1;
+            return new Date(b.last_message_time) - new Date(a.last_message_time);
+        });
+        
+        let msgsHtml = '';
+        for (let conv of messagesData) { 
+            const isUnread = conv.unread_count > 0; 
+            const preview = conv.last_message ? (conv.last_message.substring(0, 70) + (conv.last_message.length > 70 ? '...' : '')) : 'No messages'; 
+            const otherDeptName = conv.other_department_name || departmentNames[conv.other_department_id] || 'Department';
+            const lastTime = conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : '';
+            const isHighlighted = highlightId && conv.conversation_id === highlightId;
+            
+            msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
+                <div class="card-header">
+                    <h4>${escapeHtml(otherDeptName)}</h4>
+                    <p>${isUnread ? `${conv.unread_count} new` : 'Conversation'}</p>
+                </div>
+                <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${conv.conversation_id})">
+                    <i class="fas fa-trash-alt"></i>
+                </div>
+                <div class="p-3">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[9px] text-gray-400">${lastTime}</span>
+                        ${isUnread ? `<span class="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full ml-1">${conv.unread_count}</span>` : ''}
+                    </div>
+                    <p class="text-xs text-gray-600">${escapeHtml(preview)}</p>
+                </div>
+            </div>`;
+        }
+        document.getElementById('messagesGridContainer').innerHTML = msgsHtml;
+        
+        if (highlightId) { 
+            const el = document.getElementById(`msg-card-${highlightId}`); 
+            if(el) { 
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                setTimeout(() => el.classList.remove('search-highlight'), 3000); 
+            } 
+        }
+        
+    } catch(e) { 
+        console.error("Error loading messages:", e);
+        messagesData = []; 
     }
-    document.getElementById('messagesGridContainer').innerHTML = msgsHtml;
-    if (highlightId) { const el = document.getElementById(`msg-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
-    updateMessageBadge();
 }
 
 async function deleteConversation(conversationId) { 
     if (confirm('Delete this conversation? It will be hidden from your view.')) { 
         const conv = messagesData.find(c => c.conversation_id === conversationId);
         if(conv) await addToRecycleBin(conversationId, 'conversation', conv.other_department_name || 'Conversation');
-        const res = await apiCall('delete_conversation.php', 'POST', { conversation_id: conversationId, user_id: 1 }); 
-        if (res && res.success) { showToast('Conversation deleted'); messagesData = messagesData.filter(c => c.conversation_id !== conversationId); loadMessages(); if (currentConversationId === conversationId) { closeModal('chatModal'); currentConversationId = null; } } 
-        else { showToast(res?.message || 'Failed', true); } 
+        
+        try {
+            const res = await apiCall('delete_conversation.php', 'POST', { 
+                conversation_id: conversationId, 
+                user_id: 1 
+            }); 
+            
+            if (res && res.success) { 
+                showToast('Conversation deleted'); 
+                
+                // Remove from local array
+                messagesData = messagesData.filter(c => c.conversation_id !== conversationId); 
+                
+                // Close chat modal if open
+                if (currentConversationId === conversationId) { 
+                    const chatModal = document.getElementById('chatModal');
+                    if (chatModal) chatModal.style.display = 'none';
+                    currentConversationId = null; 
+                }
+                
+                // Reload messages grid
+                await loadMessages(); 
+            } else { 
+                showToast(res?.message || 'Failed', true); 
+            }
+        } catch(e) {
+            console.error("Delete error:", e);
+            showToast('Network error: ' + e.message, true);
+        }
     } 
 }
 
 async function deleteMessage(messageId) { 
     if (confirm('Delete this message?')) { 
-        const res = await apiCall('delete_message.php', 'POST', { message_id: messageId, user_id: 1 }); 
-        if (res && res.success) { showToast('Message deleted'); if (currentConversationId) await openChat(currentConversationId); await loadMessages(); } 
-        else { showToast(res?.message || 'Failed', true); } 
+        try {
+            const res = await apiCall('delete_message.php', 'POST', { 
+                message_id: messageId, 
+                user_id: 1 
+            }); 
+            
+            if (res && res.success) { 
+                showToast('Message deleted'); 
+                
+                // Refresh the current chat if open
+                if (currentConversationId) {
+                    await openChat(currentConversationId); 
+                }
+                
+                // Reload messages list to update previews
+                await loadMessages(); 
+            } else { 
+                showToast(res?.message || 'Failed', true); 
+            }
+        } catch(e) {
+            console.error("Delete error:", e);
+            showToast('Network error: ' + e.message, true);
+        }
     } 
 }
 
@@ -1417,15 +1516,16 @@ async function sendNewMessage() {
     sendBtn.disabled = true; 
     
     try { 
-        // FIXED: Use sender_dept and receiver_dept format that your API expects
+        // IMPORTANT: DO NOT include conversation_id here
+        // Let the backend find or create the conversation
         const payload = { 
-            sender_dept: 1,  // Super Admin department ID is 1
+            sender_dept: 1,  // Super Admin
             receiver_dept: parseInt(departmentId), 
             message: msg.trim(),
             subject: 'Message from Super Admin'
         }; 
         
-        console.log("Sending payload:", payload); 
+        console.log("Sending payload (without conversation_id):", payload); 
         
         const res = await apiCall('send_message.php', 'POST', payload); 
         
@@ -1436,10 +1536,10 @@ async function sendNewMessage() {
             closeModal('msgModal'); 
             document.getElementById('msgContent').value = ''; 
             
-            // Reload messages to show the new conversation
+            // Reload messages to show the conversation
             await loadMessages();
             
-            // If conversation was created, open it
+            // If conversation was created or found, open it
             if (res.data && res.data.conversation_id) {
                 setTimeout(async () => {
                     await openChat(res.data.conversation_id);
@@ -1462,69 +1562,153 @@ async function openChat(conversationId) {
     currentConversationId = conversationId; 
     const conv = messagesData.find(c => c.conversation_id === conversationId); 
     const otherDeptName = conv ? conv.other_department_name : "Department"; 
-    document.getElementById('chatModalTitle').innerHTML = `<i class="fas fa-comments text-blue-500 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`; 
-    const res = await apiCall(`get_messages.php?conversation_id=${conversationId}&user_id=1`); 
-    if (res.success && res.data) { 
-        const msgs = res.data.messages || res.data; 
+    
+    // Get modal elements safely
+    const chatModalTitle = document.getElementById('chatModalTitle');
+    if (chatModalTitle) {
+        chatModalTitle.innerHTML = `<i class="fas fa-comments text-blue-500 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`; 
+    }
+    
+    try {
+        const url = `../backend/api/get_messages.php?conversation_id=${conversationId}&user_id=1&_=${Date.now()}`;
+        console.log("Fetching messages from:", url);
+        
+        const res = await apiCall(`get_messages.php?conversation_id=${conversationId}&user_id=1`); 
+        
+        console.log("Messages API Response:", res);
+        
+        let msgs = [];
+        if (res.success && res.data) { 
+            msgs = res.data; 
+        }
+        
+        const chatMessagesArea = document.getElementById('chatMessagesArea');
+        if (!chatMessagesArea) {
+            console.error("chatMessagesArea not found");
+            return;
+        }
+        
         let chatHtml = ''; 
-        for (let m of msgs) { 
-            // FIX: Use sender_dept instead of message_type
-            const isSent = (m.sender_dept == 1); // Super Admin department is 1
-            chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
-                <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
-                    <div class="chat-bubble">${!isSent ? `<div class="text-[9px] opacity-75 mb-1 font-semibold">${escapeHtml(m.sender_dept_name || departmentNames[m.sender_dept])}</div>` : ''}<div class="text-sm">${escapeHtml(m.message)}</div><span class="chat-time">${new Date(m.created_at).toLocaleString()}</span></div>
-                </div>
-                <button onclick="event.stopPropagation(); deleteMessage(${m.id})" class="delete-msg-btn bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-[9px] ml-1 opacity-0 hover:opacity-100 transition"><i class="fas fa-trash-alt"></i></button>
-            </div>`; 
-        } 
-        document.getElementById('chatMessagesArea').innerHTML = chatHtml; 
-        document.getElementById('chatMessagesArea').scrollTop = document.getElementById('chatMessagesArea').scrollHeight; 
+        
+        if (msgs.length === 0) {
+            chatHtml = '<div class="text-center text-gray-400 py-6">No messages yet. Send a message to start the conversation!</div>';
+        } else {
+            for (let m of msgs) { 
+                const isSent = (m.sender_dept == 1);
+                const senderName = m.sender_dept_name || departmentNames[m.sender_dept] || 'Department';
+                const time = new Date(m.created_at).toLocaleString();
+                
+                chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
+                    <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
+                        <div class="chat-bubble">
+                            ${!isSent ? `<div class="text-[9px] opacity-75 mb-1 font-semibold">${escapeHtml(senderName)}</div>` : ''}
+                            <div class="text-sm">${escapeHtml(m.message)}</div>
+                            <span class="chat-time">${time}</span>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteMessage(${m.id})" 
+                        class="delete-msg-btn bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-[9px] ml-1 opacity-0 hover:opacity-100 transition">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>`; 
+            }
+        }
+        
+        chatMessagesArea.innerHTML = chatHtml; 
+        chatMessagesArea.scrollTop = chatMessagesArea.scrollHeight; 
+        
         openModal('chatModal'); 
+        
+        // Refresh messages list to update unread counts
         await loadMessages(); 
-    } else { 
-        openModal('chatModal'); 
-    } 
+        
+    } catch(e) {
+        console.error("Error opening chat:", e);
+        showToast("Failed to load messages: " + e.message, true);
+    }
 }
 
 async function sendChatMessage() { 
     let msg = document.getElementById('replyMsg').value; 
-    if (!msg.trim()) { 
+    if (!msg || !msg.trim()) { 
         showToast('Enter a message', true); 
         return; 
     } 
     if (!currentConversationId) { 
-        showToast('No conversation', true); 
+        showToast('No conversation selected', true); 
         return; 
     } 
     
     // Tafuta receiver department kutoka kwenye conversation
     const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
     if (!currentConv) {
-        showToast('Conversation not found', true);
+        await loadMessages();
+        const refreshedConv = messagesData.find(c => c.conversation_id === currentConversationId);
+        if (!refreshedConv) {
+            showToast('Conversation not found. Please refresh the page.', true);
+            return;
+        }
+        var receiverDept = refreshedConv.other_department_id;
+    } else {
+        var receiverDept = currentConv.other_department_id;
+    }
+    
+    const sendBtn = document.querySelector('#chatModal .btn-primary');
+    if (!sendBtn) {
+        showToast('Send button not found', true);
         return;
     }
     
-    const receiverDept = currentConv.other_department_id;
-    
-    const sendBtn = document.querySelector('#chatModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
     sendBtn.disabled = true;
     
     try {
-        // FIXED: Use sender_dept and receiver_dept format
         let res = await apiCall('send_message.php', 'POST', { 
-            sender_dept: 1,  // Super Admin department ID is 1
+            sender_dept: 1,
             receiver_dept: receiverDept,
             conversation_id: currentConversationId,
             message: msg.trim()
         }); 
         
+        console.log("Send message response:", res);
+        
         if (res && res.success) { 
             document.getElementById('replyMsg').value = ''; 
-            await openChat(currentConversationId); 
-            await loadMessages(); 
-            showToast('Sent'); 
+            
+            // Add message to chat window immediately
+            const chatArea = document.getElementById('chatMessagesArea');
+            if (chatArea) {
+                const newMessageDiv = document.createElement('div');
+                newMessageDiv.className = 'chat-message-wrapper justify-end';
+                newMessageDiv.innerHTML = `<div class="chat-message chat-sent">
+                    <div class="chat-bubble">
+                        <div class="text-sm">${escapeHtml(msg)}</div>
+                        <span class="chat-time">Just now</span>
+                    </div>
+                </div>`;
+                chatArea.appendChild(newMessageDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+            
+            // Update conversation's last message in the list
+            if (currentConv) {
+                currentConv.last_message = msg;
+                currentConv.last_message_time = new Date().toISOString();
+            }
+            
+            // Update the message card preview - FIXED SELECTOR
+            const msgCard = document.getElementById(`msg-card-${currentConversationId}`);
+            if (msgCard) {
+                const previewP = msgCard.querySelector('.text-xs.text-gray-600');
+                if (previewP) previewP.innerHTML = escapeHtml(msg.substring(0, 70)) + (msg.length > 70 ? '...' : '');
+                
+                // FIXED: Use simple class selector, avoid brackets
+                const timeSpan = msgCard.querySelector('.text-gray-400');
+                if (timeSpan) timeSpan.innerHTML = 'Just now';
+            }
+            
+            showToast('✅ Sent'); 
         } else { 
             showToast(res?.message || 'Failed', true); 
         }
@@ -1532,8 +1716,10 @@ async function sendChatMessage() {
         console.error("Send error:", e);
         showToast('Network error: ' + e.message, true);
     } finally {
-        sendBtn.innerHTML = originalText;
-        sendBtn.disabled = false;
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
     }
 }
 
