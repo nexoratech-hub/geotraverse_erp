@@ -29,7 +29,6 @@
         .nav-item .badge { background: #ef4444; color: white; font-size: 10px; border-radius: 20px; padding: 2px 8px; margin-left: auto; min-width: 20px; text-align: center; }
         .nav-item .badge.hidden { display: none; }
         
-        /* Cards with background colors */
         .stat-card { transition: all 0.3s ease; background: white; border-radius: 20px; border: 1px solid #e5e7eb; cursor: pointer; text-align: center; padding: 14px; }
         .stat-card:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -12px rgba(0,0,0,0.15); border-color: #4338ca; }
         .stat-number { font-size: 22px; font-weight: 700; margin-top: 6px; margin-bottom: 2px; word-break: break-word; white-space: normal; line-height: 1.2; }
@@ -71,7 +70,6 @@
         @media (max-width: 1024px) { .messages-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 640px) { .messages-grid { grid-template-columns: 1fr; } }
         
-        /* Card styles with colored headers matching sidebar */
         .project-card, .report-card, .message-card {
             background: white;
             border: 1px solid #e5e7eb;
@@ -180,7 +178,6 @@
         .search-highlight { background: #fef3c7 !important; border-left: 4px solid #f59e0b !important; transition: all 0.3s; }
         body.dark-mode .search-highlight { background: #78350f !important; border-left-color: #fbbf24 !important; }
         
-        /* Ensure amount font size fits in cards */
         .stat-number.large-amount { font-size: 18px; }
         @media (min-width: 640px) { .stat-number { font-size: 24px; } .stat-number.large-amount { font-size: 20px; } }
     </style>
@@ -394,7 +391,7 @@ const allDepartmentsForSend = [
 
 const departmentNames = { 1: "Super Admin", 2: "Finance", 3: "Sales & Marketing", 4: "Manager", 5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium", 8: "Town Planning", 9: "Architectural", 10: "Survey", 11: "Construction", 12: "Hatimiliki" };
 
-let projectsData = [], budgetsData = [], reportsList = [], conversationsList = [];
+let projectsData = [], budgetsData = [], reportsList = [], conversationsList = [], recycleBinData = [];
 let currentProjectPage = 1, currentBudgetPage = 1;
 let projectRowsPerPage = 6, budgetRowsPerPage = 5;
 let currentChatWith = null;
@@ -419,11 +416,33 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
 }
 
-async function loadDepartments() {
-    const chatSelect = document.getElementById('chatRecipientSelect');
-    if (chatSelect) { 
-        chatSelect.innerHTML = '<option value="">Select Department</option>' + allDepartmentsForSend.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join(''); 
-    }
+// ==================== RECYCLE BIN ====================
+async function loadRecycleBinFromDB() {
+    const res = await apiCall('get_recycle_bin.php');
+    if (res.success && res.data) { recycleBinData = res.data.filter(item => item.deleted_by_department_id === DEPARTMENT_ID || item.deleted_by_admin === 1); } else { recycleBinData = []; }
+}
+async function addToRecycleBin(itemId, itemType, itemName) { 
+    const res = await apiCall('add_to_recycle_bin.php', 'POST', { item_id: itemId, item_type: itemType, item_name: itemName, deleted_by_department_id: DEPARTMENT_ID, deleted_by_admin: 0 }); 
+    if (res.success) { await loadRecycleBinFromDB(); } 
+}
+async function restoreFromRecycleBin(recycleId) { 
+    const res = await apiCall('restore_from_recycle_bin.php', 'POST', { recycle_id: recycleId }); 
+    if (res.success) { showToast('Item restored successfully'); await loadRecycleBinFromDB(); renderSettings(); if (res.data && res.data.item_type === 'project') renderProjects(); if (res.data && res.data.item_type === 'transaction') renderBudget(); if (res.data && res.data.item_type === 'report') renderReports(); if (res.data && res.data.item_type === 'conversation') renderMessages(); } 
+    else { showToast(res.message || 'Failed to restore', true); } 
+}
+async function permanentlyDeleteItem(recycleId) { 
+    if (confirm('Permanently delete this item?')) { 
+        const res = await apiCall('permanently_delete_item.php', 'POST', { recycle_id: recycleId }); 
+        if (res.success) { showToast('Item permanently deleted'); await loadRecycleBinFromDB(); renderSettings(); } 
+        else { showToast(res.message || 'Failed to delete', true); } 
+    } 
+}
+async function emptyRecycleBin() { 
+    if (confirm('Empty entire recycle bin?')) { 
+        const res = await apiCall('empty_recycle_bin.php', 'POST', {}); 
+        if (res.success) { showToast('Recycle bin emptied'); await loadRecycleBinFromDB(); renderSettings(); closeModal('backupRestoreModal'); } 
+        else { showToast(res.message || 'Failed to empty', true); } 
+    } 
 }
 
 // ==================== AUTO REFRESH ====================
@@ -458,6 +477,13 @@ function updateConnectionStatus() {
     const statusDiv = document.getElementById('connectionStatus');
     statusDiv.innerHTML = '<i class="fas fa-check-circle"></i> Connected';
     statusDiv.style.color = '#10b981';
+}
+
+async function loadDepartments() {
+    const chatSelect = document.getElementById('chatRecipientSelect');
+    if (chatSelect) { 
+        chatSelect.innerHTML = '<option value="">Select Department</option>' + allDepartmentsForSend.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join(''); 
+    }
 }
 
 // ==================== IMAGE HANDLING ====================
@@ -615,7 +641,7 @@ async function saveProject() {
     let res = id ? await updateProjectAPI(parseInt(id), data) : await addProjectAPI(data); 
     if(res && res.success) { showToast(id ? "Project updated" : "Project added"); addLog(`Project ${id ? "updated" : "added"}: ${name}`); closeModal('projectModal'); await renderProjects(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } 
 }
-async function deleteProject(id) { if(confirm("Delete this project?")) { let res = await deleteProjectAPI(id); if(res && res.success) { showToast("Project deleted"); addLog(`Project deleted: ID ${id}`); await renderProjects(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } } }
+async function deleteProject(id) { if(confirm("Delete this project?")) { const p = projectsData.find(p => p.id === id); if(p) await addToRecycleBin(id, 'project', p.name); let res = await deleteProjectAPI(id); if(res && res.success) { showToast("Project deleted"); addLog(`Project deleted: ID ${id}`); await renderProjects(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } } }
 
 // ==================== EXPORT FUNCTIONS ====================
 function exportSingleProjectExcel(projectId) { 
@@ -752,7 +778,7 @@ async function renderBudget(highlightId = null) {
             <div class="bg-orange-50 rounded-xl p-2 text-center"><p class="text-[9px] text-gray-500">Pending</p><p class="text-base font-bold text-orange-600 break-words">${formatMoney(totalPending)}</p></div>
         </div>
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50 border-b"><tr><th class="p-2 text-left">Date</th><th class="p-2 text-left">Type</th><th class="p-2 text-left">Source</th><th class="p-2 text-left">Amount</th><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Pending</th><th class="p-2 text-left">Status</th><th class="p-2 text-center">Actions</th></tr></thead><tbody>`;
-    if(paginated.length === 0) { html += `<tr><td colspan="8" class="text-center py-8 text-gray-400">No transactions found</td>`; }
+    if(paginated.length === 0) { html += `<tr><td colspan="8" class="text-center py-8 text-gray-400">No transactions found</td</tr`; }
     else { for(let b of paginated) {
         let isHighlighted = highlightId && b.id === highlightId;
         let amount = parseFloat(b.amount) || 0, paid = parseFloat(b.paid_amount) || 0, pending = (b.type === 'income' && b.status !== 'paid') ? (amount - paid) : 0;
@@ -767,7 +793,7 @@ async function renderBudget(highlightId = null) {
             <td class="p-2 text-left text-orange-600 whitespace-nowrap">${pending>0?formatMoney(pending):'-'}</td>
             <td class="p-2"><span class="px-2 py-0.5 rounded-full text-xs ${statusClass}">${b.status}</span></td>
             <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewBudgetItem(${b.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editBudgetItem(${b.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteBudgetItem(${b.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
-        </tr>`;
+         </tr>`;
     } }
     html += `</tbody></table></div></div>${totalPages>1?`<div class="flex justify-center gap-2 mt-3"><button onclick="changeBudgetPage(${currentBudgetPage-1})" class="px-2 py-1 border rounded text-xs">Prev</button><span class="text-xs">Page ${currentBudgetPage} of ${totalPages}</span><button onclick="changeBudgetPage(${currentBudgetPage+1})" class="px-2 py-1 border rounded text-xs">Next</button></div>`:''}</div>`;
     document.getElementById("budgetSection").innerHTML = html;
@@ -777,7 +803,7 @@ function changeBudgetPage(page) { let totalPages = Math.ceil(budgetsData.length 
 function viewBudgetItem(id) { let b = budgetsData.find(b=>b.id===id); if(b) { let amount=parseFloat(b.amount)||0, paid=parseFloat(b.paid_amount)||0, pending=(b.type==='income'&&b.status!=='paid')?(amount-paid):0; document.getElementById('viewBudgetContent').innerHTML = `<div class="space-y-3"><div class="border-b pb-2"><h4 class="font-bold text-base">${escapeHtml(b.source)}</h4></div><div class="grid grid-cols-2 gap-2 text-sm"><div class="font-semibold">Date:</div><div>${b.transaction_date}</div><div class="font-semibold">Type:</div><div><span class="px-2 py-0.5 rounded-full text-xs ${b.type==='income'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${b.type}</span></div><div class="font-semibold">Amount:</div><div class="font-bold ${b.type==='income'?'text-green-600':'text-red-600'}">${formatMoney(amount)}</div><div class="font-semibold">Paid:</div><div class="text-blue-600">${formatMoney(paid)}</div>${pending>0?`<div class="font-semibold">Pending:</div><div class="text-orange-600">${formatMoney(pending)}</div>`:''}<div class="font-semibold">Status:</div><div><span class="status-badge ${b.status==='paid'?'status-paid':b.status==='partial'?'status-partial':'status-pending'}">${b.status}</span></div><div class="font-semibold">Description:</div><div>${escapeHtml(b.description||'-')}</div></div></div>`; openModal('viewBudgetModal'); } }
 function editBudgetItem(id) { let b = budgetsData.find(b=>b.id===id); if(b) { document.getElementById("editBudgetId").value = b.id; document.getElementById("budgetType").value = b.type; document.getElementById("budgetSource").value = b.source; document.getElementById("budgetAmount").value = b.amount; document.getElementById("budgetDate").value = b.transaction_date; document.getElementById("budgetStatus").value = b.status; document.getElementById("budgetDescription").value = b.description||''; const paidGroup = document.getElementById('paidAmountGroup'); if (b.status === 'partial') { paidGroup.classList.remove('hidden'); document.getElementById('budgetPaidAmount').value = b.paid_amount||0; } else { paidGroup.classList.add('hidden'); } openModal('budgetModal'); } }
 async function saveBudget() { let id = document.getElementById("editBudgetId").value; let type = document.getElementById("budgetType").value, source = document.getElementById("budgetSource").value.trim(), amount = parseMoneyValue(document.getElementById("budgetAmount").value), date = document.getElementById("budgetDate").value, status = document.getElementById("budgetStatus").value, desc = document.getElementById("budgetDescription").value, paid = 0; if(!source || amount<=0) { showToast("Source and amount required", true); return; } if (status === 'paid') paid = amount; else if (status === 'partial') { paid = parseMoneyValue(document.getElementById("budgetPaidAmount").value); if (paid <= 0 || paid >= amount) { showToast("Partial payment must be >0 and < total amount", true); return; } } let data = { type, source, amount, transaction_date: date || new Date().toISOString().split('T')[0], description: desc, status, paid_amount: paid }; let res = id ? await updateBudgetAPI(parseInt(id), data) : await addBudgetAPI(data); if(res && res.success) { showToast(id ? "Transaction updated" : "Transaction added"); addLog(`Budget ${id?"updated":"added"}: ${source} (${status})`); document.getElementById("editBudgetId").value = ""; document.getElementById("paidAmountGroup").classList.add('hidden'); document.getElementById("budgetStatus").value = 'paid'; closeModal('budgetModal'); await renderBudget(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } }
-async function deleteBudgetItem(id) { if(confirm("Delete this transaction?")) { let res = await deleteBudgetAPI(id); if(res && res.success) { showToast("Transaction deleted"); addLog(`Budget deleted: ID ${id}`); await renderBudget(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } } }
+async function deleteBudgetItem(id) { if(confirm("Delete this transaction?")) { const t = budgetsData.find(b => b.id === id); if(t) await addToRecycleBin(id, 'transaction', t.source); let res = await deleteBudgetAPI(id); if(res && res.success) { showToast("Transaction deleted"); addLog(`Budget deleted: ID ${id}`); await renderBudget(); await renderDashboard(); } else { showToast(res?.message || "Failed", true); } } }
 function exportBudgetToExcel() { let ws = [["Date","Type","Source","Amount","Paid","Pending","Status","Description"]]; budgetsData.forEach(b => { let amount=parseFloat(b.amount)||0, paid=parseFloat(b.paid_amount)||0, pending=(b.type==='income'&&b.status!=='paid')?(amount-paid):0; ws.push([b.transaction_date, b.type, b.source, amount, paid, pending, b.status, b.description||'']); }); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), "Budget"); XLSX.writeFile(wb, `budget_${new Date().toISOString().slice(0,10)}.xlsx`); showToast("Budget exported to Excel"); }
 function exportBudgetToPDF() { 
     let totalIncome = budgetsData.filter(b=>b.type==='income').reduce((s,b)=>s+(parseFloat(b.amount)||0),0);
@@ -825,11 +851,10 @@ function exportBudgetToPDF() {
     showToast("PDF preview opened - click Print to save");
 }
 
-// ==================== MESSAGES SECTION ====================
-// REPLACE in town_planning.html
+// ==================== MESSAGES SECTION - FIXED ====================
 async function fetchMessages() {
     try {
-        const res = await apiCall(`get_conversations.php?user_id=1`);
+        const res = await apiCall(`get_conversations.php?department_id=${DEPARTMENT_ID}`);
         if (res.success && res.data) {
             conversationsList = res.data;
         } else {
@@ -846,7 +871,7 @@ async function fetchMessages() {
 function getUnreadMessagesCount() { return conversationsList.reduce((sum, c) => sum + (c.unread_count || 0), 0); }
 function updateMessageBadge() { const badge = document.getElementById('msgBadge'); if (badge) { const count = getUnreadMessagesCount(); if (count > 0) { badge.classList.remove('hidden'); badge.innerText = count > 99 ? '99+' : count; } else { badge.classList.add('hidden'); } } }
 async function markMessageRead(messageId) { return await apiCall('mark_message_read.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); }
-async function deleteConversationAPI(deptId) { return await apiCall('delete_conversation.php', 'POST', { department_id: deptId, deleted_by_department: 1 }); }
+async function deleteConversationAPI(conversationId) { return await apiCall('delete_conversation.php', 'POST', { conversation_id: conversationId, department_id: DEPARTMENT_ID }); }
 
 async function renderMessages(highlightId = null) {
     await fetchMessages();
@@ -859,10 +884,10 @@ async function renderMessages(highlightId = null) {
         let otherDeptName = conv.other_department_name || 'Department';
         let unread = conv.unread_count || 0;
         let preview = conv.last_message ? (conv.last_message.substring(0,70)+(conv.last_message.length>70?'...':'')) : 'No messages';
-        let isHighlighted = highlightId && conv.other_department_id === highlightId;
-        gridHtml += `<div class="message-card ${unread>0?'message-unread':''} ${isHighlighted?'search-highlight':''}" id="msg-card-${conv.other_department_id}" onclick="openChatWithDept(${conv.other_department_id})">
+        let isHighlighted = highlightId && conv.conversation_id === highlightId;
+        gridHtml += `<div class="message-card ${unread>0?'message-unread':''} ${isHighlighted?'search-highlight':''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
             <div class="card-header"><h4>${escapeHtml(otherDeptName)}</h4><p>${unread>0?`${unread} new`:'Conversation'}</p></div>
-            <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversationWith(${conv.other_department_id})"><i class="fas fa-trash-alt"></i></div>
+            <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></div>
             <div class="p-4"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${conv.last_message_time?new Date(conv.last_message_time).toLocaleString():''}</span>${unread>0?`<span class="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">${unread}</span>`:''}</div><p class="text-sm text-gray-600 mt-1">${escapeHtml(preview)}</p></div>
         </div>`;
     }
@@ -870,24 +895,63 @@ async function renderMessages(highlightId = null) {
     if (highlightId) { const el = document.getElementById(`msg-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
     updateMessageBadge();
 }
-async function deleteConversationWith(deptId) { if(confirm(`Delete entire conversation with ${departmentNames[deptId]||'Department'}?`)) { let res = await deleteConversationAPI(deptId); if(res && res.success) { showToast("Conversation deleted"); addLog(`Conversation deleted with ${departmentNames[deptId]}`); if(currentChatWith===deptId) closeModal('chatModal'); await renderMessages(); } else { showToast(res?.message||"Failed",true); } } }
-async function openChatWithDept(deptId) {
-    currentChatWith = deptId;
-    const res = await apiCall(`get_messages.php?department_id=${deptId}`);
+async function deleteConversation(conversationId) { 
+    if(confirm(`Delete this conversation?`)) { 
+        const conv = conversationsList.find(c => c.conversation_id === conversationId);
+        if(conv) await addToRecycleBin(conversationId, 'conversation', conv.other_department_name || 'Conversation');
+        let res = await deleteConversationAPI(conversationId); 
+        if(res && res.success) { showToast("Conversation deleted"); addLog(`Conversation deleted with ID ${conversationId}`); if(currentChatWith===conversationId) closeModal('chatModal'); await renderMessages(); } else { showToast(res?.message||"Failed",true); } 
+    } 
+}
+async function openChat(conversationId) {
+    currentChatWith = conversationId;
+    const res = await apiCall(`get_messages.php?conversation_id=${conversationId}&department_id=${DEPARTMENT_ID}`);
     let messages = (res.success && res.data) ? res.data : [];
     for (let m of messages) { if (m.receiver_dept == DEPARTMENT_ID && !m.is_read) await markMessageRead(m.id); }
     await fetchMessages();
     let chatHtml = '';
     for (let m of messages) {
         let isSent = (m.sender_dept == DEPARTMENT_ID);
-        chatHtml += `<div class="chat-message-wrapper ${isSent?'justify-end':'justify-start'}"><div class="chat-message ${isSent?'chat-sent':'chat-received'}"><div class="chat-bubble">${!isSent?`<div class="text-xs opacity-75 mb-1 font-semibold">${departmentNames[m.sender_dept]||'Department'}</div>`:''}<div>${escapeHtml(m.message)}</div><span class="chat-time">${new Date(m.created_at).toLocaleString()}</span></div></div></div>`;
+        let senderName = departmentNames[m.sender_dept] || 'Department';
+        chatHtml += `<div class="chat-message-wrapper ${isSent?'justify-end':'justify-start'}"><div class="chat-message ${isSent?'chat-sent':'chat-received'}"><div class="chat-bubble">${!isSent?`<div class="text-xs opacity-75 mb-1 font-semibold">${escapeHtml(senderName)}</div>`:''}<div>${escapeHtml(m.message)}</div><span class="chat-time">${new Date(m.created_at).toLocaleString()}</span></div></div></div>`;
     }
-    document.getElementById("chatModalTitle").innerHTML = `<i class="fas fa-comments text-indigo-600 mr-2"></i>Chat with ${departmentNames[deptId]||'Department'}`;
+    document.getElementById("chatModalTitle").innerHTML = `<i class="fas fa-comments text-indigo-600 mr-2"></i>Chat with ${departmentNames[conversationId]||'Department'}`;
     document.getElementById("chatMessagesArea").innerHTML = chatHtml || '<div class="text-center text-gray-400 py-6">No messages</div>';
     openModal('chatModal');
 }
-async function sendChatMessage() { let msg = document.getElementById("replyMsg").value.trim(); if(!msg||!currentChatWith) return; let res = await apiCall('send_message.php','POST',{sender_dept:DEPARTMENT_ID,receiver_dept:currentChatWith,message:msg,sender_id:USER_ID}); if(res && res.success) { document.getElementById("replyMsg").value=""; await openChatWithDept(currentChatWith); await fetchMessages(); } else { showToast(res?.message||"Failed to send",true); } }
-async function sendNewChat() { let to = document.getElementById("chatRecipientSelect").value; let msg = document.getElementById("newChatMsg").value.trim(); if(!to){ showToast("Select department",true); return; } if(!msg){ showToast("Enter message",true); return; } let res = await apiCall('send_message.php','POST',{sender_dept:DEPARTMENT_ID,receiver_dept:parseInt(to),message:msg,sender_id:USER_ID}); if(res && res.success) { showToast(`✅ Message sent to ${departmentNames[to]||'Department'}`); addLog(`Message sent to ${departmentNames[to]}`); closeModal('startChatModal'); document.getElementById("newChatMsg").value=""; await renderMessages(); } else { showToast(res?.message||"Failed to send",true); } }
+async function sendChatMessage() { 
+    let msg = document.getElementById("replyMsg").value.trim(); 
+    if(!msg||!currentChatWith) return; 
+    let conv = conversationsList.find(c => c.conversation_id === currentChatWith);
+    let receiverDept = conv ? conv.other_department_id : null;
+    if(!receiverDept) { showToast("Conversation not found", true); return; }
+    let res = await apiCall('send_message.php','POST',{sender_dept:DEPARTMENT_ID, receiver_dept:receiverDept, conversation_id: currentChatWith, message:msg, sender_id:USER_ID}); 
+    if(res && res.success) { 
+        document.getElementById("replyMsg").value=""; 
+        await openChat(currentChatWith); 
+        await renderMessages(); 
+        showToast("Sent");
+    } else { 
+        showToast(res?.message||"Failed to send", true); 
+    } 
+}
+async function sendNewChat() { 
+    let to = document.getElementById("chatRecipientSelect").value; 
+    let msg = document.getElementById("newChatMsg").value.trim(); 
+    if(!to){ showToast("Select department",true); return; } 
+    if(!msg){ showToast("Enter message",true); return; } 
+    let res = await apiCall('send_message.php','POST',{sender_dept:DEPARTMENT_ID, receiver_dept:parseInt(to), message:msg, sender_id:USER_ID}); 
+    if(res && res.success) { 
+        showToast(`✅ Message sent to ${departmentNames[to]||'Department'}`); 
+        addLog(`Message sent to ${departmentNames[to]}`); 
+        closeModal('startChatModal'); 
+        document.getElementById("newChatMsg").value=""; 
+        await renderMessages(); 
+        if(res.conversation_id) setTimeout(() => openChat(res.conversation_id), 500);
+    } else { 
+        showToast(res?.message||"Failed to send",true); 
+    } 
+}
 
 // ==================== REPORTS SECTION ====================
 async function fetchReports() { 
@@ -966,14 +1030,14 @@ async function sendReportToDepartment(reportId,deptId){ const r=reportsList.find
 function exportSingleReportExcel(reportId){ let r=reportsList.find(r=>r.id===reportId); if(r){ let ws=[["Title","Period","Content","Created","Status"]]; ws.push([r.title,r.period,r.content,r.created_at,r.status]); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),"Report"); XLSX.writeFile(wb,`report_${r.id}.xlsx`); showToast("Exported to Excel"); } }
 function exportSingleReportPDF(reportId){ let r=reportsList.find(r=>r.id===reportId); if(r){ let printWindow=window.open('','_blank'); if(!printWindow){ showToast("Please allow popups",true); return; } let statusClass=r.status==='sent'?'status-paid':'status-pending'; let statusText=r.status==='sent'?'Sent':'Draft'; printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(r.title)} - Report</title><style>body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;max-width:900px;margin:0 auto;border:3px solid #4338ca;border-radius:12px;background:white;}h1{color:#4338ca;text-align:center;border-bottom:3px solid #4338ca;padding-bottom:15px;margin-bottom:25px;font-size:24px;font-weight:bold;}.header-info{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px;border:1px solid #ddd;padding:12px 15px;background:#f9fafb;font-size:13px;}.report-content{background:white;padding:20px;border:1px solid #e5e7eb;border-radius:8px;line-height:1.8;white-space:pre-wrap;font-size:14px;min-height:300px;}.footer{text-align:center;font-size:10px;color:#6b7280;margin-top:25px;padding-top:12px;border-top:2px solid #ddd;}.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500;}.status-paid{background:#d1fae5;color:#059669;}.status-pending{background:#fef3c7;color:#d97706;}.print-btn{text-align:center;margin-top:25px;}.print-btn button{padding:10px 24px;background:#4338ca;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:bold;}@media print{body{border:none;padding:15px;}.print-btn{display:none;}}</style></head><body><div style="padding:25px;"><h1>${escapeHtml(r.title)}</h1><div class="header-info"><div><strong>Report ID:</strong> #${r.id}</div><div><strong>Period:</strong> ${r.period}</div><div><strong>Department:</strong> ${departmentNames[r.department_id]||'Town Planning'}</div><div><strong>Created:</strong> ${formatDate(r.created_at)}</div><div><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></div></div><div class="report-content">${escapeHtml(r.content||'No content available')}</div><div class="footer">Generated: ${new Date().toLocaleString()} | GeoTraverse ERP System</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></div></body></html>`); printWindow.document.close(); showToast("PDF preview opened - click Print to save"); } }
 function exportAllReportsToExcel() { let ws=[["Title","Period","Content","Created","Status"]]; reportsList.forEach(r=>ws.push([r.title,r.period,r.content,r.created_at,r.status])); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),"Reports"); XLSX.writeFile(wb,`reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast("All reports exported to Excel"); }
-function exportAllReportsToPDF() { let printWindow=window.open('','_blank'); let reportsHtml=reportsList.map(r=>`<div style="margin-bottom:30px; border-bottom:1px solid #ddd; padding-bottom:20px;"><h3 style="color:#4338ca;">${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDate(r.created_at)}</p><div style="background:#f5f5f5; padding:10px; border-radius:5px;">${escapeHtml(r.content)}</div></div>`).join(''); printWindow.document.write(`<!DOCTYPE html><html><head><title>All Reports</title><style>body{font-family:Arial;padding:40px;max-width:1000px;margin:0 auto;border:2px solid #4338ca;} h1{color:#4338ca;text-align:center;}</style></head><body><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${reportsHtml}<div style="text-align:center;margin-top:30px;">GeoTraverse ERP System</div></body></html>`); printWindow.document.close(); printWindow.print(); showToast("All reports exported to PDF"); }
+function exportAllReportsToPDF() { let printWindow=window.open('','_blank'); let reportsHtml=reportsList.map(r=>`<div style="margin-bottom:30px; border-bottom:1px solid #ddd; padding-bottom:20px;"><h3 style="color:#4338ca;">${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDate(r.created_at)}</p><div style="background:#f5f5f5; padding:10px; border-radius:5px;">${escapeHtml(r.content)}</div></div>`).join(''); printWindow.document.write(`<!DOCTYPE html><html><head><title>All Reports</title><style>body{font-family:Arial;padding:40px;max-width:1000px;margin:0 auto;border:2px solid #4338ca;} h1{color:#4338ca;text-align:center;}</style></head><body><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${reportsHtml}<div style="text-align:center;margin-top:30px;">GeoTraverse ERP System</div><div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);" style="background:#4338ca;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;">Print / Save PDF</button></div></body></html>`); printWindow.document.close(); showToast("PDF preview opened - click Print to save"); }
 function editReportDetail(id){ let r=reportsList.find(r=>r.id===id); if(r){ document.getElementById("editReportId").value=r.id; document.getElementById("editReportTitle").value=r.title; document.getElementById("editReportPeriod").value=r.period; document.getElementById("editReportContent").value=r.content; openModal('editReportModal'); } }
 async function updateReport(){ let id=parseInt(document.getElementById("editReportId").value); let data={title:document.getElementById("editReportTitle").value,period:document.getElementById("editReportPeriod").value,content:document.getElementById("editReportContent").value}; let res=await updateReportAPI(id,data); if(res&&res.success){ showToast("Report updated"); addLog(`Report updated: ${data.title}`); closeModal('editReportModal'); await renderReports(); await renderDashboard(); } else { showToast(res?.message||"Failed",true); } }
-async function deleteReportDetail(id){ if(confirm("Delete this report?")){ let res=await deleteReportAPI(id); if(res&&res.success){ showToast("Report deleted"); addLog(`Report deleted: ID ${id}`); await renderReports(); await renderDashboard(); } else { showToast(res?.message||"Failed",true); } } }
+async function deleteReportDetail(id){ if(confirm("Delete this report?")){ const r = reportsList.find(r=>r.id===id); if(r) await addToRecycleBin(id, 'report', r.title); let res=await deleteReportAPI(id); if(res&&res.success){ showToast("Report deleted"); addLog(`Report deleted: ID ${id}`); await renderReports(); await renderDashboard(); } else { showToast(res?.message||"Failed",true); } } }
 
 // ==================== DASHBOARD ====================
 async function renderDashboard() {
-    await Promise.all([fetchProjects(), fetchBudgets(), fetchMessages(), fetchReports()]);
+    await Promise.all([fetchProjects(), fetchBudgets(), fetchMessages(), fetchReports(), loadRecycleBinFromDB()]);
     let totalProjects = projectsData.length;
     let inProgress = projectsData.filter(p=>p.status==="in_progress").length;
     let completed = projectsData.filter(p=>p.status==="completed").length;
@@ -1028,13 +1092,16 @@ async function renderDashboard() {
 function renderSettings() {
     let logsHtml = activityLogs.slice(0,15).map(l=>`<div class="text-[10px] border-b py-1"><span>${escapeHtml(l.action)}</span><span class="float-right text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('');
     let colors = [{ name:'Indigo',value:'#4338ca'},{ name:'Purple',value:'#7c3aed'},{ name:'Blue',value:'#2563eb'},{ name:'Green',value:'#065f46'},{ name:'Orange',value:'#ea580c'},{ name:'Red',value:'#dc2626'},{ name:'Teal',value:'#0d9488'}];
+    let recycleHtml = `<div class="bg-white rounded-xl p-4 shadow-sm mt-4"><div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-sm"><i class="fas fa-trash-restore text-orange-500 mr-2"></i>Recycle Bin (${recycleBinData.length} items)</h3><button onclick="emptyRecycleBin()" class="btn-danger text-xs px-2 py-1 rounded">Empty Bin</button></div>`;
+    if (recycleBinData.length === 0) { recycleHtml += `<div class="text-center py-6 text-gray-400 text-xs">Recycle bin is empty</div>`; }
+    else { recycleHtml += `<div class="space-y-2 max-h-64 overflow-y-auto">`; recycleBinData.forEach(item => { const icon = item.item_type === 'project' ? 'fa-tasks' : item.item_type === 'transaction' ? 'fa-exchange-alt' : item.item_type === 'report' ? 'fa-chart-line' : 'fa-comments'; recycleHtml += `<div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg"><div class="flex items-center gap-2"><i class="fas ${icon} text-gray-500 text-xs"></i><div><p class="font-medium text-xs">${escapeHtml(item.item_name)}</p><p class="text-[8px] text-gray-500">${item.item_type} · Deleted: ${new Date(item.deleted_at).toLocaleString()}</p></div></div><div class="flex gap-1"><button onclick="restoreFromRecycleBin(${item.id})" class="action-btn restore text-[9px] px-1 py-0.5"><i class="fas fa-trash-restore"></i></button><button onclick="permanentlyDeleteItem(${item.id})" class="action-btn delete text-[9px] px-1 py-0.5"><i class="fas fa-trash-alt"></i></button></div></div>`; }); recycleHtml += `</div>`; } recycleHtml += `</div>`;
     let html = `<h2 class="text-xl font-bold mb-4"><i class="fas fa-cog mr-2"></i>Settings</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-2"><i class="fas fa-palette mr-2 text-indigo-600"></i>Sidebar Color</h3><div class="flex gap-2 flex-wrap" id="colorOptionsContainer"></div></div>
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-2"><i class="fas fa-database mr-2 text-green-600"></i>Backup & Restore</h3><div class="flex gap-2"><button onclick="openModal('backupRestoreModal')" class="flex-1 bg-green-600 text-white py-2 rounded text-xs">Backup</button><button onclick="restoreBackup()" class="flex-1 bg-orange-600 text-white py-2 rounded text-xs">Restore</button></div></div>
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-2"><i class="fas fa-history mr-2 text-blue-600"></i>Activity Logs</h3><div class="max-h-32 overflow-y-auto text-xs border rounded-lg p-2 bg-gray-50">${logsHtml}</div><button onclick="clearLogs()" class="w-full mt-2 bg-red-600 text-white py-1.5 rounded text-xs">Clear Logs</button></div>
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-2"><i class="fas fa-info-circle mr-2 text-purple-600"></i>System Info</h3><p class="text-xs"><strong>Version:</strong> 2.1.0</p><p class="text-xs mt-1"><strong>Projects:</strong> ${projectsData.length}</p><p class="text-xs mt-1"><strong>Transactions:</strong> ${budgetsData.length}</p><p class="text-xs mt-1"><strong>Reports:</strong> ${reportsList.length}</p></div>
-        </div>`;
+        </div>${recycleHtml}`;
     document.getElementById("settingsSection").innerHTML = html;
     const container = document.getElementById('colorOptionsContainer');
     if(container){
@@ -1063,7 +1130,7 @@ function performGlobalSearch() {
         dropdown.innerHTML=html; dropdown.classList.add("active");
     },300);
 }
-function searchAndHighlight(section,id,elementId){ document.getElementById('searchResultsDropdown').classList.remove('active'); document.getElementById('globalSearchInput').value=''; showSection(section); setTimeout(()=>{ const element=document.getElementById(elementId); if(element){ element.scrollIntoView({behavior:'smooth',block:'center'}); element.classList.add('search-highlight'); setTimeout(()=>element.classList.remove('search-highlight'),3000); } },500); }
+function searchAndHighlight(section,id,elementId){ document.getElementById('searchResultsDropdown').classList.remove('active'); document.getElementById('globalSearchInput').value=''; showSection(section, id); setTimeout(()=>{ const element=document.getElementById(elementId); if(element){ element.scrollIntoView({behavior:'smooth',block:'center'}); element.classList.add('search-highlight'); setTimeout(()=>element.classList.remove('search-highlight'),3000); } },500); }
 document.addEventListener("click",(e)=>{ let inp=document.getElementById("globalSearchInput"); let dd=document.getElementById("searchResultsDropdown"); if(inp&&dd&&!inp.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove("active"); });
 function showSection(sectionId, highlightId = null) {
     let sections=["dashboardSection","projectsSection","budgetSection","messagesSection","reportsSection","settingsSection"];
@@ -1080,6 +1147,7 @@ function showSection(sectionId, highlightId = null) {
 }
 async function logout() { if(confirm('Logout?')) { if(refreshInterval) clearInterval(refreshInterval); if(countdownInterval) clearInterval(countdownInterval); localStorage.clear(); sessionStorage.clear(); window.location.href='login_system.html'; } }
 async function init() {
+    await loadRecycleBinFromDB();
     await loadDepartments();
     let container=document.getElementById("mainContentContainer");
     container.innerHTML=`<div id="dashboardSection"></div><div id="projectsSection" class="hidden"></div><div id="budgetSection" class="hidden"></div><div id="messagesSection" class="hidden"></div><div id="reportsSection" class="hidden"></div><div id="settingsSection" class="hidden"></div>`;
@@ -1099,9 +1167,10 @@ async function init() {
 window.showSection=showSection; window.closeModal=closeModal; window.openModal=openModal; window.toggleSendDropdown=toggleSendDropdown; window.goToMainWebsite=goToMainWebsite; window.logout=logout; window.closeMobileSidebar=closeMobileSidebar;
 window.saveProject=saveProject; window.editProject=editProject; window.deleteProject=deleteProject; window.viewProjectDetails=viewProjectDetails; window.exportSingleProjectExcel=exportSingleProjectExcel; window.exportProjectToPDF=exportProjectToPDF; window.exportProjectsToExcel=exportProjectsToExcel; window.exportProjectsToPDF=exportProjectsToPDF;
 window.saveBudget=saveBudget; window.editBudgetItem=editBudgetItem; window.deleteBudgetItem=deleteBudgetItem; window.viewBudgetItem=viewBudgetItem; window.exportBudgetToExcel=exportBudgetToExcel; window.exportBudgetToPDF=exportBudgetToPDF;
-window.openChatWithDept=openChatWithDept; window.sendChatMessage=sendChatMessage; window.sendNewChat=sendNewChat; window.deleteConversationWith=deleteConversationWith;
-window.addReport=addReport; window.viewReportDetail=viewReportDetail; window.editReportDetail=editReportDetail; window.updateReport=updateReport; window.deleteReportDetail=deleteReportDetail; window.exportSingleReportExcel=exportSingleReportExcel; window.exportSingleReportPDF=exportSingleReportPDF; window.exportAllReportsToExcel=exportAllReportsToExcel; window.exportAllReportsToPDF=exportAllReportsToPDF;
+window.openChat=openChat; window.sendChatMessage=sendChatMessage; window.sendNewChat=sendNewChat; window.deleteConversation=deleteConversation;
+window.addReport=addReport; window.viewReportDetail=viewReportDetail; window.editReportDetail=editReportDetail; window.updateReport=updateReport; window.deleteReportDetail=deleteReportDetail; window.exportSingleReportExcel=exportSingleReportExcel; window.exportSingleReportPDF=exportSingleReportPDF; window.exportAllReportsToExcel=exportAllReportsToExcel; window.exportAllReportsToPDF=exportAllReportsToPDF; window.sendReportToDepartment=sendReportToDepartment;
 window.changeColor=changeColor; window.createBackup=createBackup; window.restoreBackup=restoreBackup; window.clearLogs=clearLogs; window.showFullImage=showFullImage;
+window.restoreFromRecycleBin = restoreFromRecycleBin; window.permanentlyDeleteItem = permanentlyDeleteItem; window.emptyRecycleBin = emptyRecycleBin;
 
 init();
 </script>
