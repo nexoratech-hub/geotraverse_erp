@@ -167,6 +167,35 @@
         
         .money-input { text-align: left; font-family: monospace; font-weight: 500; }
         .detail-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 15px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+        /* Message styles - replace Tailwind bracket classes */
+.msg-time {
+    font-size: 11px;
+    color: #9ca3af;
+}
+.unread-count-badge {
+    background-color: #ef4444;
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    margin-left: 6px;
+    font-weight: bold;
+}
+.msg-preview-text {
+    font-size: 13px;
+    color: #4b5563;
+    margin-top: 4px;
+    line-height: 1.4;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+}
+body.dark-mode .msg-preview-text {
+    color: #9ca3af;
+}
+body.dark-mode .msg-time {
+    color: #6b7280;
+}
     </style>
 </head>
 <body>
@@ -965,7 +994,6 @@ async function loadMessages(highlightId = null) {
             return;
         }
         
-        // Sort by latest message first, unread first
         messagesData.sort((a, b) => {
             if (a.unread_count > 0 && b.unread_count === 0) return -1;
             if (a.unread_count === 0 && b.unread_count > 0) return 1;
@@ -983,6 +1011,7 @@ async function loadMessages(highlightId = null) {
             const lastTime = conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : '';
             const isHighlighted = highlightId && conv.conversation_id === highlightId;
             
+            // BADILISHA: Tumia classes rahisi bila brackets
             msgsHtml += `<div class="message-item ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
                 <div class="delete-conv-btn" onclick="event.stopPropagation(); deleteConversation(${conv.conversation_id})"><i class="fas fa-trash-alt"></i></div>
                 <div class="card-header">
@@ -991,10 +1020,10 @@ async function loadMessages(highlightId = null) {
                 </div>
                 <div class="p-3">
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-[9px] text-gray-400">${lastTime}</span>
-                        ${isUnread ? `<span class="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full ml-1">${conv.unread_count}</span>` : ''}
+                        <span class="msg-time">${lastTime}</span>
+                        ${isUnread ? `<span class="unread-count-badge">${conv.unread_count}</span>` : ''}
                     </div>
-                    <p class="text-xs text-gray-600 line-clamp-2">${escapeHtml(preview)}</p>
+                    <p class="msg-preview-text">${escapeHtml(preview)}</p>
                 </div>
             </div>`;
         }
@@ -1015,7 +1044,6 @@ async function loadMessages(highlightId = null) {
             <h2 class="text-lg font-bold"><i class="fas fa-envelope text-blue-600 mr-2"></i>Messages (0 conversations)</h2>
             <button onclick="openModal('msgModal')" class="btn-primary"><i class="fas fa-paper-plane mr-1"></i> New Message</button>
         </div>
-        <div class="messages-grid" id="messagesGridContainer"></div>
         <div class="text-center py-12 text-gray-400 bg-white rounded-lg">Error loading messages. Please refresh.</div>`;
     }
 }
@@ -1235,10 +1263,8 @@ async function sendChatMessage() {
         return;
     }
     
-    // Tafuta receiver department kutoka kwenye conversation
     let currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
     if (!currentConv) {
-        // Try to reload conversations first
         await loadMessages();
         currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
         if (!currentConv) {
@@ -1258,7 +1284,7 @@ async function sendChatMessage() {
     
     try {
         const payload = {
-            sender_dept: DEPARTMENT_ID,  // Manager = 4
+            sender_dept: DEPARTMENT_ID,
             receiver_dept: receiverDept,
             conversation_id: currentConversationId,
             message: msg.trim()
@@ -1273,37 +1299,33 @@ async function sendChatMessage() {
         if (res && res.success) {
             document.getElementById('replyMsg').value = '';
             
-            // Add message to chat window immediately
             const chatArea = document.getElementById('chatMessagesArea');
             if (chatArea) {
                 const newMessageDiv = document.createElement('div');
                 newMessageDiv.className = 'chat-message-wrapper justify-end';
                 newMessageDiv.innerHTML = `<div class="chat-message chat-sent">
                     <div class="chat-bubble">
-                        <div class="text-sm">${escapeHtml(msg)}</div>
-                        <span class="chat-time">Just now</span>
+                        <div class="chat-message-text">${escapeHtml(msg)}</div>
+                        <div class="chat-time">Just now</div>
                     </div>
                 </div>`;
                 chatArea.appendChild(newMessageDiv);
                 chatArea.scrollTop = chatArea.scrollHeight;
             }
             
-            // Update conversation's last message in the list
             if (currentConv) {
                 currentConv.last_message = msg;
                 currentConv.last_message_time = new Date().toISOString();
             }
             
-            // Update the message card preview
             const msgCard = document.getElementById(`msg-card-${currentConversationId}`);
             if (msgCard) {
-                const previewP = msgCard.querySelector('.text-xs.text-gray-600');
+                const previewP = msgCard.querySelector('.msg-preview-text');
                 if (previewP) previewP.innerHTML = escapeHtml(msg.substring(0, 70)) + (msg.length > 70 ? '...' : '');
-                const timeSpan = msgCard.querySelector('.text-[9px].text-gray-400');
+                const timeSpan = msgCard.querySelector('.msg-time');
                 if (timeSpan) timeSpan.innerHTML = 'Just now';
             }
             
-            // Reload messages to update conversation list order
             await loadMessages();
             showToast('✅ Sent');
         } else {
