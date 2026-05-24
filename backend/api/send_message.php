@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -23,30 +23,33 @@ if ($conn->connect_error) {
 
 $conn->set_charset("utf8mb4");
 
-$data = json_decode(file_get_contents('php://input'), true);
-
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'No data received']);
-    exit;
+// Get POST data
+$input = json_decode(file_get_contents('php://input'), true);
+if (!$input) {
+    $input = $_POST;
 }
 
-$sender_dept = isset($data['sender_dept']) ? (int)$data['sender_dept'] : 0;
-$receiver_dept = isset($data['receiver_dept']) ? (int)$data['receiver_dept'] : 0;
-$message = isset($data['message']) ? trim($data['message']) : '';
-$conversation_id = isset($data['conversation_id']) ? (int)$data['conversation_id'] : null;
-$user_id = isset($data['user_id']) ? (int)$data['user_id'] : null;
-
-if ($user_id == 1 && !$sender_dept) {
-    $sender_dept = 1;
-}
+$sender_dept = isset($input['sender_dept']) ? (int)$input['sender_dept'] : null;
+$receiver_dept = isset($input['receiver_dept']) ? (int)$input['receiver_dept'] : null;
+$conversation_id = isset($input['conversation_id']) ? (int)$input['conversation_id'] : null;
+$message = isset($input['message']) ? trim($input['message']) : '';
+$subject = isset($input['subject']) ? trim($input['subject']) : 'Message';
+$sender_id = isset($input['sender_id']) ? (int)$input['sender_id'] : null;
 
 if (!$sender_dept || !$receiver_dept || !$message) {
-    echo json_encode(['success' => false, 'message' => 'Missing required fields: sender_dept, receiver_dept, message']);
+    echo json_encode(['success' => false, 'message' => 'sender_dept, receiver_dept, and message are required']);
     exit;
 }
 
+$department_names = [
+    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing',
+    4 => 'Manager', 5 => 'Secretary', 6 => 'Bricks & Timber',
+    7 => 'Aluminium', 8 => 'Town Planning', 9 => 'Architectural',
+    10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
+];
+
 // Map department to delete column
-$dept_column_map = [
+$delete_column_map = [
     1 => 'deleted_by_super_admin',
     2 => 'deleted_by_finance',
     3 => 'deleted_by_sales',
@@ -61,86 +64,92 @@ $dept_column_map = [
     12 => 'deleted_by_hatimiliki'
 ];
 
-$sender_column = $dept_column_map[$sender_dept] ?? 'deleted_by_super_admin';
+$sender_delete_column = $delete_column_map[$sender_dept] ?? 'deleted_by_super_admin';
+$receiver_delete_column = $delete_column_map[$receiver_dept] ?? 'deleted_by_super_admin';
 
 try {
     $conn->begin_transaction();
     
-    // STEP 1: Check if conversation already exists between these departments
-    $existing_conversation_id = null;
-    
+    // If conversation_id not provided, find or create conversation
     if (!$conversation_id) {
-        // Search for existing conversation between these two departments
-        $search_query = "
+        // Check if conversation already exists between these departments
+        $find_stmt = $conn->prepare("
             SELECT id FROM conversations 
             WHERE (sender_dept = ? AND receiver_dept = ?) 
                OR (sender_dept = ? AND receiver_dept = ?)
             LIMIT 1
-        ";
-        $search_stmt = $conn->prepare($search_query);
-        $search_stmt->bind_param("iiii", $sender_dept, $receiver_dept, $receiver_dept, $sender_dept);
-        $search_stmt->execute();
-        $search_result = $search_stmt->get_result();
+        ");
+        $find_stmt->bind_param("iiii", $sender_dept, $receiver_dept, $receiver_dept, $sender_dept);
+        $find_stmt->execute();
+        $find_result = $find_stmt->get_result();
         
-        if ($search_row = $search_result->fetch_assoc()) {
-            $existing_conversation_id = $search_row['id'];
-            $conversation_id = $existing_conversation_id;
-            
-            // UNDELETE - if this department had deleted it, restore it
-            $undelete_query = "UPDATE conversations SET $sender_column = 0, deleted_at = NULL WHERE id = ?";
-            $undelete_stmt = $conn->prepare($undelete_query);
-            $undelete_stmt->bind_param("i", $conversation_id);
-            $undelete_stmt->execute();
+        if ($find_row = $find_result->fetch_assoc()) {
+            $conversation_id = $find_row['id'];
+        } else {
+            // Create new conversation
+            $insert_stmt = $conn->prepare("
+                INSERT INTO conversations (sender_dept, receiver_dept, subject, created_at, updated_at)
+                VALUES (?, ?, ?, NOW(), NOW())
+            ");
+            $insert_stmt->bind_param("iis", $sender_dept, $receiver_dept, $subject);
+            $insert_stmt->execute();
+            $conversation_id = $conn->insert_id;
         }
     }
     
-    // STEP 2: If no conversation exists, create a new one
-    if (!$conversation_id) {
-        $insert_conv = "
-            INSERT INTO conversations (sender_dept, receiver_dept, subject, status, created_at, updated_at) 
-            VALUES (?, ?, ?, 'active', NOW(), NOW())
-        ";
-        $subject = substr($message, 0, 100);
-        $insert_stmt = $conn->prepare($insert_conv);
-        $insert_stmt->bind_param("iis", $sender_dept, $receiver_dept, $subject);
-        $insert_stmt->execute();
-        $conversation_id = $conn->insert_id;
-    }
+    // CRITICAL: Clear deleted flags for both departments when a new message is sent
+    // This ensures the conversation reappears for both sides
+    $clear_sender_stmt = $conn->prepare("UPDATE conversations SET $sender_delete_column = 0 WHERE id = ?");
+    $clear_sender_stmt->bind_param("i", $conversation_id);
+    $clear_sender_stmt->execute();
     
-    // STEP 3: Insert the message
-    $insert_msg = "
-        INSERT INTO messages (
-            sender_dept, receiver_dept, conversation_id, sender_id, receiver_id, 
-            message, is_read, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, 'sent', NOW())
-    ";
-    $msg_stmt = $conn->prepare($insert_msg);
-    $msg_stmt->bind_param("iiiiss", $sender_dept, $receiver_dept, $conversation_id, $sender_dept, $receiver_dept, $message);
-    $msg_stmt->execute();
+    $clear_receiver_stmt = $conn->prepare("UPDATE conversations SET $receiver_delete_column = 0 WHERE id = ?");
+    $clear_receiver_stmt->bind_param("i", $conversation_id);
+    $clear_receiver_stmt->execute();
+    
+    // Insert the message
+    $insert_msg_stmt = $conn->prepare("
+        INSERT INTO messages (conversation_id, sender_dept, receiver_dept, message, status, created_at)
+        VALUES (?, ?, ?, ?, 'sent', NOW())
+    ");
+    $insert_msg_stmt->bind_param("iiis", $conversation_id, $sender_dept, $receiver_dept, $message);
+    $insert_msg_stmt->execute();
     $message_id = $conn->insert_id;
     
-    // STEP 4: Update conversation updated_at timestamp
-    $update_conv = "UPDATE conversations SET updated_at = NOW() WHERE id = ?";
-    $update_stmt = $conn->prepare($update_conv);
-    $update_stmt->bind_param("i", $conversation_id);
-    $update_stmt->execute();
+    // Update conversation's updated_at timestamp
+    $update_conv_stmt = $conn->prepare("UPDATE conversations SET updated_at = NOW() WHERE id = ?");
+    $update_conv_stmt->bind_param("i", $conversation_id);
+    $update_conv_stmt->execute();
     
     $conn->commit();
+    
+    // Get conversation details for response
+    $conv_info_stmt = $conn->prepare("
+        SELECT sender_dept, receiver_dept, subject 
+        FROM conversations WHERE id = ?
+    ");
+    $conv_info_stmt->bind_param("i", $conversation_id);
+    $conv_info_stmt->execute();
+    $conv_info = $conv_info_stmt->get_result()->fetch_assoc();
     
     echo json_encode([
         'success' => true,
         'message' => 'Message sent successfully',
+        'conversation_id' => $conversation_id,
+        'message_id' => $message_id,
         'data' => [
             'conversation_id' => $conversation_id,
-            'message_id' => $message_id,
-            'is_new_conversation' => ($existing_conversation_id === null)
+            'sender_dept' => $sender_dept,
+            'receiver_dept' => $receiver_dept,
+            'message' => $message,
+            'created_at' => date('Y-m-d H:i:s')
         ]
     ]);
     
 } catch (Exception $e) {
     $conn->rollback();
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Failed: ' . $e->getMessage()]);
 } finally {
-    $conn->close();
+    if (isset($conn)) $conn->close();
 }
 ?>

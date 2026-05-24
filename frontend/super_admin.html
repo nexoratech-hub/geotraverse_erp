@@ -1361,17 +1361,306 @@ async function saveTransaction() { let id = document.getElementById('transId').v
 async function deleteTransaction(id) { if(confirm('Delete this transaction?')) { const trans = transactionsData.find(t => t.id === id); if(trans) await addToRecycleBin(id, 'transaction', trans.source); let res = await apiCall('delete_transaction.php','DELETE',{id: parseInt(id)}); if(res.success) { showToast('Transaction deleted'); loadCashflow(); loadDashboard(); } else showToast(res.message || 'Failed', true); } }
 
 // ==================== MESSAGES SECTION ====================
-async function loadMessages(highlightId = null) {
+// ==================== MESSAGES SECTION - COMPLETELY FIXED FOR SUPER ADMIN ====================
+
+// Function ya kutuma message mpya kwa department (Super Admin anaanzisha conversation)
+// ==================== MESSAGES SECTION - COMPLETELY REWRITTEN ====================
+
+// Reset variables when page loads
+currentConversationId = null;
+currentChatReceiverDept = null;
+currentChatOtherDeptId = null;
+// Function ya kutuma message mpya kwa department (Super Admin anaanzisha conversation)
+async function sendNewMessage() { 
+    const departmentId = document.getElementById('msgTo').value; 
+    const msg = document.getElementById('msgContent').value; 
+    
+    if (!departmentId) { 
+        showToast('Please select a department', true); 
+        return; 
+    } 
+    if (!msg.trim()) { 
+        showToast('Please enter a message', true); 
+        return; 
+    } 
+    
+    const sendBtn = document.querySelector('#msgModal .btn-primary'); 
+    const originalText = sendBtn.innerHTML; 
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...'; 
+    sendBtn.disabled = true; 
+    
     try { 
-        const res = await apiCall(`get_conversations.php?user_id=1`); 
+        const payload = { 
+            sender_dept: 1,  
+            receiver_dept: parseInt(departmentId), 
+            message: msg.trim(),
+            subject: 'Message from Super Admin',
+            sender_id: 1
+        }; 
+        
+        console.log("Sending new message payload:", payload); 
+        
+        const res = await apiCall('send_message.php', 'POST', payload); 
+        
+        console.log("Send message response:", res); 
+        
+        if (res && res.success) { 
+            showToast('✅ Message sent successfully!'); 
+            closeModal('msgModal'); 
+            document.getElementById('msgContent').value = ''; 
+            
+            // Force reload messages from server
+            await loadMessages(true);
+            
+            // Open the conversation if we have ID
+            if (res.conversation_id || (res.data && res.data.conversation_id)) {
+                const convId = res.conversation_id || res.data.conversation_id;
+                setTimeout(async () => {
+                    await openChat(convId, parseInt(departmentId));
+                }, 500);
+            } else {
+                // If no conversation ID, try to find it
+                setTimeout(async () => {
+                    await loadMessages(true);
+                    const conv = messagesData.find(c => c.other_department_id == departmentId);
+                    if (conv) {
+                        await openChat(conv.conversation_id, departmentId);
+                    }
+                }, 1000);
+            }
+        } else { 
+            showToast('❌ ' + (res?.message || 'Failed to send'), true); 
+        } 
+    } catch (error) { 
+        console.error("Send error:", error);
+        showToast('❌ Network error: ' + error.message, true); 
+    } 
+    finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    } 
+}
+
+// Function ya kufungua chat
+async function openChat(conversationId, receiverDeptId = null) { 
+    // Store conversation ID
+    currentConversationId = conversationId; 
+    
+    // First reload messages to get latest conversation data
+    await loadMessages(true);
+    
+    let conv = messagesData.find(c => c.conversation_id === conversationId); 
+    
+    // If conversation not found, try to find by department
+    if (!conv && receiverDeptId) {
+        conv = messagesData.find(c => c.other_department_id == receiverDeptId);
+        if (conv) {
+            currentConversationId = conv.conversation_id;
+        }
+    }
+    
+    // If still not found, create a temporary conv object
+    if (!conv && receiverDeptId) {
+        conv = { 
+            conversation_id: conversationId, 
+            other_department_id: receiverDeptId, 
+            other_department_name: departmentNames[receiverDeptId] || 'Department',
+            unread_count: 0
+        };
+    } else if (!conv) {
+        showToast('Conversation not found. Please try again.', true);
+        return;
+    }
+    
+    const otherDeptName = conv.other_department_name || departmentNames[conv.other_department_id] || 'Department'; 
+    const otherDeptId = conv.other_department_id;
+    
+    // Store for sending messages
+    currentChatReceiverDept = otherDeptId;
+    currentChatOtherDeptId = otherDeptId;
+    
+    const chatModalTitle = document.getElementById('chatModalTitle');
+    if (chatModalTitle) {
+        chatModalTitle.innerHTML = `<i class="fas fa-comments text-blue-500 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`; 
+    }
+    
+    try {
+        const res = await apiCall(`get_messages.php?conversation_id=${currentConversationId}&user_id=1&department_id=1`); 
+        
+        console.log("Messages API Response:", res);
+        
+        let msgs = [];
+        if (res.success && res.data && Array.isArray(res.data)) { 
+            msgs = res.data; 
+        } else if (res.data && typeof res.data === 'object') {
+            msgs = Object.values(res.data);
+        }
+        
+        const chatMessagesArea = document.getElementById('chatMessagesArea');
+        if (!chatMessagesArea) {
+            console.error("chatMessagesArea not found");
+            return;
+        }
+        
+        let chatHtml = ''; 
+        
+        if (!msgs || msgs.length === 0) {
+            chatHtml = '<div class="text-center text-gray-400 py-6">No messages yet. Send a message to start the conversation!</div>';
+        } else {
+            for (let m of msgs) { 
+                const isSent = (m.sender_dept == 1);
+                const senderName = m.sender_dept_name || departmentNames[m.sender_dept] || (m.sender_dept == 1 ? 'Super Admin' : 'Department');
+                const time = new Date(m.created_at).toLocaleString();
+                
+                chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
+                    <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
+                        <div class="chat-bubble">
+                            ${!isSent ? `<div class="text-[9px] opacity-75 mb-1 font-semibold">${escapeHtml(senderName)}</div>` : ''}
+                            <div class="text-sm">${escapeHtml(m.message)}</div>
+                            <span class="chat-time">${time}</span>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteMessage(${m.id})" 
+                        class="delete-msg-btn bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-[9px] ml-1 opacity-0 hover:opacity-100 transition">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>`; 
+            }
+        }
+        
+        chatMessagesArea.innerHTML = chatHtml; 
+        chatMessagesArea.scrollTop = chatMessagesArea.scrollHeight; 
+        
+        openModal('chatModal'); 
+        
+        // Mark all messages as read
+        if (msgs && msgs.length > 0) {
+            for (let m of msgs) {
+                if (m.receiver_dept == 1 && !m.is_read) {
+                    await apiCall('mark_message_read.php', 'POST', { message_id: m.id, department_id: 1 });
+                }
+            }
+        }
+        
+        // Refresh messages list to update unread counts
+        await loadMessages(true); 
+        
+    } catch(e) {
+        console.error("Error opening chat:", e);
+        showToast("Failed to load messages: " + e.message, true);
+    }
+}
+
+// Function ya kutuma message (kujibu)
+async function sendChatMessage() { 
+    let msg = document.getElementById('replyMsg')?.value; 
+    if (!msg || !msg.trim()) { 
+        showToast('Enter a message', true); 
+        return; 
+    } 
+    if (!currentConversationId && !currentChatReceiverDept) { 
+        showToast('No conversation selected', true); 
+        return; 
+    } 
+    
+    const sendBtn = document.querySelector('#chatModal .btn-primary');
+    if (!sendBtn) {
+        showToast('Send button not found', true);
+        return;
+    }
+    
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
+    sendBtn.disabled = true;
+    
+    try {
+        let receiverDept = currentChatReceiverDept;
+        
+        // If we don't have receiver dept, try to get it from the conversation
+        if (!receiverDept) {
+            await loadMessages(true);
+            const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
+            if (currentConv) {
+                receiverDept = currentConv.other_department_id;
+                currentChatReceiverDept = receiverDept;
+            }
+        }
+        
+        if (!receiverDept) {
+            showToast('Could not find receiver department', true);
+            return;
+        }
+        
+        // Build payload - ALWAYS include both sender_dept and receiver_dept
+        const payload = {
+            sender_dept: 1,
+            receiver_dept: receiverDept,
+            message: msg.trim(),
+            subject: 'Reply from Super Admin',
+            sender_id: 1
+        };
+        
+        // Add conversation_id if we have it (helps backend)
+        if (currentConversationId) {
+            payload.conversation_id = currentConversationId;
+        }
+        
+        console.log("Sending reply payload:", payload);
+        
+        const res = await apiCall('send_message.php', 'POST', payload);
+        
+        console.log("Send chat response:", res);
+        
+        if (res && res.success) { 
+            document.getElementById('replyMsg').value = ''; 
+            
+            // Get the conversation ID from response if available
+            const newConvId = res.conversation_id || (res.data && res.data.conversation_id);
+            if (newConvId && newConvId !== currentConversationId) {
+                currentConversationId = newConvId;
+            }
+            
+            // Refresh the chat window to show the new message
+            await loadMessages(true);
+            await openChat(currentConversationId, receiverDept);
+            
+            showToast('✅ Sent'); 
+        } else { 
+            showToast(res?.message || 'Failed to send message', true); 
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+}
+
+// Load messages - FIXED to properly load and display conversations
+async function loadMessages(forceRefresh = false, highlightId = null) {
+    try { 
+        // Use department_id=1 for Super Admin (Super Admin department ID is 1)
+        const res = await apiCall(`get_conversations.php?department_id=1`); 
+        
+        console.log("Conversations API Response:", res);
         
         if (res.success && res.data && Array.isArray(res.data)) { 
-            messagesData = res.data; 
+            // Sort by last message time (newest first)
+            messagesData = res.data.sort((a, b) => {
+                const timeA = a.last_message_time ? new Date(a.last_message_time) : 0;
+                const timeB = b.last_message_time ? new Date(b.last_message_time) : 0;
+                return timeB - timeA;
+            });
         } else { 
             messagesData = []; 
         }
         
-        updateMessageBadge();
+        // Calculate unread count and update badge
+        const unreadCount = messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+        updateMessageBadge(unreadCount);
         
         let html = `<div class="flex flex-wrap justify-between items-center gap-3 mb-3">
             <h2 class="text-lg font-bold"><i class="fas fa-envelope text-blue-600 mr-2"></i>Messages (${messagesData.length} conversations)</h2>
@@ -1382,15 +1671,9 @@ async function loadMessages(highlightId = null) {
         document.getElementById('messagesPage').innerHTML = html;
         
         if (messagesData.length === 0) { 
-            document.getElementById('messagesGridContainer').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-lg">No messages found.</div>'; 
+            document.getElementById('messagesGridContainer').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-lg">No messages found. Click "New Message" to start a conversation.</div>'; 
             return; 
         }
-        
-        messagesData.sort((a, b) => {
-            if (a.unread_count > 0 && b.unread_count === 0) return -1;
-            if (a.unread_count === 0 && b.unread_count > 0) return 1;
-            return new Date(b.last_message_time) - new Date(a.last_message_time);
-        });
         
         let msgsHtml = '';
         for (let conv of messagesData) { 
@@ -1400,7 +1683,7 @@ async function loadMessages(highlightId = null) {
             const lastTime = conv.last_message_time ? new Date(conv.last_message_time).toLocaleString() : '';
             const isHighlighted = highlightId && conv.conversation_id === highlightId;
             
-            msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id})">
+            msgsHtml += `<div class="message-card ${isUnread ? 'message-unread' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="msg-card-${conv.conversation_id}" onclick="openChat(${conv.conversation_id}, ${conv.other_department_id})">
                 <div class="card-header">
                     <h4>${escapeHtml(otherDeptName)}</h4>
                     <p>${isUnread ? `${conv.unread_count} new` : 'Conversation'}</p>
@@ -1433,6 +1716,21 @@ async function loadMessages(highlightId = null) {
     }
 }
 
+// Update message badge function
+function updateMessageBadge(count = null) {
+    const unreadCount = count !== null ? count : messagesData.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+    const badge = document.getElementById('msgBadge'); 
+    if (badge) { 
+        if (unreadCount > 0) { 
+            badge.classList.remove('hidden'); 
+            badge.innerText = unreadCount > 99 ? '99+' : unreadCount; 
+        } else { 
+            badge.classList.add('hidden'); 
+        } 
+    } 
+}
+
+// Delete conversation function
 async function deleteConversation(conversationId) { 
     if (confirm('Delete this conversation? It will be hidden from your view.')) { 
         const conv = messagesData.find(c => c.conversation_id === conversationId);
@@ -1441,7 +1739,7 @@ async function deleteConversation(conversationId) {
         try {
             const res = await apiCall('delete_conversation.php', 'POST', { 
                 conversation_id: conversationId, 
-                user_id: 1 
+                department_id: 1 
             }); 
             
             if (res && res.success) { 
@@ -1455,10 +1753,11 @@ async function deleteConversation(conversationId) {
                     const chatModal = document.getElementById('chatModal');
                     if (chatModal) chatModal.style.display = 'none';
                     currentConversationId = null; 
+                    currentChatReceiverDept = null;
                 }
                 
                 // Reload messages grid
-                await loadMessages(); 
+                await loadMessages(true); 
             } else { 
                 showToast(res?.message || 'Failed', true); 
             }
@@ -1469,24 +1768,25 @@ async function deleteConversation(conversationId) {
     } 
 }
 
+// Delete message function
 async function deleteMessage(messageId) { 
     if (confirm('Delete this message?')) { 
         try {
             const res = await apiCall('delete_message.php', 'POST', { 
                 message_id: messageId, 
-                user_id: 1 
+                department_id: 1 
             }); 
             
             if (res && res.success) { 
                 showToast('Message deleted'); 
                 
-                // Refresh the current chat if open
-                if (currentConversationId) {
-                    await openChat(currentConversationId); 
+                // Refresh the current chat
+                if (currentConversationId && currentChatReceiverDept) {
+                    await openChat(currentConversationId, currentChatReceiverDept); 
                 }
                 
-                // Reload messages list to update previews
-                await loadMessages(); 
+                // Reload messages list
+                await loadMessages(true); 
             } else { 
                 showToast(res?.message || 'Failed', true); 
             }
@@ -1496,233 +1796,6 @@ async function deleteMessage(messageId) {
         }
     } 
 }
-
-async function sendNewMessage() { 
-    const departmentId = document.getElementById('msgTo').value; 
-    const msg = document.getElementById('msgContent').value; 
-    
-    if (!departmentId) { 
-        showToast('Please select a department', true); 
-        return; 
-    } 
-    if (!msg.trim()) { 
-        showToast('Please enter a message', true); 
-        return; 
-    } 
-    
-    const sendBtn = document.querySelector('#msgModal .btn-primary'); 
-    const originalText = sendBtn.innerHTML; 
-    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...'; 
-    sendBtn.disabled = true; 
-    
-    try { 
-        // IMPORTANT: DO NOT include conversation_id here
-        // Let the backend find or create the conversation
-        const payload = { 
-            sender_dept: 1,  // Super Admin
-            receiver_dept: parseInt(departmentId), 
-            message: msg.trim(),
-            subject: 'Message from Super Admin'
-        }; 
-        
-        console.log("Sending payload (without conversation_id):", payload); 
-        
-        const res = await apiCall('send_message.php', 'POST', payload); 
-        
-        console.log("Send message response:", res); 
-        
-        if (res && res.success) { 
-            showToast('✅ Message sent successfully!'); 
-            closeModal('msgModal'); 
-            document.getElementById('msgContent').value = ''; 
-            
-            // Reload messages to show the conversation
-            await loadMessages();
-            
-            // If conversation was created or found, open it
-            if (res.data && res.data.conversation_id) {
-                setTimeout(async () => {
-                    await openChat(res.data.conversation_id);
-                }, 500);
-            }
-        } else { 
-            showToast('❌ ' + (res?.message || 'Failed to send'), true); 
-        } 
-    } catch (error) { 
-        console.error("Send error:", error);
-        showToast('❌ Network error: ' + error.message, true); 
-    } 
-    finally { 
-        sendBtn.innerHTML = originalText; 
-        sendBtn.disabled = false; 
-    } 
-}
-
-async function openChat(conversationId) { 
-    currentConversationId = conversationId; 
-    const conv = messagesData.find(c => c.conversation_id === conversationId); 
-    const otherDeptName = conv ? conv.other_department_name : "Department"; 
-    
-    // Get modal elements safely
-    const chatModalTitle = document.getElementById('chatModalTitle');
-    if (chatModalTitle) {
-        chatModalTitle.innerHTML = `<i class="fas fa-comments text-blue-500 mr-2"></i>Chat with ${escapeHtml(otherDeptName)}`; 
-    }
-    
-    try {
-        const url = `../backend/api/get_messages.php?conversation_id=${conversationId}&user_id=1&_=${Date.now()}`;
-        console.log("Fetching messages from:", url);
-        
-        const res = await apiCall(`get_messages.php?conversation_id=${conversationId}&user_id=1`); 
-        
-        console.log("Messages API Response:", res);
-        
-        let msgs = [];
-        if (res.success && res.data) { 
-            msgs = res.data; 
-        }
-        
-        const chatMessagesArea = document.getElementById('chatMessagesArea');
-        if (!chatMessagesArea) {
-            console.error("chatMessagesArea not found");
-            return;
-        }
-        
-        let chatHtml = ''; 
-        
-        if (msgs.length === 0) {
-            chatHtml = '<div class="text-center text-gray-400 py-6">No messages yet. Send a message to start the conversation!</div>';
-        } else {
-            for (let m of msgs) { 
-                const isSent = (m.sender_dept == 1);
-                const senderName = m.sender_dept_name || departmentNames[m.sender_dept] || 'Department';
-                const time = new Date(m.created_at).toLocaleString();
-                
-                chatHtml += `<div class="chat-message-wrapper ${isSent ? 'justify-end' : 'justify-start'}">
-                    <div class="chat-message ${isSent ? 'chat-sent' : 'chat-received'}">
-                        <div class="chat-bubble">
-                            ${!isSent ? `<div class="text-[9px] opacity-75 mb-1 font-semibold">${escapeHtml(senderName)}</div>` : ''}
-                            <div class="text-sm">${escapeHtml(m.message)}</div>
-                            <span class="chat-time">${time}</span>
-                        </div>
-                    </div>
-                    <button onclick="event.stopPropagation(); deleteMessage(${m.id})" 
-                        class="delete-msg-btn bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-[9px] ml-1 opacity-0 hover:opacity-100 transition">
-                        <i class="fas fa-trash-alt"></i>
-                    </button>
-                </div>`; 
-            }
-        }
-        
-        chatMessagesArea.innerHTML = chatHtml; 
-        chatMessagesArea.scrollTop = chatMessagesArea.scrollHeight; 
-        
-        openModal('chatModal'); 
-        
-        // Refresh messages list to update unread counts
-        await loadMessages(); 
-        
-    } catch(e) {
-        console.error("Error opening chat:", e);
-        showToast("Failed to load messages: " + e.message, true);
-    }
-}
-
-async function sendChatMessage() { 
-    let msg = document.getElementById('replyMsg').value; 
-    if (!msg || !msg.trim()) { 
-        showToast('Enter a message', true); 
-        return; 
-    } 
-    if (!currentConversationId) { 
-        showToast('No conversation selected', true); 
-        return; 
-    } 
-    
-    // Tafuta receiver department kutoka kwenye conversation
-    const currentConv = messagesData.find(c => c.conversation_id === currentConversationId);
-    if (!currentConv) {
-        await loadMessages();
-        const refreshedConv = messagesData.find(c => c.conversation_id === currentConversationId);
-        if (!refreshedConv) {
-            showToast('Conversation not found. Please refresh the page.', true);
-            return;
-        }
-        var receiverDept = refreshedConv.other_department_id;
-    } else {
-        var receiverDept = currentConv.other_department_id;
-    }
-    
-    const sendBtn = document.querySelector('#chatModal .btn-primary');
-    if (!sendBtn) {
-        showToast('Send button not found', true);
-        return;
-    }
-    
-    const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
-    sendBtn.disabled = true;
-    
-    try {
-        let res = await apiCall('send_message.php', 'POST', { 
-            sender_dept: 1,
-            receiver_dept: receiverDept,
-            conversation_id: currentConversationId,
-            message: msg.trim()
-        }); 
-        
-        console.log("Send message response:", res);
-        
-        if (res && res.success) { 
-            document.getElementById('replyMsg').value = ''; 
-            
-            // Add message to chat window immediately
-            const chatArea = document.getElementById('chatMessagesArea');
-            if (chatArea) {
-                const newMessageDiv = document.createElement('div');
-                newMessageDiv.className = 'chat-message-wrapper justify-end';
-                newMessageDiv.innerHTML = `<div class="chat-message chat-sent">
-                    <div class="chat-bubble">
-                        <div class="text-sm">${escapeHtml(msg)}</div>
-                        <span class="chat-time">Just now</span>
-                    </div>
-                </div>`;
-                chatArea.appendChild(newMessageDiv);
-                chatArea.scrollTop = chatArea.scrollHeight;
-            }
-            
-            // Update conversation's last message in the list
-            if (currentConv) {
-                currentConv.last_message = msg;
-                currentConv.last_message_time = new Date().toISOString();
-            }
-            
-            // Update the message card preview - FIXED SELECTOR
-            const msgCard = document.getElementById(`msg-card-${currentConversationId}`);
-            if (msgCard) {
-                const previewP = msgCard.querySelector('.text-xs.text-gray-600');
-                if (previewP) previewP.innerHTML = escapeHtml(msg.substring(0, 70)) + (msg.length > 70 ? '...' : '');
-                
-                // FIXED: Use simple class selector, avoid brackets
-                const timeSpan = msgCard.querySelector('.text-gray-400');
-                if (timeSpan) timeSpan.innerHTML = 'Just now';
-            }
-            
-            showToast('✅ Sent'); 
-        } else { 
-            showToast(res?.message || 'Failed', true); 
-        }
-    } catch(e) {
-        console.error("Send error:", e);
-        showToast('Network error: ' + e.message, true);
-    } finally {
-        if (sendBtn) {
-            sendBtn.innerHTML = originalText;
-            sendBtn.disabled = false;
-        }
-    }
-}
-
 // ==================== REPORTS SECTION ====================
 async function loadReports(highlightId = null) {
     const departmentId = 1; const res = await apiCall(`get_reports.php?department_id=${departmentId}`); 

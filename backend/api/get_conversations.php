@@ -65,8 +65,8 @@ $delete_column_map = [
 $delete_column = $delete_column_map[$department_id] ?? 'deleted_by_super_admin';
 
 try {
-    // Get ALL conversations where this department is involved
-    // Don't filter by deleted column in the main query - we'll handle it later
+    // Get conversations where this department is involved AND not deleted by this department
+    // CRITICAL: Filter out conversations where this department has deleted it
     $query = "
         SELECT 
             c.id as conversation_id,
@@ -76,13 +76,15 @@ try {
             c.status,
             c.created_at,
             c.updated_at,
-            c.$delete_column as is_deleted_by_me,
+            COALESCE(c.$delete_column, 0) as is_deleted_by_me,
             CASE 
                 WHEN c.sender_dept = ? THEN c.receiver_dept
                 ELSE c.sender_dept
             END as other_department_id
         FROM conversations c
         WHERE (c.sender_dept = ? OR c.receiver_dept = ?)
+        AND c.status != 'deleted'
+        AND COALESCE(c.$delete_column, 0) = 0
         ORDER BY c.updated_at DESC
         LIMIT ? OFFSET ?
     ";
@@ -99,16 +101,21 @@ try {
         $other_dept_id = $row['other_department_id'];
         $other_dept_name = $department_names[$other_dept_id] ?? 'Unknown';
         
-        // Get latest message (including those that might be unread)
+        // Get latest message (excluding those deleted by current user)
         $msg_query = "
             SELECT message, created_at, sender_dept 
             FROM messages 
             WHERE conversation_id = ? 
+            AND (
+                (sender_dept = ? AND deleted_by_sender != 1) 
+                OR 
+                (receiver_dept = ? AND deleted_by_receiver != 1)
+            )
             ORDER BY created_at DESC 
             LIMIT 1
         ";
         $msg_stmt = $conn->prepare($msg_query);
-        $msg_stmt->bind_param("i", $row['conversation_id']);
+        $msg_stmt->bind_param("iii", $row['conversation_id'], $department_id, $department_id);
         $msg_stmt->execute();
         $msg_result = $msg_stmt->get_result();
         $latest_msg = $msg_result->fetch_assoc();
@@ -116,28 +123,20 @@ try {
         $last_message = $latest_msg['message'] ?? 'No messages';
         $last_message_time = $latest_msg['created_at'] ?? $row['updated_at'];
         
-        // Get unread count for this conversation
+        // Get unread count
         $unread_stmt = $conn->prepare("
             SELECT COUNT(*) as unread 
             FROM messages 
             WHERE conversation_id = ? 
             AND receiver_dept = ? 
             AND is_read = 0
+            AND deleted_by_receiver != 1
         ");
         $unread_stmt->bind_param("ii", $row['conversation_id'], $department_id);
         $unread_stmt->execute();
         $unread_result = $unread_stmt->get_result();
         $unread_data = $unread_result->fetch_assoc();
         $unread_count = $unread_data['unread'] ?? 0;
-        
-        // CRITICAL: Even if deleted by this department, show conversation if there are unread messages
-        $is_deleted = ($row['is_deleted_by_me'] == 1);
-        $has_unread = ($unread_count > 0);
-        
-        // Skip only if it's deleted AND has no unread messages
-        if ($is_deleted && !$has_unread) {
-            continue;
-        }
         
         $total_unread += $unread_count;
         
@@ -149,7 +148,7 @@ try {
             'last_message' => $last_message,
             'last_message_time' => $last_message_time,
             'unread_count' => $unread_count,
-            'is_deleted_by_me' => $is_deleted,
+            'is_deleted_by_me' => false,
             'status' => $row['status'] ?? 'active',
             'created_at' => $row['created_at'],
             'updated_at' => $row['updated_at']
