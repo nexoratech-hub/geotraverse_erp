@@ -1470,15 +1470,55 @@ async function markReportAsViewed(reportId) {
 function viewReportDetail(id) {
     const r = reportsData.find(r => r.id === id);
     if (r) {
-        if ((r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && r.sent_from_department !== DEPARTMENT_ID) { markReportAsViewed(id); }
-        document.getElementById('viewReportContent').innerHTML = `<div class="space-y-2"><div><strong class="text-green-400 text-xs">Period:</strong> <span class="text-gray-300 text-xs">${r.period}</span></div><div><strong class="text-green-400 text-xs">Created:</strong> <span class="text-gray-300 text-xs">${formatDate(r.created_at)}</span></div><div><strong class="text-green-400 text-xs">Status:</strong> <span class="text-gray-300 text-xs">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div><div class="border-t border-gray-700 my-2"></div><div class="whitespace-pre-wrap text-gray-200 text-xs leading-relaxed">${escapeHtml(r.content)}</div></div>`;
-        
-        let deptOptions = '';
-        for (let i = 1; i <= 12; i++) {
-            if (i !== DEPARTMENT_ID && i !== 1) { deptOptions += `<a onclick="sendReportToDept(${r.id}, ${i})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">${escapeHtml(departmentNames[i])}</a>`; }
+        if ((r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && r.sent_from_department !== DEPARTMENT_ID) { 
+            markReportAsViewed(id); 
         }
         
-        document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel"></i> Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf"></i> PDF</button><div class="send-dropdown relative inline-block"><button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content absolute right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg hidden z-50 min-w-[150px]">${deptOptions}</div></div>`;
+        document.getElementById('viewReportContent').innerHTML = `<div class="space-y-2">
+            <div><strong class="text-green-400 text-xs">Period:</strong> <span class="text-gray-300 text-xs">${r.period}</span></div>
+            <div><strong class="text-green-400 text-xs">Created:</strong> <span class="text-gray-300 text-xs">${formatDate(r.created_at)}</span></div>
+            <div><strong class="text-green-400 text-xs">Status:</strong> <span class="text-gray-300 text-xs">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div>
+            <div class="border-t border-gray-700 my-2"></div>
+            <div class="whitespace-pre-wrap text-gray-200 text-xs leading-relaxed">${escapeHtml(r.content)}</div>
+        </div>`;
+        
+        // BUILD DROPDOWN WITH SUPER ADMIN INCLUDED
+        let deptOptions = '';
+        
+        // ADD SUPER ADMIN FIRST (Department ID = 1)
+        deptOptions += `<a onclick="sendReportToDept(${r.id}, 1)" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
+            <i class="fas fa-crown text-yellow-400 mr-1"></i> 👑 Super Admin
+        </a>`;
+        
+        // ADD SEPARATOR
+        deptOptions += `<div class="border-t border-gray-600 my-1"></div>`;
+        
+        // ADD OTHER DEPARTMENTS (excluding Finance and Super Admin)
+        for (let i = 3; i <= 12; i++) {
+            if (i !== DEPARTMENT_ID) {
+                const icon = departmentIcons[i] || 'fa-building';
+                deptOptions += `<a onclick="sendReportToDept(${r.id}, ${i})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
+                    <i class="fas ${icon} mr-1"></i> ${escapeHtml(departmentNames[i])}
+                </a>`;
+            }
+        }
+        
+        document.getElementById('viewReportButtons').innerHTML = `
+            <button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-2 py-1 rounded text-xs">
+                <i class="fas fa-file-excel"></i> Excel
+            </button>
+            <button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-2 py-1 rounded text-xs">
+                <i class="fas fa-file-pdf"></i> PDF
+            </button>
+            <div class="send-dropdown relative inline-block">
+                <button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')">
+                    <i class="fas fa-paper-plane"></i> Send Report
+                </button>
+                <div id="reportSendDropdown-${r.id}" class="send-dropdown-content absolute right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg hidden z-50 min-w-[180px]">
+                    ${deptOptions}
+                </div>
+            </div>
+        `;
         openModal('viewReportModal');
     }
 }
@@ -1486,13 +1526,30 @@ function viewReportDetail(id) {
 async function sendReportToDept(reportId, deptId) {
     const r = reportsData.find(r => r.id === reportId);
     if (r) {
-        const msg = `📊 REPORT FROM FINANCE:\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${r.content?.substring(0, 300) || ''}`;
-        const res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: deptId, message: msg, subject: `Report: ${r.title}` });
+        // Get department name (handle Super Admin separately)
+        let deptName = departmentNames[deptId];
+        if (deptId == 1) deptName = "Super Admin";
+        
+        const msg = `📊 REPORT FROM FINANCE DEPARTMENT:\n\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${r.content?.substring(0, 500) || ''}\n\n---\nGenerated from Finance Department Dashboard`;
+        
+        const payload = { 
+            sender_dept: DEPARTMENT_ID, 
+            receiver_dept: parseInt(deptId), 
+            message: msg, 
+            subject: `Report: ${r.title}`
+        };
+        
+        console.log("Sending report to department:", deptId, payload);
+        
+        const res = await apiCall('send_message.php', 'POST', payload);
+        
         if (res && res.success) {
-            showToast(`Report "${r.title}" sent to ${departmentNames[deptId]}`);
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
             r.status = 'sent';
             await loadReports();
-        } else { showToast(res?.message || 'Failed to send report', true); }
+        } else { 
+            showToast(res?.message || 'Failed to send report', true); 
+        }
         toggleSendDropdown(`reportSendDropdown-${reportId}`);
         closeModal('viewReportModal');
     }
