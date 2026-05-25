@@ -509,9 +509,27 @@ async function exportProjectPDFWithImage(projectId) {
 
 async function loadProjects(highlightId = null) {
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
-    if (res.success && res.data) { projectsData = res.data.filter(p => !p.deleted_by_department).sort((a,b) => b.id - a.id); unviewedProjectsCount = res.unviewed_count || 0; } else { projectsData = []; unviewedProjectsCount = 0; }
+    if (res.success && res.data) { 
+        // Show projects that belong to this department OR were sent to this department
+        projectsData = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_department === DEPARTMENT_ID) &&
+            !p.deleted_by_department && 
+            !p.deleted_by_admin
+        ).sort((a,b) => b.id - a.id);
+        
+        unviewedProjectsCount = projectsData.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept !== DEPARTMENT_ID && 
+            p.sent_to_department === DEPARTMENT_ID &&
+            p.is_viewed_by_department === 0
+        ).length;
+    } else { 
+        projectsData = []; 
+        unviewedProjectsCount = 0; 
+    }
     updateProjectBadge();
-    
+    // ... rest of function
+
     let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h2 class="text-xl font-bold"><i class="fas fa-tasks text-amber-600 mr-2"></i>Projects (${projectsData.length})</h2><button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i>Add Project</button></div><div class="project-grid" id="projectsGrid"></div>`;
     document.getElementById('projectsPage').innerHTML = html;
     if (projectsData.length === 0) { document.getElementById('projectsGrid').innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400 bg-white rounded-xl">No projects found</div>'; return; }
@@ -552,13 +570,58 @@ async function viewProjectDetails(id) {
 
 async function sendProjectToDept(projectId, deptId) {
     let p = projectsData.find(p => p.id === projectId);
-    if (p) {
-        let msg = `📋 PROJECT FROM CONSTRUCTION:\nProject: ${p.name}\nClient: ${p.client_name}\nAmount: ${formatMoney(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress}%`;
-        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: deptId, message: msg });
-        if (res.success) showToast(`Project sent to ${allDepartments.find(d=>d.id===deptId)?.name || 'Department'}`);
-        else showToast(res.message || 'Failed', true);
-        toggleSendDropdown(`projSendDropdown-${projectId}`);
+    if (!p) {
+        showToast('Project not found', true);
+        return;
     }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send project to your own department', true);
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 PROJECT FROM CONSTRUCTION:\n\nProject: ' + p.name + '\nClient: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatMoney(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        };
+        
+        console.log("Sending project payload:", payload);
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        console.log("Send project response:", res);
+        
+        if (res && res.success) {
+            const deptName = allDepartments.find(d => d.id == deptId)?.name || 'Department';
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`);
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send project'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`projSendDropdown-${projectId}`);
 }
 
 function exportSingleProjectExcel(projectId) {

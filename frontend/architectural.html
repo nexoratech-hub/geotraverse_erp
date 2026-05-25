@@ -510,15 +510,60 @@
         if(dropdown) dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
     }
     
-    async function sendProjectToDept(projectId, deptId) {
-        const p = projectsData.find(p => p.id === projectId);
-        if(p) {
-            const res = await apiCall('send_project.php', 'POST', { project_id: projectId, to_department_id: deptId, department_id: DEPARTMENT_ID });
-            if(res.success) showToast(`Project "${p.name}" sent to ${deptId === 1 ? 'Super Admin' : (departmentsList.find(d => d.id === deptId)?.name || 'Department')}`);
-            else showToast(res.message || 'Failed', true);
-            toggleSendDropdown(`projectSendDropdown-${projectId}`);
+async function sendProjectToDept(projectId, deptId) {
+    const p = projectsData.find(p => p.id === projectId);
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send project to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjButtons .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 PROJECT FROM ARCHITECTURAL:\n\nProject: ' + p.name + '\nClient: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatMoney(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        };
+        
+        console.log("Sending project payload:", payload);
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        console.log("Send project response:", res);
+        
+        if (res && res.success) {
+            const deptName = deptId == 1 ? 'Super Admin' : (departmentsList.find(d => d.id == deptId)?.name || 'Department');
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`);
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send project'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
         }
     }
+    
+    toggleSendDropdown(`projectSendDropdown-${projectId}`);
+}
     
     function openAddProjectModal() { currentEditProjectId = null; currentProjectImageFile = null; document.getElementById('projId').value = ''; document.getElementById('projName').value = ''; document.getElementById('projClient').value = ''; document.getElementById('projAmount').value = ''; document.getElementById('projLocation').value = ''; document.getElementById('projDesc').value = ''; document.getElementById('projStatus').value = 'pending'; document.getElementById('projProgress').value = '0'; document.getElementById('projDept').value = DEPARTMENT_ID; document.getElementById('projImagePreviewContainer').classList.add('hidden'); document.getElementById('projImageUploadArea').classList.remove('hidden'); openModal('projModal'); }
     
@@ -988,15 +1033,64 @@ async function sendChatMessage() {
         } 
     }
     
-    async function sendReportToDept(reportId, deptId) {
-        const r = reportsData.find(r => r.id === reportId);
-        if(r) {
-            const res = await apiCall('send_report.php', 'POST', { report_id: reportId, to_department_id: deptId, department_id: DEPARTMENT_ID });
-            if(res.success) { showToast(`Report "${r.title}" sent to ${deptId === 1 ? 'Super Admin' : (departmentsList.find(d => d.id === deptId)?.name || 'Department')}`); r.status = 'sent'; loadReports(); }
-            else showToast(res.message || 'Failed', true);
-            toggleSendDropdown(`reportSendDropdown-${reportId}`);
+async function sendReportToDept(reportId, deptId) {
+    const r = reportsData.find(r => r.id === reportId);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewReportModal .dropdown-trigger') || 
+                    document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM ARCHITECTURAL:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = deptId == 1 ? 'Super Admin' : (departmentsList.find(d => d.id == deptId)?.name || 'Department');
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            r.status = 'sent';
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
         }
     }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    const reportModal = document.getElementById('reportDetailModal');
+    if (reportModal) reportModal.remove();
+}
     
     function editReport(id) { const r = reportsData.find(r=>r.id===id); if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('reportModal'); } }
     async function saveReport() { let id = document.getElementById('reportId').value; let data = { title: document.getElementById('reportTitle').value.trim(), period: document.getElementById('reportPeriod').value, content: document.getElementById('reportContent').value.trim(), department_id: DEPARTMENT_ID }; if(!data.title || !data.content) { showToast('Title and content required', true); return; } let res = id ? await apiCall('update_report.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_report.php', 'POST', data); if(res.success) { showToast(id ? 'Updated' : 'Added'); closeModal('reportModal'); loadReports(); loadDashboard(); } else showToast(res.message || 'Failed', true); }

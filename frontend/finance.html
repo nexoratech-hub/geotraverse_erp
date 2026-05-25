@@ -1415,58 +1415,114 @@ async function sendChatReply() {
 async function loadReports(highlightId = null) {
     const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`);
     if (res.success && res.data) {
-        reportsData = res.data.filter(r => r.deleted_by_department !== 1 && r.deleted_by_admin !== 1).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-        unviewedReportsCount = reportsData.filter(r => (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && (r.sent_from_department !== DEPARTMENT_ID)).length;
+        // Filter out deleted reports
+        reportsData = res.data.filter(r => 
+            r.deleted_by_department !== 1 && 
+            r.deleted_by_admin !== 1
+        ).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+        
+        // Count unviewed reports (reports sent TO this department that are not viewed)
+        unviewedReportsCount = reportsData.filter(r => 
+            (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && 
+            (r.sent_from_department === DEPARTMENT_ID || r.department_id === DEPARTMENT_ID)
+        ).length;
     } else {
         reportsData = [];
         unviewedReportsCount = 0;
     }
     updateReportBadge();
     
-    let html = `<div class="flex flex-wrap justify-between items-center gap-2 mb-3"><h2 class="text-lg font-bold"><i class="fas fa-chart-line text-green-600 mr-2"></i>Reports (${reportsData.length})</h2><div class="flex gap-2 flex-wrap"><button onclick="openModal('reportModal')" class="btn-primary text-white px-3 py-1.5 rounded text-xs"><i class="fas fa-plus mr-1"></i> Add Report</button><button onclick="exportAllReportsToExcel()" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllReportsToPDF()" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
+    let html = `<div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+        <h2 class="text-lg font-bold"><i class="fas fa-chart-line text-green-600 mr-2"></i>Reports (${reportsData.length})</h2>
+        <div class="flex gap-2 flex-wrap">
+            <button onclick="openModal('reportModal')" class="btn-primary text-white px-3 py-1.5 rounded text-xs"><i class="fas fa-plus mr-1"></i> Add Report</button>
+            <button onclick="exportAllReportsToExcel()" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+            <button onclick="exportAllReportsToPDF()" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+        </div>
+    </div>
     <div class="report-grid" id="reportsGrid"></div>`;
+    
     document.getElementById('reportsPage').innerHTML = html;
     
-    if (reportsData.length === 0) { document.getElementById('reportsGrid').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 text-xs bg-white rounded-xl">No reports found</div>'; return; }
+    if (reportsData.length === 0) { 
+        document.getElementById('reportsGrid').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 text-xs bg-white rounded-xl">No reports found</div>'; 
+        return; 
+    }
     
     let reportsHtml = '';
     for (let r of reportsData) {
-        const isUnviewed = (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && (r.sent_from_department !== DEPARTMENT_ID);
+        // Check if report is unviewed (sent to this department and not viewed yet)
+        const isUnviewed = (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && 
+                           (r.sent_from_department === DEPARTMENT_ID || r.department_id === DEPARTMENT_ID);
         const isHighlighted = highlightId && r.id === highlightId;
         const statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+        const sentFrom = r.sent_from_department ? `📨 From: ${departmentNames[r.sent_from_department] || 'Unknown'}` : '';
+        
         reportsHtml += `<div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetail(${r.id})">
-            <div class="report-header-custom" style="background: #059669;"><div class="flex items-center gap-2"><div class="dept-icon w-7 h-7 rounded-lg flex items-center justify-center bg-white/20"><i class="fas fa-building text-xs"></i></div><div><h4 class="font-semibold text-xs">${escapeHtml(r.title)}</h4><p class="text-[9px] opacity-90">${departmentNames[r.department_id] || 'Department'} · ${r.period}</p></div></div>${isUnviewed ? '<div class="new-badge" onclick="event.stopPropagation(); markReportAsViewed(' + r.id + ')">!</div>' : ''}</div>
-            <div class="p-3"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5 rounded-full">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div>
-            <div class="text-[10px] text-gray-600 line-clamp-2">${escapeHtml(r.content?.substring(0, 100) || '')}${r.content?.length > 100 ? '...' : ''}</div>
-            <div class="flex gap-2 justify-end mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></div>
+            <div class="report-header-custom" style="background: #059669;">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="dept-icon w-7 h-7 rounded-lg flex items-center justify-center bg-white/20"><i class="fas fa-file-alt text-xs"></i></div>
+                        <div>
+                            <h4 class="font-semibold text-xs">${escapeHtml(r.title)}</h4>
+                            <p class="text-[9px] opacity-90">${departmentNames[r.department_id] || 'Finance'} · ${r.period}</p>
+                            ${sentFrom ? `<p class="text-[8px] opacity-75">${sentFrom}</p>` : ''}
+                        </div>
+                    </div>
+                    ${isUnviewed ? '<div class="new-badge w-5 h-5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center">!</div>' : ''}
+                </div>
+            </div>
+            <div class="p-3">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span>
+                    <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5 rounded-full">${r.status === 'sent' ? 'Sent' : 'Draft'}</span>
+                </div>
+                <div class="text-[10px] text-gray-600 line-clamp-2">${escapeHtml(r.content?.substring(0, 100) || '')}${r.content?.length > 100 ? '...' : ''}</div>
+                <div class="flex gap-2 justify-end mt-2 pt-1 border-t">
+                    <button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
+                    ${r.department_id === DEPARTMENT_ID ? `<button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>` : ''}
+                    <button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
         </div>`;
     }
     document.getElementById('reportsGrid').innerHTML = reportsHtml;
-    if (highlightId) { const el = document.getElementById(`report-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+    
+    if (highlightId) { 
+        const el = document.getElementById(`report-card-${highlightId}`); 
+        if(el) { 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            setTimeout(() => el.classList.remove('search-highlight'), 3000); 
+        } 
+    }
 }
-
 function updateReportBadge() {
     const badge = document.getElementById('reportBadge');
     if (badge) {
         if (unviewedReportsCount > 0) {
             badge.classList.remove('hidden');
             badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
-        } else { badge.classList.add('hidden'); }
+        } else { 
+            badge.classList.add('hidden'); 
+        }
     }
 }
 
 async function markReportAsViewed(reportId) {
-    const res = await apiCall('mark_report_viewed.php', 'POST', { report_id: reportId, department_id: DEPARTMENT_ID, is_admin: 0 });
+    const res = await apiCall('mark_report_viewed.php', 'POST', { 
+        report_id: reportId, 
+        department_id: DEPARTMENT_ID, 
+        is_admin: 0 
+    });
     if (res.success) {
         unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
         updateReportBadge();
         const report = reportsData.find(r => r.id === reportId);
         if (report) report.is_viewed_by_department = 1;
-        loadReports();
+        await loadReports(); // Refresh the reports list
         showToast('Report marked as viewed');
     }
 }
-
 function viewReportDetail(id) {
     const r = reportsData.find(r => r.id === id);
     if (r) {
@@ -1620,16 +1676,51 @@ async function saveReport() {
 }
 
 async function deleteReport(id) {
-    if (confirm('Delete this report?')) {
-        const rep = reportsData.find(r => r.id === id);
-        if (rep) await addToRecycleBin(id, 'report', rep.title);
-        let res = await apiCall('delete_report.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID, is_admin: 0 });
-        if (res.success) {
-            showToast('Report moved to recycle bin');
+    if (!confirm('⚠️ Delete this report? This will move it to recycle bin.')) return;
+    
+    // Find the report
+    const rep = reportsData.find(r => r.id === id);
+    if (!rep) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Add loading state
+    const card = document.getElementById(`report-card-${id}`);
+    const deleteBtn = card?.querySelector('.action-btn.delete');
+    const originalText = deleteBtn ? deleteBtn.innerHTML : 'Delete';
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        deleteBtn.disabled = true;
+    }
+    
+    try {
+        // Direct API call to delete_report.php
+        const res = await apiCall('delete_report.php', 'POST', { 
+            report_id: id, 
+            department_id: DEPARTMENT_ID, 
+            is_admin: 0 
+        });
+        
+        if (res && res.success) {
+            showToast('✅ Report deleted successfully');
+            // Remove from local array
             reportsData = reportsData.filter(r => r.id !== id);
-            loadReports();
-            loadDashboard();
-        } else { showToast(res.message || 'Failed', true); }
+            // Refresh UI
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to delete report'), true);
+        }
+    } catch(e) {
+        console.error("Delete error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
+        }
     }
 }
 

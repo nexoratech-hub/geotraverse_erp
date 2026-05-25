@@ -632,13 +632,58 @@ async function deleteProject(id) {
 
 async function sendProjectToDept(projectId, deptId) { 
     let p = projectsData.find(p => p.id === projectId); 
-    if (p) { 
-        let msg = `📋 PROJECT FROM SURVEY:\n\nProject: ${p.name}\nClient: ${p.client_name}\nAmount: ${formatCurrency(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress}%\nLocation: ${p.location}\n\nPlease review this project.`; 
-        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: deptId, message: msg, subject: 'Project from Survey' }); 
-        if (res.success) showToast(`✅ Project sent to ${departmentNames[deptId] || 'Department'}`); 
-        else showToast('❌ Failed to send', true); 
-        toggleSendDropdown(`projSendDropdown-${projectId}`); 
-    } 
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send project to your own department', true);
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjectModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 PROJECT FROM SURVEY:\n\nProject: ' + p.name + '\nClient: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatCurrency(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        };
+        
+        console.log("Sending project payload:", payload);
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        console.log("Send project response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`);
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send project'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`projSendDropdown-${projectId}`);
 }
 
 // ==================== BUDGET ====================
@@ -1114,27 +1159,61 @@ function viewReportDetail(id) {
 
 async function sendReportToDept(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
-    if (!r) return;
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
     
-    let msg = `📊 REPORT FROM SURVEY:\n\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${(r.content || '').substring(0, 500)}`; 
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        return;
+    }
     
-    const res = await apiCall('send_message.php', 'POST', { 
-        sender_dept: DEPARTMENT_ID,
-        receiver_dept: deptId, 
-        message: msg, 
-        subject: 'Report from Survey' 
-    }); 
+    const sendBtn = document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
     
-    if (res && res.success) { 
-        showToast(`✅ Report sent to ${departmentNames[deptId] || 'Department'}`); 
-        await apiCall('update_report.php', 'POST', { id: reportId, status: 'sent' });
-        await loadReports();
-    } else { 
-        showToast(res?.message || "Failed to send", true); 
-    } 
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM SURVEY:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            // Update local report status
+            r.status = 'sent';
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
     
-    toggleSendDropdown(`reportSendDropdown-${reportId}`); 
-    document.getElementById('reportDetailModal')?.remove(); 
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    document.getElementById('reportDetailModal')?.remove();
 }
 
 function exportSingleReportExcel(reportId) { 

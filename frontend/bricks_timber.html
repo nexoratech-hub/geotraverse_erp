@@ -142,11 +142,36 @@
         
         .detail-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
         .send-dropdown { position: relative; display: inline-block; }
-        .send-dropdown-content { display: none; position: absolute; right: 0; top: 100%; background: white; min-width: 160px; border-radius: 8px; z-index: 100; border: 1px solid #e5e7eb; max-height: 300px; overflow-y: auto; margin-top: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .send-dropdown-content a { display: block; padding: 6px 10px; text-decoration: none; color: #333; font-size: 12px; cursor: pointer; }
-        body.dark-mode .send-dropdown-content { background: #1e293b; border-color: #334155; }
-        body.dark-mode .send-dropdown-content a { color: #f1f5f9; }
-        
+.send-dropdown-content { 
+    display: none; 
+    position: absolute; 
+    right: 0; 
+    top: 100%; 
+    background: #1e293b; 
+    min-width: 180px; 
+    border-radius: 8px; 
+    z-index: 100; 
+    border: 1px solid #334155; 
+    max-height: 300px; 
+    overflow-y: auto; 
+    margin-top: 5px; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.send-dropdown-content a { 
+    display: block; 
+    padding: 10px 15px; 
+    text-decoration: none; 
+    color: #ffffff !important; 
+    font-size: 13px; 
+    cursor: pointer; 
+    border-bottom: 1px solid #334155; 
+    transition: background 0.2s;
+}
+.send-dropdown-content a:last-child { border-bottom: none; }
+.send-dropdown-content a:hover { background-color: #334155; color: #ffffff !important; }
+body.dark-mode .send-dropdown-content { background: #1e293b; border-color: #334155; }
+body.dark-mode .send-dropdown-content a { color: #f1f5f9 !important; border-bottom-color: #334155; }
+body.dark-mode .send-dropdown-content a:hover { background-color: #334155; }
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
         .modal-content { background: white; border-radius: 20px; width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; padding: 20px; animation: fadeIn 0.2s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
@@ -1045,7 +1070,89 @@ async function deleteConversationWith(conversationId) {
 }
 
 // ==================== REPORTS API FUNCTIONS ====================
-async function fetchReports() { const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); reportsList = (res.success && res.data) ? res.data.sort((a,b) => new Date(b.created_at) - new Date(a.created_at)) : []; return reportsList; }
+async function fetchReports() { 
+    const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
+    if (res.success && res.data) { 
+        // Show reports that belong to this department OR were sent to this department
+        reportsList = res.data.filter(r => 
+            (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
+            r.deleted_by_department !== 1 && 
+            r.deleted_by_admin !== 1
+        ).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)); 
+        return reportsList;
+    } else { 
+        reportsList = []; 
+        return [];
+    } 
+}
+async function sendReportToDepartment(reportId, deptId, title, content) { 
+    console.log("sendReportToDepartment called with:", {reportId, deptId, title});
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('⚠️ Cannot send report to your own department', true);
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        return;
+    }
+    
+    // Find the report
+    const report = reportsList.find(r => r.id == reportId);
+    if (!report) {
+        showToast('❌ Report not found', true);
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        return;
+    }
+    
+    // Show loading state on send button
+    const sendBtn = document.querySelector('#viewReportModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        // Use send_report.php API
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM BRICKS & TIMBER:\n\nTitle: ' + report.title + '\nPeriod: ' + report.period + '\n\n' + (report.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Report "${report.title}" sent to ${deptName}`);
+            addLog(`Report sent to ${deptName}: ${report.title}`);
+            
+            // Update local report status
+            report.status = 'sent';
+            
+            // Refresh reports list
+            await renderReports();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    // Close dropdown and modal
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    closeModal('viewReportModal');
+}
 async function addReportAPI(data) { data.department_id = DEPARTMENT_ID; return await apiCall('add_report.php', 'POST', data); }
 async function updateReportAPI(id, data) { data.department_id = DEPARTMENT_ID; return await apiCall('update_report.php', 'POST', { ...data, id }); }
 async function deleteReportAPI(id) { return await apiCall('delete_report.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID, is_admin: 0 }); }
@@ -1054,17 +1161,38 @@ async function renderReports(highlightId = null) {
     await fetchReports();
     let searchTerm = document.getElementById("globalSearchInput")?.value.toLowerCase() || "";
     let filtered = reportsList.filter(r => r.title?.toLowerCase().includes(searchTerm));
+    
     let html = `<div class="flex justify-between items-center mb-3"><h2 class="text-lg font-bold"><i class="fas fa-chart-bar text-amber-600 mr-2"></i>Reports (${reportsList.length})</h2><div class="flex gap-2"><button onclick="openModal('addReportModal')" class="btn-primary text-white px-3 py-1.5 rounded-lg text-xs"><i class="fas fa-plus mr-1"></i>Add Report</button><button onclick="exportAllReportsToExcel()" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllReportsToPDF()" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
         <div class="reports-grid" id="reportsGridContainer"></div>`;
+    
     document.getElementById("reportsSection").innerHTML = html;
-    if (filtered.length === 0) { document.getElementById("reportsGridContainer").innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 text-sm">No reports found. Click "Add Report" to create one.</div>'; return; }
+    
+    if (filtered.length === 0) { 
+        document.getElementById("reportsGridContainer").innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400 text-sm">No reports found. Click "Add Report" to create one.</div>'; 
+        return; 
+    }
+    
     let gridHtml = '';
     for (let r of filtered) {
         let isHighlighted = highlightId && r.id === highlightId;
+        let sourceInfo = r.sent_from_department ? `<span class="text-[8px] text-amber-600 block mt-1">📨 From: ${departmentNames[r.sent_from_department] || 'Unknown'}</span>` : '';
+        
         gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetail(${r.id})">
-            <div class="report-header-bg"><div class="flex justify-between items-center"><h4 class="font-semibold text-sm">📊 ${escapeHtml(r.title)}</h4><span class="text-[9px] px-1.5 py-0.5 rounded-full bg-white/20">${r.period}</span></div></div>
-            <div class="p-2"><p class="text-[9px] text-gray-500 mt-1">📅 ${formatDate(r.created_at)}</p><p class="text-xs text-gray-600 mt-1 line-clamp-2">${escapeHtml((r.content||'').substring(0,80))}...</p>
-            <div class="flex gap-2 justify-end mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="btn-info text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-eye mr-1"></i> View</button><button onclick="event.stopPropagation(); editReportDetail(${r.id})" class="btn-warning text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-edit mr-1"></i> Edit</button><button onclick="event.stopPropagation(); deleteReportDetail(${r.id})" class="btn-danger text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-trash mr-1"></i> Delete</button></div>
+            <div class="report-header-bg">
+                <div class="flex justify-between items-center">
+                    <h4 class="font-semibold text-sm">📊 ${escapeHtml(r.title)}</h4>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-white/20">${r.period}</span>
+                </div>
+                ${sourceInfo}
+            </div>
+            <div class="p-2">
+                <p class="text-[9px] text-gray-500 mt-1">📅 ${formatDate(r.created_at)}</p>
+                <p class="text-xs text-gray-600 mt-1 line-clamp-2">${escapeHtml((r.content||'').substring(0,80))}${(r.content||'').length > 80 ? '...' : ''}</p>
+                <div class="flex gap-2 justify-end mt-2 pt-1 border-t">
+                    <button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="btn-info text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-eye mr-1"></i> View</button>
+                    ${r.department_id === DEPARTMENT_ID ? `<button onclick="event.stopPropagation(); editReportDetail(${r.id})" class="btn-warning text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-edit mr-1"></i> Edit</button>` : ''}
+                    <button onclick="event.stopPropagation(); deleteReportDetail(${r.id})" class="btn-danger text-white text-[9px] px-1.5 py-0.5 rounded"><i class="fas fa-trash mr-1"></i> Delete</button>
+                </div>
             </div>
         </div>`;
     }
@@ -1074,7 +1202,42 @@ async function renderReports(highlightId = null) {
 
 async function addReport() { let title = document.getElementById("newReportTitle").value.trim(), period = document.getElementById("newReportPeriod").value, content = document.getElementById("newReportContent").value.trim(); if (!title || !content) { showToast("Title and content required", true); return; } let res = await addReportAPI({ title, period, content }); if (res.success) { showToast("Report added"); addLog(`Report added: ${title}`); closeModal('addReportModal'); renderReports(); renderDashboard(); } else showToast(res.message || "Failed", true); }
 function viewReportDetail(id) { let r = reportsList.find(r => r.id === id); if (r) { document.getElementById("viewReportContent").innerHTML = `<div class="space-y-2"><div class="report-detail-header px-3 py-2 rounded-t-lg"><strong>📄 Period:</strong> ${r.period} | <strong>📅 Created:</strong> ${formatDate(r.created_at)} | <strong>✅ Status:</strong> ${r.status === 'sent' ? 'Sent' : 'Draft'}</div><div class="report-content-view mt-2 text-xs">${escapeHtml(r.content)}</div></div>`; let allDeptsForSend = [{ id: 1, name: "Super Admin" }, { id: 2, name: "Finance" }, { id: 3, name: "Sales & Marketing" }, { id: 4, name: "Manager" }, { id: 5, name: "Secretary" }, { id: 7, name: "Aluminium" }, { id: 8, name: "Town Planning" }, { id: 9, name: "Architectural" }, { id: 10, name: "Survey" }, { id: 11, name: "Construction" }, { id: 12, name: "Hatimiliki" }]; let deptOptions = ''; allDeptsForSend.forEach(d => { if (d.id !== DEPARTMENT_ID) { deptOptions += `<a onclick="sendReportToDepartment(${r.id}, ${d.id}, '${escapeHtml(r.title)}', '${escapeHtml(r.content)}')" class="block px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700">📨 ${escapeHtml(d.name)}</a>`; } }); document.getElementById("viewReportButtons").innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf mr-1"></i> PDF</button><div class="send-dropdown"><button class="btn-purple text-white px-2 py-1 rounded text-xs" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content absolute right-0 mt-1 bg-white dark:bg-gray-800 border rounded shadow-lg z-50 min-w-[160px]">${deptOptions}</div></div>`; openModal('viewReportModal'); } }
-async function sendReportToDepartment(reportId, deptId, title, content) { let msg = `📊 REPORT FROM BRICKS &amp; TIMBER:\nTitle: ${title}\n\n${content}\n\n---\nThis report was generated by Bricks &amp; Timber Department.`; let res = await sendMessage(deptId, msg); if (res && res.success) { showToast(`✅ Report sent to ${departmentNames[deptId] || 'Department'}`); addLog(`Report sent to ${departmentNames[deptId]}: ${title}`); } else showToast("Failed to send report", true); toggleSendDropdown(`reportSendDropdown-${reportId}`); closeModal('viewReportModal'); }
+function viewReportDetail(id) { 
+    let r = reportsList.find(r => r.id === id); 
+    if (r) { 
+        document.getElementById("viewReportContent").innerHTML = `<div class="space-y-2">
+            <div class="report-detail-header px-3 py-2 rounded-t-lg bg-amber-700 text-white">
+                <strong>📄 Period:</strong> ${r.period} | 
+                <strong>📅 Created:</strong> ${formatDate(r.created_at)} | 
+                <strong>✅ Status:</strong> ${r.status === 'sent' ? 'Sent' : 'Draft'}
+            </div>
+            ${r.sent_from_department ? `<div class="bg-gray-100 dark:bg-gray-800 p-2 rounded mt-2 text-xs"><span class="font-semibold">📨 From:</span> ${departmentNames[r.sent_from_department] || 'Unknown'}</div>` : ''}
+            <div class="report-content-view mt-2 text-xs bg-gray-800 text-white p-3 rounded-lg whitespace-pre-wrap max-h-[400px] overflow-y-auto">${escapeHtml(r.content)}</div>
+        </div>`; 
+        
+        let allDeptsForSend = [ 
+            { id: 1, name: "Super Admin" }, { id: 2, name: "Finance" }, { id: 3, name: "Sales & Marketing" }, 
+            { id: 4, name: "Manager" }, { id: 5, name: "Secretary" }, { id: 7, name: "Aluminium" }, 
+            { id: 8, name: "Town Planning" }, { id: 9, name: "Architectural" }, { id: 10, name: "Survey" }, 
+            { id: 11, name: "Construction" }, { id: 12, name: "Hatimiliki" } 
+        ]; 
+        
+        let deptOptions = ''; 
+        allDeptsForSend.forEach(d => { 
+            if (d.id !== DEPARTMENT_ID) { 
+                deptOptions += `<a onclick="sendReportToDepartment(${r.id}, ${d.id}, '${escapeHtml(r.title).replace(/'/g, "\\'")}', \`${escapeHtml(r.content).replace(/`/g, '\\`')}\`)" class="block px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700">📨 ${escapeHtml(d.name)}</a>`; 
+            } 
+        }); 
+        
+        document.getElementById("viewReportButtons").innerHTML = `
+            <button onclick="exportSingleReportExcel(${r.id})" class="btn-success text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+            <button onclick="exportSingleReportPDF(${r.id})" class="btn-danger text-white px-2 py-1 rounded text-xs"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+            <div class="send-dropdown"><button class="btn-purple text-white px-2 py-1 rounded text-xs" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content absolute right-0 mt-1 bg-white dark:bg-gray-800 border rounded shadow-lg z-50 min-w-[160px]">${deptOptions}</div></div>
+        `; 
+        openModal('viewReportModal'); 
+    } 
+}
+
 function editReportDetail(id) { let r = reportsList.find(r => r.id === id); if (r) { document.getElementById("editReportId").value = r.id; document.getElementById("editReportTitle").value = r.title; document.getElementById("editReportPeriod").value = r.period; document.getElementById("editReportContent").value = r.content; openModal('editReportModal'); } }
 async function updateReport() { let id = parseInt(document.getElementById("editReportId").value); let data = { title: document.getElementById("editReportTitle").value, period: document.getElementById("editReportPeriod").value, content: document.getElementById("editReportContent").value }; let res = await updateReportAPI(id, data); if (res.success) { showToast("Report updated"); addLog(`Report updated: ${data.title}`); closeModal('editReportModal'); renderReports(); renderDashboard(); } else showToast(res.message || "Failed", true); }
 async function deleteReportDetail(id) { if (confirm("Delete this report? This will soft delete it from your view.")) { let r = reportsList.find(r => r.id === id); let title = r ? r.title : ''; let res = await deleteReportAPI(id); if (res.success) { showToast("Report deleted from your view"); addLog(`Report deleted: ${title}`); renderReports(); renderDashboard(); } else showToast(res.message || "Failed", true); } }

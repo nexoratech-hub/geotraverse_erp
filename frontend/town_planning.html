@@ -597,12 +597,59 @@ async function viewProjectDetails(id) {
 }
 async function sendProjectToDepartment(projectId, deptId) { 
     let p = projectsData.find(p => p.id === projectId); 
-    if(p) { 
-        let msg = `📋 PROJECT FROM TOWN PLANNING:\n\nProject: ${p.name}\nClient: ${p.client_name}\nAmount: ${formatMoney(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress}%\nLocation: ${p.location}\n\nPlease review this project.`; 
-        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: deptId, message: msg, sender_id: USER_ID }); 
-        if (res && res.success) { showToast(`✅ Project sent to ${departmentNames[deptId] || 'Department'}`); addLog(`Project sent to ${departmentNames[deptId]}: ${p.name}`); } else { showToast("❌ Failed to send", true); }
-    } 
-    toggleSendDropdown(`projectSendDropdown-${projectId}`); 
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send project to your own department', true);
+        toggleSendDropdown(`projectSendDropdown-${projectId}`);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjectModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 PROJECT FROM TOWN PLANNING:\n\nProject: ' + p.name + '\nClient: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatMoney(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        };
+        
+        console.log("Sending project payload:", payload);
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        console.log("Send project response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`);
+            addLog(`Project sent to ${deptName}: ${p.name}`);
+            await renderProjects();
+            await renderDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send project'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`projectSendDropdown-${projectId}`);
 }
 function editProject(id) { 
     let p = projectsData.find(p => p.id === id); 
@@ -1026,7 +1073,66 @@ async function viewReportDetail(id) {
         document.body.insertAdjacentHTML('beforeend',modalHtml);
     } 
 }
-async function sendReportToDepartment(reportId,deptId){ const r=reportsList.find(r=>r.id===reportId); if(r){ let msg=`📊 REPORT FROM TOWN PLANNING:\n\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${r.content.substring(0,500)}`; let res=await apiCall('send_message.php','POST',{sender_dept:DEPARTMENT_ID,receiver_dept:deptId,message:msg,sender_id:USER_ID}); if(res&&res.success){ showToast(`✅ Report sent to ${departmentNames[deptId]||'Department'}`); addLog(`Report sent to ${departmentNames[deptId]}: ${r.title}`); } else { showToast(res?.message||"Failed to send",true); } } toggleSendDropdown(`reportSendDropdown-${reportId}`); document.getElementById('reportDetailModal')?.remove(); }
+async function sendReportToDepartment(reportId, deptId) { 
+    const r = reportsList.find(r => r.id === reportId); 
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM TOWN PLANNING:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            addLog(`Report sent to ${deptName}: ${r.title}`);
+            // Update local report status
+            r.status = 'sent';
+            await renderReports();
+            await renderDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    document.getElementById('reportDetailModal')?.remove();
+}
+
 function exportSingleReportExcel(reportId){ let r=reportsList.find(r=>r.id===reportId); if(r){ let ws=[["Title","Period","Content","Created","Status"]]; ws.push([r.title,r.period,r.content,r.created_at,r.status]); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),"Report"); XLSX.writeFile(wb,`report_${r.id}.xlsx`); showToast("Exported to Excel"); } }
 function exportSingleReportPDF(reportId){ let r=reportsList.find(r=>r.id===reportId); if(r){ let printWindow=window.open('','_blank'); if(!printWindow){ showToast("Please allow popups",true); return; } let statusClass=r.status==='sent'?'status-paid':'status-pending'; let statusText=r.status==='sent'?'Sent':'Draft'; printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(r.title)} - Report</title><style>body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;max-width:900px;margin:0 auto;border:3px solid #4338ca;border-radius:12px;background:white;}h1{color:#4338ca;text-align:center;border-bottom:3px solid #4338ca;padding-bottom:15px;margin-bottom:25px;font-size:24px;font-weight:bold;}.header-info{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px;border:1px solid #ddd;padding:12px 15px;background:#f9fafb;font-size:13px;}.report-content{background:white;padding:20px;border:1px solid #e5e7eb;border-radius:8px;line-height:1.8;white-space:pre-wrap;font-size:14px;min-height:300px;}.footer{text-align:center;font-size:10px;color:#6b7280;margin-top:25px;padding-top:12px;border-top:2px solid #ddd;}.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500;}.status-paid{background:#d1fae5;color:#059669;}.status-pending{background:#fef3c7;color:#d97706;}.print-btn{text-align:center;margin-top:25px;}.print-btn button{padding:10px 24px;background:#4338ca;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:bold;}@media print{body{border:none;padding:15px;}.print-btn{display:none;}}</style></head><body><div style="padding:25px;"><h1>${escapeHtml(r.title)}</h1><div class="header-info"><div><strong>Report ID:</strong> #${r.id}</div><div><strong>Period:</strong> ${r.period}</div><div><strong>Department:</strong> ${departmentNames[r.department_id]||'Town Planning'}</div><div><strong>Created:</strong> ${formatDate(r.created_at)}</div><div><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></div></div><div class="report-content">${escapeHtml(r.content||'No content available')}</div><div class="footer">Generated: ${new Date().toLocaleString()} | GeoTraverse ERP System</div><div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></div></body></html>`); printWindow.document.close(); showToast("PDF preview opened - click Print to save"); } }
 function exportAllReportsToExcel() { let ws=[["Title","Period","Content","Created","Status"]]; reportsList.forEach(r=>ws.push([r.title,r.period,r.content,r.created_at,r.status])); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),"Reports"); XLSX.writeFile(wb,`reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast("All reports exported to Excel"); }

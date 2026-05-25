@@ -1419,15 +1419,62 @@ function exportSingleReportExcel(reportId) {
 }
 
 async function sendReportToDept(reportId, deptId) { 
-    let res = await sendReportToDepartment(reportId, deptId); 
-    if (res && res.success) { 
-        showToast(`✅ Report sent to ${departmentNames[deptId] || 'Department'}`); 
-        const r = reportsList.find(r => r.id === reportId);
-        if (r) r.status = 'sent';
-        await loadReports();
-    } else showToast(res?.message || "Failed to send", true); 
-    toggleSendDropdown(`reportSendDropdown-${reportId}`); 
-    document.getElementById('reportDetailModal')?.remove(); 
+    const r = reportsList.find(r => r.id === reportId);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM SALES & MARKETING:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[deptId] || 'Department';
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            // Update local report status
+            r.status = 'sent';
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    document.getElementById('reportDetailModal')?.remove();
 }
 
 function editReport(id) { let r = reportsList.find(r => r.id === id); if (r) { document.getElementById("editReportId").value = r.id; document.getElementById("editReportTitle").value = r.title; document.getElementById("editReportPeriod").value = r.period; document.getElementById("editReportContent").value = r.content; openModal('editReportModal'); } }

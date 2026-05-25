@@ -343,11 +343,44 @@ function resetCountdown() { countdownSeconds = 5; }
 function startCountdownDisplay() { setInterval(() => { if (countdownSeconds <= 1) countdownSeconds = 5; else countdownSeconds--; const span = document.getElementById('refreshCountdown'); if (span) span.innerText = countdownSeconds; }, 1000); }
 
 // Mark functions
-async function markProjectAsViewed(projectId) { const res = await apiCall('mark_project_viewed.php', 'POST', { project_id: projectId, department_id: DEPARTMENT_ID, is_admin: 0 }); if (res.success) { unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); updateProjectBadge(); await loadTitleDeeds(); } }
+async function markProjectAsViewed(projectId) { 
+    const res = await apiCall('mark_project_viewed.php', 'POST', { 
+        project_id: projectId, 
+        department_id: DEPARTMENT_ID, 
+        is_admin: 0 
+    }); 
+    if (res.success) { 
+        // Update local count
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
+        updateProjectBadge(); 
+        
+        // Update local project object
+        const project = projects.find(p => p.id === projectId); 
+        if (project) project.is_viewed_by_department = 1; 
+        
+        console.log("Project marked as viewed, remaining unviewed:", unviewedProjectsCount);
+        
+        // Refresh the title deeds view to remove NEW badge
+        await loadTitleDeeds(); 
+        await loadDashboard(); 
+    } 
+}
+
 async function markReportAsViewed(reportId) { const res = await apiCall('mark_report_viewed.php', 'POST', { report_id: reportId, department_id: DEPARTMENT_ID, is_admin: 0 }); if (res.success) { unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); updateReportBadge(); await loadReports(); } }
 async function markMessageRead(messageId) { await apiCall('mark_message_read.php', 'POST', { message_id: messageId, department_id: DEPARTMENT_ID }); await loadMessages(); }
 
-function updateProjectBadge() { const badge = document.getElementById('projectBadge'); if (badge) { if (unviewedProjectsCount > 0) { badge.classList.remove('hidden'); badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; } else badge.classList.add('hidden'); } }
+function updateProjectBadge() { 
+    const badge = document.getElementById('projectBadge'); 
+    if (badge) { 
+        console.log("Updating badge - unviewedCount:", unviewedProjectsCount);
+        if (unviewedProjectsCount > 0) { 
+            badge.classList.remove('hidden'); 
+            badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; 
+        } else { 
+            badge.classList.add('hidden'); 
+        } 
+    } 
+}
 function updateReportBadge() { const badge = document.getElementById('reportBadge'); if (badge) { if (unviewedReportsCount > 0) { badge.classList.remove('hidden'); badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; } else badge.classList.add('hidden'); } }
 function updateMessageBadge() { const badge = document.getElementById('msgBadge'); if (badge) { if (unreadMessagesCount > 0) { badge.classList.remove('hidden'); badge.innerText = unreadMessagesCount > 99 ? '99+' : unreadMessagesCount; } else badge.classList.add('hidden'); } }
 
@@ -355,9 +388,26 @@ function updateMessageBadge() { const badge = document.getElementById('msgBadge'
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        projects = res.data.filter(p => p.deleted_by_department !== 1 && p.deleted_by_admin !== 1).sort((a,b) => b.id - a.id); 
-        unviewedProjectsCount = projects.filter(p => p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && p.is_viewed_by_department === 0).length;
-    } else { projects = []; unviewedProjectsCount = 0; }
+        // Show projects that belong to this department OR were sent to this department
+        projects = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_department === DEPARTMENT_ID) &&
+            p.deleted_by_department !== 1 && 
+            p.deleted_by_admin !== 1
+        ).sort((a,b) => b.id - a.id); 
+        
+        // Count unviewed projects (sent TO this department, NOT viewed yet)
+        unviewedProjectsCount = projects.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept !== DEPARTMENT_ID && 
+            p.sent_to_department === DEPARTMENT_ID &&
+            (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null)
+        ).length;
+        
+        console.log("Unviewed projects count:", unviewedProjectsCount);
+    } else { 
+        projects = []; 
+        unviewedProjectsCount = 0; 
+    }
     updateProjectBadge();
     return projects;
 }
@@ -433,27 +483,64 @@ async function loadTitleDeeds() {
     await fetchProjects();
     let search = document.getElementById("globalSearchInput")?.value.toLowerCase() || "";
     let filtered = projects.filter(p => p.name?.toLowerCase().includes(search) || p.client_name?.toLowerCase().includes(search));
-    let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h2 class="text-xl font-bold"><i class="fas fa-file-contract text-emerald-600 mr-2"></i>Title Deeds (${projects.length})</h2><div class="flex gap-2"><button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i>Add</button><button onclick="exportProjectsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i>Excel</button><button onclick="exportProjectsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button></div></div><div class="projects-grid" id="projectsGrid"></div>`;
+    
+    let html = `<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+        <h2 class="text-xl font-bold"><i class="fas fa-file-contract text-emerald-600 mr-2"></i>Title Deeds (${projects.length})</h2>
+        <div class="flex gap-2">
+            <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i>Add</button>
+            <button onclick="exportProjectsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i>Excel</button>
+            <button onclick="exportProjectsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button>
+        </div>
+    </div>
+    <div class="projects-grid" id="projectsGrid"></div>`;
+    
     document.getElementById("titledeedsSection").innerHTML = html;
-    if (filtered.length === 0) { document.getElementById("projectsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No title deeds</div>'; return; }
+    
+    if (filtered.length === 0) { 
+        document.getElementById("projectsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No title deeds</div>'; 
+        return; 
+    }
+    
     let gridHtml = '';
     for (let p of filtered) {
-        let isNew = p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && p.is_viewed_by_department === 0;
+        // Check if this is a new/unviewed project sent from another department
+        const isUnviewed = p.sent_from_dept && 
+                           p.sent_from_dept !== DEPARTMENT_ID && 
+                           p.sent_to_department === DEPARTMENT_ID &&
+                           (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null);
+        
+        const sourceDept = p.sent_from_dept ? `<span class="text-[8px] opacity-75 block">📨 From: ${departmentNames[p.sent_from_dept] || 'Unknown'}</span>` : '';
+        
         let img = getFullImageUrl(p.image);
         gridHtml += `<div class="project-card" id="proj-card-${p.id}" onclick="viewTitleDeed(${p.id})">
-            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+            ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
             <div class="delete-proj-btn" onclick="event.stopPropagation(); deleteTitleDeed(${p.id})"><i class="fas fa-trash-alt"></i></div>
             ${img ? `<img src="${img}?t=${Date.now()}" class="project-image" onclick="event.stopPropagation(); showFullImage('${img}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : `<div class="no-image"><i class="fas fa-file-image text-3xl"></i><p class="text-xs mt-1">No Image</p></div>`}
-            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
+            <div class="card-header">
+                <h4>${escapeHtml(p.name)}</h4>
+                <p>ID: #${p.id} ${sourceDept}</p>
+            </div>
             <div class="p-3">
-                <div class="flex justify-between items-start"><span class="text-xs text-gray-500">Owner: ${escapeHtml(p.client_name||'N/A')}</span><span class="px-1.5 py-0.5 text-[9px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span></div>
+                <div class="flex justify-between items-start">
+                    <span class="text-xs text-gray-500">Owner: ${escapeHtml(p.client_name||'N/A')}</span>
+                    <span class="px-1.5 py-0.5 text-[9px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span>
+                </div>
                 <p class="text-sm font-semibold text-purple-600 mt-1">${formatCurrency(p.amount)}</p>
-                <div class="mt-2"><div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-emerald-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div>
-                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewTitleDeed(${p.id})" class="action-btn view"><i class="fas fa-eye"></i>View</button><button onclick="event.stopPropagation(); editTitleDeed(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button></div>
+                <div class="mt-2">
+                    <div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div>
+                    <div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-emerald-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div>
+                </div>
+                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                    <button onclick="event.stopPropagation(); viewTitleDeed(${p.id})" class="action-btn view"><i class="fas fa-eye"></i>View</button>
+                    ${p.department_id === DEPARTMENT_ID ? `<button onclick="event.stopPropagation(); editTitleDeed(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button>` : ''}
+                </div>
             </div>
         </div>`;
     }
     document.getElementById("projectsGrid").innerHTML = gridHtml;
+    
+    // Update badge after loading
+    updateProjectBadge();
 }
 
 function openAddProjectModal() { 
@@ -581,27 +668,79 @@ function editTitleDeed(id) {
 async function viewTitleDeed(id) { 
     let p = projects.find(p => p.id === id); 
     if(p) { 
-        if(p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && p.is_viewed_by_department === 0) await markProjectAsViewed(id); 
+        // Mark as viewed if it's unviewed and sent from another department
+        if(p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null)) { 
+            await markProjectAsViewed(id); 
+        } 
+        
         let imgUrl = getFullImageUrl(p.image); 
         let deptOptions = ''; 
         allDepartments.forEach(d => { 
             deptOptions += `<a onclick="sendTitleDeedToDept(${p.id}, ${d.id})" class="block px-4 py-2 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-sm">${escapeHtml(d.name)}</a>`; 
         }); 
+        
         document.getElementById('viewProjectContent').innerHTML = `${imgUrl ? `<img src="${imgUrl}?t=${Date.now()}" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer hover:opacity-90 transition" onclick="showFullImage('${imgUrl}')">` : '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded-lg"><i class="fas fa-image text-4xl text-gray-400"></i></div>'}<div class="space-y-2"><p><strong>Reference:</strong> ${escapeHtml(p.name)}</p><p><strong>Owner:</strong> ${escapeHtml(p.client_name||'N/A')}</p><p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatCurrency(p.amount)}</span></p><p><strong>Status:</strong> <span class="px-2 py-0.5 rounded-full text-xs ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span></p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Location:</strong> ${escapeHtml(p.location||'N/A')}</p><p><strong>Start:</strong> ${p.start_date||'N/A'}</p><p><strong>End:</strong> ${p.end_date||'N/A'}</p><p><strong>Desc:</strong> ${escapeHtml(p.description||'')}</p></div>`; 
+        
         document.getElementById('viewProjectButtons').innerHTML = `<button onclick="exportSingleProjectExcel(${p.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportSingleProjectPDF(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>${imgUrl ? `<button onclick="showFullImage('${imgUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-image mr-1"></i> Image</button>` : ''}<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projectSendDropdown-${p.id}')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="projectSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>`; 
+        
         openModal('viewProjectModal'); 
     } 
 }
 
 async function sendTitleDeedToDept(projectId, toDeptId) { 
     let p = projects.find(p => p.id === projectId); 
-    if(p) { 
-        let msg = `📋 TITLE DEED FROM HATIMILIKI:\n\nReference: ${p.name}\nOwner: ${p.client_name}\nAmount: ${formatCurrency(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress}%\nLocation: ${p.location}\n\nPlease review this title deed.`; 
-        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: toDeptId, message: msg, subject: 'Title Deed from Hatimiliki' }); 
-        if(res.success) showToast(`✅ Sent to ${departmentNames[toDeptId]}`); 
-        else showToast('❌ Failed', true); 
-    } 
-    let dd = document.getElementById(`projectSendDropdown-${projectId}`); if(dd) dd.style.display = 'none'; 
+    if (!p) {
+        showToast('Title deed not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(toDeptId) === DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjectModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 TITLE DEED FROM HATIMILIKI:\n\nTitle Deed: ' + p.name + '\nOwner: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatCurrency(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        };
+        
+        console.log("Sending title deed payload:", payload);
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        console.log("Send title deed response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[toDeptId] || 'Department';
+            showToast(`✅ Title deed "${p.name}" sent to ${deptName}`);
+            await loadTitleDeeds();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    let dd = document.getElementById(`projectSendDropdown-${projectId}`);
+    if(dd) dd.style.display = 'none';
 }
 
 function exportSingleProjectExcel(id) { 
@@ -1191,16 +1330,60 @@ async function viewReportDetails(id) {
 
 async function sendReportToDept(reportId, toDeptId) { 
     let r = reportsList.find(r => r.id === reportId); 
-    if(r) { 
-        let msg = `📊 REPORT FROM HATIMILIKI:\n\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${(r.content || '').substring(0, 500)}`; 
-        let res = await apiCall('send_message.php', 'POST', { sender_dept: DEPARTMENT_ID, receiver_dept: toDeptId, message: msg, subject: `Report: ${r.title}` }); 
-        if(res.success) { 
-            showToast(`✅ Report sent to ${departmentNames[toDeptId]}`); 
-            addLog(`Report sent to ${departmentNames[toDeptId]}: ${r.title}`);
-        } else { showToast("❌ Failed to send", true); }
-    } 
-    toggleSendDropdown(`reportSendDropdown-${reportId}`); 
-    document.getElementById('reportDetailModal')?.remove(); 
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Check if sending to self
+    if (parseInt(toDeptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM HATIMILIKI:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        };
+        
+        console.log("Sending report payload:", payload);
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            const deptName = departmentNames[toDeptId] || 'Department';
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            addLog(`Report sent to ${deptName}: ${r.title}`);
+            // Update local report status
+            r.status = 'sent';
+            await loadReports();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    document.getElementById('reportDetailModal')?.remove();
 }
 
 function exportSingleReportExcel(reportId) { 

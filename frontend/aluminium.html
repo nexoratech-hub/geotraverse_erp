@@ -487,9 +487,24 @@ async function loadDashboard() {
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        projectsData = res.data.filter(p => p.deleted_by_department !== 1 && p.deleted_by_admin !== 1).sort((a,b) => b.id - a.id);
-        unviewedProjectsCount = projectsData.filter(p => p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && p.is_viewed_by_department === 0).length;
-    } else { projectsData = []; unviewedProjectsCount = 0; }
+        // Show projects that belong to this department OR were sent to this department
+        projectsData = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_department === DEPARTMENT_ID) &&
+            p.deleted_by_department !== 1 && 
+            p.deleted_by_admin !== 1
+        ).sort((a,b) => b.id - a.id);
+        
+        // Count unviewed projects sent FROM other departments TO this department
+        unviewedProjectsCount = projectsData.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept !== DEPARTMENT_ID && 
+            p.sent_to_department === DEPARTMENT_ID &&
+            p.is_viewed_by_department === 0
+        ).length;
+    } else { 
+        projectsData = []; 
+        unviewedProjectsCount = 0; 
+    } 
     updateProjectBadge();
 }
 async function addProjectAPI(data) { data.department_id = DEPARTMENT_ID; return await apiCall('add_project.php', 'POST', data); }
@@ -719,13 +734,54 @@ async function viewProjectDetails(id) {
 
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p => p.id === projectId); 
-    if(p) { 
-        const msg = `📋 PROJECT FROM ALUMINIUM:\nTitle: ${p.name}\nClient: ${p.client_name || 'N/A'}\nAmount: ${formatMoney(p.amount)}\nStatus: ${p.status}\nProgress: ${p.progress || 0}%`;
-        const res = await apiCall('send_message.php', 'POST', { from_department_id: DEPARTMENT_ID, to_department_id: deptId, message: msg, subject: 'Project from Aluminium' }); 
-        if (res.success) showToast(`Project sent to ${departmentNames[deptId]}`); 
-        else showToast('Failed', true); 
-        toggleSendDropdown(`projectSendDropdown-${projectId}`); 
-    } 
+    if (!p) { 
+        showToast('Project not found', true); 
+        return; 
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send project to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewProjButtons .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        // Use send_project.php API
+        const res = await apiCall('send_project.php', 'POST', {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📋 PROJECT FROM ALUMINIUM:\n\nProject: ' + p.name + '\nClient: ' + (p.client_name || 'N/A') + '\nAmount: ' + formatMoney(p.amount) + '\nStatus: ' + p.status + '\nProgress: ' + (p.progress || 0) + '%'
+        });
+        
+        console.log("Send project response:", res);
+        
+        if (res && res.success) {
+            showToast(`✅ Project "${p.name}" sent to ${departmentNames[deptId] || 'Department'}`);
+            // Reload projects to update
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send project'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`projectSendDropdown-${projectId}`);
 }
 
 function openAddProjectModal() { 
@@ -1566,9 +1622,24 @@ async function sendChatMessage() {
 async function fetchReports() { 
     const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        reportsData = res.data.filter(r => r.deleted_by_department !== 1 && r.deleted_by_admin !== 1).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-        unviewedReportsCount = reportsData.filter(r => r.sent_from_department && r.sent_from_department !== DEPARTMENT_ID && r.is_viewed_by_department === 0).length;
-    } else { reportsData = []; unviewedReportsCount = 0; } 
+        // Show reports that belong to this department OR were sent to this department
+        reportsData = res.data.filter(r => 
+            (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
+            r.deleted_by_department !== 1 && 
+            r.deleted_by_admin !== 1
+        ).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+        
+        // Count unviewed reports sent FROM other departments TO this department
+        unviewedReportsCount = reportsData.filter(r => 
+            r.sent_from_department && 
+            r.sent_from_department !== DEPARTMENT_ID && 
+            r.sent_to_department === DEPARTMENT_ID &&
+            r.is_viewed_by_department === 0
+        ).length;
+    } else { 
+        reportsData = []; 
+        unviewedReportsCount = 0; 
+    } 
     updateReportBadge();
 }
 async function addReportAPI(data) { data.department_id = DEPARTMENT_ID; return await apiCall('add_report.php', 'POST', data); }
@@ -1626,14 +1697,60 @@ function viewReportDetails(id) {
 
 async function sendReportToDept(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
-    if(r) { 
-        const msg = `📊 REPORT FROM ALUMINIUM:\nTitle: ${r.title}\nPeriod: ${r.period}\n\n${r.content.substring(0, 300)}`;
-        const res = await apiCall('send_message.php', 'POST', { from_department_id: DEPARTMENT_ID, to_department_id: deptId, message: msg, subject: `Report: ${r.title}` }); 
-        if (res && res.success) { showToast(`Report "${r.title}" sent to ${departmentNames[deptId]}`); r.status = 'sent'; await loadReports(); } 
-        else { showToast(res?.message || 'Failed to send report', true); } 
-        toggleSendDropdown(`reportSendDropdown-${reportId}`); 
-        document.getElementById('reportDetailModal')?.remove();
-    } 
+    if (!r) { 
+        showToast('Report not found', true); 
+        return; 
+    }
+    
+    // Check if sending to self
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('Cannot send report to your own department', true);
+        return;
+    }
+    
+    const sendBtn = document.querySelector('#viewReportModal .dropdown-trigger') || 
+                    document.querySelector('#reportDetailModal .dropdown-trigger');
+    const originalText = sendBtn ? sendBtn.innerHTML : 'Send';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+        sendBtn.disabled = true;
+    }
+    
+    try {
+        // Use send_report.php API
+        const res = await apiCall('send_report.php', 'POST', {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            message: '📊 REPORT FROM ALUMINIUM:\n\nTitle: ' + r.title + '\nPeriod: ' + r.period + '\n\n' + (r.content || '').substring(0, 500)
+        });
+        
+        console.log("Send report response:", res);
+        
+        if (res && res.success) {
+            showToast(`✅ Report "${r.title}" sent to ${departmentNames[deptId] || 'Department'}`);
+            // Update local report status
+            r.status = 'sent';
+            // Reload reports
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast('❌ ' + (res?.message || 'Failed to send report'), true);
+        }
+    } catch(e) {
+        console.error("Send error:", e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (sendBtn) {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }
+    }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    // Close the modal if open
+    const reportModal = document.getElementById('reportDetailModal');
+    if (reportModal) reportModal.remove();
 }
 
 function exportSingleReportExcel(reportId) { 
