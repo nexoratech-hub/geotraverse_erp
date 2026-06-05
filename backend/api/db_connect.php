@@ -1,16 +1,13 @@
 <?php
-// C:\xampp\htdocs\geotraverse\backend\api\db_connect.php
 $host = 'localhost';
 $user = 'root';
-$pass = '';
-$dbname = 'geotraverse_erp';
+$password = '';
+$database = 'geotraverse_erp';
 
-$conn = new mysqli($host, $user, $pass, $dbname);
+$conn = new mysqli($host, $user, $password, $database);
 
 if ($conn->connect_error) {
-    http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $conn->connect_error]);
-    exit();
+    die(json_encode(['success' => false, 'message' => 'Connection failed: ' . $conn->connect_error]));
 }
 
 $conn->set_charset("utf8mb4");

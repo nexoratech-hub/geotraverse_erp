@@ -1,73 +1,140 @@
 <?php
+// upload_report.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-require_once '../config/database.php';
+require_once 'db_config.php';
 
-$database = new Database();
-$db = $database->getConnection();
-
-$title = isset($_POST['title']) ? $_POST['title'] : null;
-
-if (!$title) {
-    echo json_encode(['success' => false, 'error' => 'Title required']);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
     exit();
 }
 
-if (!isset($_FILES['report_file']) || $_FILES['report_file']['error'] !== UPLOAD_ERR_OK) {
-    echo json_encode(['success' => false, 'error' => 'File required']);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['success' => false, 'message' => 'Method not allowed']);
     exit();
 }
 
-$file = $_FILES['report_file'];
-$allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-$maxSize = 10 * 1024 * 1024;
+$title = isset($_POST['title']) ? trim($_POST['title']) : '';
+$period = isset($_POST['period']) ? trim($_POST['period']) : 'monthly';
+$department_id = isset($_POST['department_id']) ? intval($_POST['department_id']) : 0;
+$created_by = isset($_POST['created_by']) ? trim($_POST['created_by']) : 'System';
+$status = isset($_POST['status']) ? trim($_POST['status']) : 'draft';
 
-if (!in_array($file['type'], $allowedTypes)) {
-    echo json_encode(['success' => false, 'error' => 'Invalid file type']);
+if (empty($title)) {
+    echo json_encode(['success' => false, 'message' => 'Report title is required']);
     exit();
 }
 
-if ($file['size'] > $maxSize) {
-    echo json_encode(['success' => false, 'error' => 'File too large']);
-    exit();
-}
+$file_content = '';
+$file_path = '';
+$file_type = '';
+$file_name = '';
 
-$uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/';
-if (!is_dir($uploadDir)) {
-    mkdir($uploadDir, 0777, true);
-}
-
-$extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-$filename = 'report_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $extension;
-$filepath = $uploadDir . $filename;
-$webPath = '/geotraverse/frontend/assets/uploads/reports/' . $filename;
-
-if (move_uploaded_file($file['tmp_name'], $filepath)) {
-    $query = "INSERT INTO uploaded_reports (title, department_id, file_path, file_name, description, uploaded_by, created_at) 
-              VALUES (:title, :dept_id, :file_path, :file_name, :desc, :user_id, NOW())";
-    $stmt = $db->prepare($query);
-    $dept_id = 1;
-    $user_id = 1;
-    $desc = isset($_POST['description']) ? $_POST['description'] : '';
-    $stmt->bindParam(':title', $title);
-    $stmt->bindParam(':dept_id', $dept_id);
-    $stmt->bindParam(':file_path', $webPath);
-    $stmt->bindParam(':file_name', $filename);
-    $stmt->bindParam(':desc', $desc);
-    $stmt->bindParam(':user_id', $user_id);
-    $stmt->execute();
+// Handle file upload - extract content for preview
+if (isset($_FILES['report_file']) && $_FILES['report_file']['error'] === UPLOAD_ERR_OK) {
+    $upload_dir = '../uploads/reports/';
     
-    $content = "Uploaded file: " . $file['name'] . "\nSize: " . round($file['size'] / 1024, 2) . " KB\nDescription: " . $desc;
-    $reportQuery = "INSERT INTO reports (department_id, title, period, content, status, created_at) VALUES (:dept_id, :title, 'uploaded', :content, 'unread', NOW())";
-    $reportStmt = $db->prepare($reportQuery);
-    $reportStmt->bindParam(':dept_id', $dept_id);
-    $reportStmt->bindParam(':title', $title);
-    $reportStmt->bindParam(':content', $content);
-    $reportStmt->execute();
+    if (!file_exists($upload_dir)) {
+        mkdir($upload_dir, 0777, true);
+    }
     
-    echo json_encode(['success' => true, 'data' => ['file_path' => $webPath]]);
+    $file = $_FILES['report_file'];
+    $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    $file_name = $file['name'];
+    $file_type = $file['type'];
+    $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'];
+    
+    if (!in_array($file_extension, $allowed_extensions)) {
+        echo json_encode(['success' => false, 'message' => 'File type not allowed']);
+        exit();
+    }
+    
+    $new_filename = uniqid() . '_' . time() . '.' . $file_extension;
+    $upload_path = $upload_dir . $new_filename;
+    $file_path = $new_filename;
+    
+    if (move_uploaded_file($file['tmp_name'], $upload_path)) {
+        // Extract content from file for preview
+        $file_content = extractFileContent($upload_path, $file_extension, $file_name, $created_by);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to move uploaded file']);
+        exit();
+    }
+}
+
+// If no file uploaded, use text content from textarea
+if (!$file_content && isset($_POST['content']) && !empty($_POST['content'])) {
+    $file_content = trim($_POST['content']);
+    $file_content .= "\n\n---\nCreated by: " . $created_by . " on " . date('Y-m-d H:i:s');
+}
+
+// Insert into database
+$conn = getConnection();
+$query = "INSERT INTO reports (title, period, content, department_id, status, created_by, created_at, file_path, file_type, file_name) 
+          VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)";
+
+$stmt = $conn->prepare($query);
+$stmt->bind_param("sssississ", $title, $period, $file_content, $department_id, $status, $created_by, $file_path, $file_type, $file_name);
+
+if ($stmt->execute()) {
+    $report_id = $conn->insert_id;
+    echo json_encode([
+        'success' => true,
+        'message' => 'Report uploaded successfully',
+        'report_id' => $report_id,
+        'content_preview' => substr($file_content, 0, 500) . (strlen($file_content) > 500 ? '...' : '')
+    ]);
 } else {
-    echo json_encode(['success' => false, 'error' => 'Failed to upload file']);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $conn->error]);
+}
+
+$stmt->close();
+$conn->close();
+
+// Function to extract content from different file types
+function extractFileContent($file_path, $extension, $original_name, $created_by) {
+    $content = "📎 UPLOADED DOCUMENT: " . $original_name . "\n";
+    $content .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+    $content .= "Uploaded by: " . $created_by . "\n";
+    $content .= "Uploaded on: " . date('Y-m-d H:i:s') . "\n";
+    $content .= "File type: " . strtoupper($extension) . "\n";
+    $content .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+    
+    // Extract text from different file types
+    if ($extension == 'txt') {
+        $file_content = file_get_contents($file_path);
+        $content .= $file_content;
+    } 
+    elseif ($extension == 'pdf') {
+        $content .= "[PDF DOCUMENT UPLOADED]\n";
+        $content .= "File: " . $original_name . "\n";
+        $content .= "To view the full document, please download the file.\n";
+        $content .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+        $content .= "PDF documents can be viewed by clicking the 'View Document' button.\n";
+    }
+    elseif (in_array($extension, ['jpg', 'jpeg', 'png', 'gif'])) {
+        $content .= "[IMAGE DOCUMENT UPLOADED]\n";
+        $content .= "File: " . $original_name . "\n";
+        $content .= "Image size: " . round(filesize($file_path) / 1024, 2) . " KB\n";
+        $content .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+        $content .= "To view the image, click the 'View Image' button.\n";
+    }
+    elseif (in_array($extension, ['doc', 'docx', 'xls', 'xlsx'])) {
+        $content .= "[OFFICE DOCUMENT UPLOADED]\n";
+        $content .= "File: " . $original_name . "\n";
+        $content .= "File size: " . round(filesize($file_path) / 1024, 2) . " KB\n";
+        $content .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+        $content .= "To view this document, please download the file.\n";
+    }
+    else {
+        $content .= "[DOCUMENT UPLOADED]\n";
+        $content .= "File: " . $original_name . "\n";
+        $content .= "File size: " . round(filesize($file_path) / 1024, 2) . " KB\n";
+    }
+    
+    return $content;
 }
 ?>
