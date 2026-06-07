@@ -88,7 +88,7 @@
         }
         
         .card-header { padding: 12px 14px; color: white; font-weight: bold; background: #be123c; }
-        .project-image { width: 100%; height: 140px; object-fit: cover; cursor: pointer; }
+        .project-image { width: 100%; height: 140px; object-fit: cover; cursor: pointer; background-color: #f3f4f6; }
         .no-image { width: 100%; height: 140px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; color: #9ca3af; border-radius: 8px; margin-bottom: 10px; }
         
         .section-card { background: white; border-radius: 16px; border: 1px solid #e5e7eb; overflow: hidden; margin-bottom: 25px; }
@@ -231,6 +231,45 @@
         .small-btn-primary { background: #be123c; color: white; }
         .small-btn-success { background: #10b981; color: white; }
         .small-btn-danger { background: #ef4444; color: white; }
+        
+        /* Document Info Modal styles */
+        .doc-info-modal-container {
+            max-width: 550px;
+            margin: 0 auto;
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
+        }
+        body.dark-mode .doc-info-modal-container {
+            background: #0f172a;
+            border-color: #334155;
+        }
+        .doc-info-item {
+            display: flex;
+            padding: 10px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        body.dark-mode .doc-info-item {
+            border-bottom-color: #334155;
+        }
+        .doc-info-label {
+            width: 130px;
+            font-weight: 600;
+            color: #374151;
+            flex-shrink: 0;
+        }
+        body.dark-mode .doc-info-label {
+            color: #94a3b8;
+        }
+        .doc-info-value {
+            flex: 1;
+            word-break: break-word;
+            color: #1f2937;
+        }
+        body.dark-mode .doc-info-value {
+            color: #f1f5f9;
+        }
     </style>
 </head>
 <body>
@@ -297,7 +336,11 @@
 <div id="dailyworkModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-calendar-plus mr-2"></i>Add Daily Work</h3><button onclick="closeModal('dailyworkModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="dailyworkId"><input type="hidden" id="dailyworkProjectId"><div class="form-group"><label>Project Name</label><input type="text" id="dailyworkProjectName" readonly class="bg-gray-100 w-full p-2 border rounded"></div><div class="form-group"><label>Date & Time *</label><input type="datetime-local" id="dailyworkDateTime" required></div><div class="form-group"><label>Description *</label><textarea id="dailyworkDesc" rows="3"></textarea></div><div class="form-group"><label>Budget Amount (TZS)</label><input type="text" id="dailyworkBudget" class="money-input"></div><div class="form-group"><label>Amount Spent (TZS)</label><input type="text" id="dailyworkAmount" class="money-input"></div><div class="form-group"><label>Status</label><select id="dailyworkStatus"><option value="pending">Pending</option><option value="partial">Partial</option><option value="completed">Completed</option></select></div><div class="flex gap-3"><button onclick="saveDailyWork()" class="flex-1 btn-primary py-2 rounded">Save</button><button onclick="closeModal('dailyworkModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 <div id="viewDailyworkModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-calendar-day mr-2"></i>Daily Work Details</h3><button onclick="closeModal('viewDailyworkModal')">&times;</button></div><div class="modal-body"><div id="viewDailyworkContent"></div></div></div></div>
 
-<div id="documentPreviewModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Document Preview</h3><button onclick="closeModal('documentPreviewModal')">&times;</button></div><div class="modal-body"><div id="documentPreviewContent" class="file-preview-container"></div><div id="documentPreviewButtons" class="view-buttons-container"></div></div></div></div>
+<!-- DOCUMENT INFO MODAL (NO PREVIEW) -->
+<div id="documentInfoModal" class="modal"><div class="modal-content" style="max-width: 600px;"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Document Information</h3><button onclick="closeModal('documentInfoModal')">&times;</button></div><div class="modal-body">
+    <div id="documentInfoContent" class="doc-info-modal-container"></div>
+    <div id="documentInfoButtons" class="view-buttons-container mt-4"></div>
+</div></div></div>
 
 <!-- REQUEST MODAL -->
 <div id="requestModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Add Fund Request</h3><button onclick="closeModal('requestModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="reqId"><div class="form-group"><label>Date *</label><input type="date" id="reqDate"></div><div class="form-group"><label>Type</label><select id="reqType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="reqSource" placeholder="Office" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="reqAmount" class="money-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="reqDesc" rows="3" placeholder="Reason for request..."></textarea></div><div class="flex gap-3"><button onclick="submitRequest()" class="flex-1 btn-primary">Submit Request</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
@@ -522,12 +565,12 @@ function markRequestViewed(id) {
     } 
 }
 
-function getFileUrl(filePath, type = 'projects') {
-    if (!filePath) return null;
-    if (filePath.startsWith('http')) return filePath;
-    if (filePath.startsWith('data:')) return filePath;
-    if (type === 'reports') return '../uploads/reports/' + filePath;
-    return '../uploads/projects/' + filePath;
+function getFullImageUrl(imagePath) {
+    if (!imagePath) return null;
+    if (imagePath.startsWith('http')) return imagePath;
+    if (imagePath.startsWith('data:')) return imagePath;
+    // Path fixed to match the server directory: C:\xampp\htdocs\geotraverse\frontend\assets\uploads\projects
+    return '/geotraverse/frontend/assets/uploads/projects/' + imagePath;
 }
 
 function getImageAsBase64(file) { 
@@ -605,7 +648,7 @@ async function loadProjects() {
         let projectsHtml = '';
         for (let p of projectsData) {
             let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null);
-            let fileUrl = getFileUrl(p.image);
+            let fileUrl = getFullImageUrl(p.image);
             let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
             let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
             let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
@@ -652,7 +695,7 @@ async function loadProjects() {
                         <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span></div>
                         <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
                         <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                            <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="viewUploadedDocumentInfo(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                             <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
                         </div>
                         <div class="user-info">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
@@ -697,7 +740,7 @@ function editProject(id) {
         document.getElementById('projProgress').value = p.progress; 
         document.getElementById('projDept').value = p.department_id; 
         if(p.image) { 
-            let imgUrl = getFileUrl(p.image); 
+            let imgUrl = getFullImageUrl(p.image); 
             if(imgUrl) { 
                 document.getElementById('projImagePreview').src = imgUrl; 
                 document.getElementById('projImagePreviewContainer').classList.remove('hidden'); 
@@ -774,9 +817,9 @@ async function viewProjectDetails(id) {
             await markProjectViewed(id);
         }
         currentProjectId = id;
-        let fileUrl = getFileUrl(p.image);
+        let fileUrl = getFullImageUrl(p.image);
         let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
-        let filePreviewHtml = fileUrl ? (isImage ? `<img src="${fileUrl}?t=${Date.now()}" class="w-full h-40 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage('${fileUrl}')">` : `<div class="w-full h-40 mb-3 flex items-center justify-center bg-gray-100 rounded cursor-pointer" onclick="previewDocument('${fileUrl}', '${escapeHtml(p.name)}', 'application/octet-stream')"><i class="fas fa-file-alt text-4xl text-gray-500"></i><p class="text-sm ml-2">Click to preview</p></div>`) : '<div class="no-image w-full h-40 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
+        let filePreviewHtml = fileUrl ? (isImage ? `<img src="${fileUrl}?t=${Date.now()}" class="w-full h-40 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage('${fileUrl}')">` : `<div class="w-full h-40 mb-3 flex items-center justify-center bg-gray-100 rounded cursor-pointer" onclick="window.open('${fileUrl}', '_blank')"><i class="fas fa-file-alt text-4xl text-gray-500"></i><p class="text-sm ml-2">Click to view file</p></div>`) : '<div class="no-image w-full h-40 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
         document.getElementById('viewProjContent').innerHTML = `${filePreviewHtml}<div class="space-y-2 text-sm"><p><strong>Name:</strong> ${escapeHtml(p.name)}</p><p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p><p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></p><p><strong>Status:</strong> <span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p><p><strong>Start Date:</strong> ${p.start_date || 'N/A'}</p><p><strong>End Date:</strong> ${p.end_date || 'N/A'}</p><p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p><div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div></div>`;
         
         await loadDailyWorkForProject(id);
@@ -790,7 +833,7 @@ async function viewProjectDetails(id) {
         document.getElementById('viewProjButtons').innerHTML = `
             <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
             <button onclick="exportProjectToPDF(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
-            ${fileUrl ? `<button onclick="previewDocument('${fileUrl}', '${escapeHtml(p.name)}', '${isImage ? 'image' : 'application/octet-stream'}')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> Preview File</button>` : ''}
+            ${fileUrl ? `<button onclick="window.open('${fileUrl}', '_blank')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> View File</button>` : ''}
             <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
         `;
         openModal('viewProjModal');
@@ -798,31 +841,57 @@ async function viewProjectDetails(id) {
     }
 }
 
-function viewUploadedDocument(docId) {
+// ==================== UPLOADED DOCUMENT INFO (NO PREVIEW) ====================
+function viewUploadedDocumentInfo(docId) {
     const doc = projectDocuments.find(d => d.id === docId);
     if(doc) {
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
-        let fileName = doc.file_name || '';
-        let isImage = fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-        let isPdf = fileName.match(/\.pdf$/i);
-        let previewContent = '';
-        if (isImage) {
-            previewContent = `<img src="${fileUrl}?t=${Date.now()}" class="max-w-full max-h-[400px] mx-auto object-contain rounded">`;
-        } else if (isPdf) {
-            previewContent = `<iframe src="${fileUrl}" width="100%" height="500px" style="border:none;"></iframe>`;
-        } else {
-            previewContent = `<div class="text-center py-10"><i class="fas fa-file-alt text-6xl text-gray-400 mb-3"></i><p>Preview not available</p><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary mt-3">Download File</button></div>`;
-        }
+        let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
+        let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+        
+        let infoHtml = `
+            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+        `;
+        
+        let actionHtml = '';
+        if (doc.created_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(doc.created_by)} | ${formatDateTime(doc.created_at)}</div>`;
+        if (doc.updated_by && doc.updated_by !== doc.created_by) actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(doc.updated_by)} | ${formatDateTime(doc.updated_at)}</div>`;
+        if (actionHtml) infoHtml += `<div class="doc-info-item"><div class="doc-info-label">History:</div><div class="doc-info-value">${actionHtml}</div></div>`;
+        
+        document.getElementById('documentInfoContent').innerHTML = infoHtml;
+        
         let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">${escapeHtml(d.name)}</a>`; });
-        document.getElementById('documentPreviewContent').innerHTML = previewContent;
-        document.getElementById('documentPreviewButtons').innerHTML = `
-            <button onclick="exportDocumentToExcel(${doc.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
-            <button onclick="exportDocumentToPDF(${doc.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (New Window)</button>
+        allDepartmentsForSend.forEach(d => { 
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">${escapeHtml(d.name)}</a>`; 
+            }
+        });
+        
+        let buttonsHtml = `
+            <button onclick="exportDocumentToExcel(${doc.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
+            <button onclick="downloadDocument(${doc.id})" class="small-btn small-btn-primary"><i class="fas fa-download"></i> Download</button>
             <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
         `;
-        openModal('documentPreviewModal');
+        
+        document.getElementById('documentInfoButtons').innerHTML = buttonsHtml;
+        openModal('documentInfoModal');
     }
+}
+
+function downloadDocument(docId) {
+    window.open(`../backend/api/download_document.php?id=${docId}&type=project`, '_blank');
+}
+
+function sendDocumentToDept(docId, deptId) { 
+    const deptName = departmentNames[deptId] || 'Department';
+    showToast(`✅ Document sent to ${deptName}`, false);
+    toggleSendDropdown(`docSendDropdown-${docId}`);
+    closeModal('documentInfoModal');
 }
 
 async function sendProjectToDept(projectId, deptId) { 
@@ -867,7 +936,7 @@ function exportAllProjectsToPDF() {
 async function exportProjectToPDF(projectId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { showToast('Project not found', true); return; }
-    let fileUrl = getFileUrl(p.image);
+    let fileUrl = getFullImageUrl(p.image);
     let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
     let statusBadgeClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
     let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
@@ -875,19 +944,261 @@ async function exportProjectToPDF(projectId) {
     dailyworkData.filter(w => w.project_id == p.id).forEach(w => { totalBudget += parseFloat(w.budget)||0; totalAmount += parseFloat(w.amount)||0; });
     let w = window.open('', '_blank');
     if (!w) { showToast("Please allow popups", true); return; }
-    w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(p.name)} - Project Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;}h1{color:#be123c;}.details-table{width:100%;border-collapse:collapse;margin:10px 0;}.details-table th,.details-table td{border:1px solid #be123c;padding:8px;text-align:left;}.details-table th{background:#be123c;color:white;}.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;}.footer{text-align:center;font-size:10px;margin-top:20px;}.print-btn{text-align:center;margin-top:20px;}@media print{.print-btn{display:none;}}</style></head><body><h1>${escapeHtml(p.name)}</h1><p>Generated: ${new Date().toLocaleString()} | Department: Architectural</p><table class="details-table"><tr><th style="width:35%">Project Name</th><td><strong>${escapeHtml(p.name)}</strong></td</tr>
-    <tr><th>Client Name</th><td>${escapeHtml(p.client_name||'N/A')}</td</tr>
-    <tr><th>Amount</th><td>${formatMoney(p.amount)}</td</tr>
-    <tr><th>Status</th><td><span class="status-badge ${statusBadgeClass}">${statusText}</span></td</tr>
-    <tr><th>Progress</th><td>${p.progress}%</td</tr>
-    <tr><th>Location</th><td>${escapeHtml(p.location||'N/A')}</td</tr>
-    <tr><th>Description</th><td>${escapeHtml(p.description||'No description')}</td</tr>
-    <tr><th>Created By</th><td>${escapeHtml(p.created_by||'System')} on ${formatDateTime(p.created_at)}</td</tr>
+    w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(p.name)} - Project Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;}h1{color:#be123c;}.details-table{width:100%;border-collapse:collapse;margin:10px 0;}.details-table th,.details-table td{border:1px solid #be123c;padding:8px;text-align:left;}.details-table th{background:#be123c;color:white;}.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;}.footer{text-align:center;font-size:10px;margin-top:20px;}.print-btn{text-align:center;margin-top:20px;}@media print{.print-btn{display:none;}}</style></head><body><h1>${escapeHtml(p.name)}</h1><p>Generated: ${new Date().toLocaleString()} | Department: Architectural</p><table class="details-table"><tr><th style="width:35%">Project Name</th><td><strong>${escapeHtml(p.name)}</strong></td</tr
+    <tr><th>Client Name</th><td>${escapeHtml(p.client_name||'N/A')}</td</tr
+    <tr><th>Amount</th><td>${formatMoney(p.amount)}</td</tr
+    <tr><th>Status</th><td><span class="status-badge ${statusBadgeClass}">${statusText}</span></td</tr
+    <tr><th>Progress</th><td>${p.progress}%</td</tr
+    <tr><th>Location</th><td>${escapeHtml(p.location||'N/A')}</td</tr
+    <tr><th>Description</th><td>${escapeHtml(p.description||'No description')}</td</tr
+    <tr><th>Created By</th><td>${escapeHtml(p.created_by||'System')} on ${formatDateTime(p.created_at)}</td</tr
     ${fileUrl ? `<tr><th>Attached File</th><td><a href="${fileUrl}" target="_blank">${escapeHtml(p.image)}</a></td>` : ''}</tr>
-    ${dailyworkData.filter(w=>w.project_id==p.id).length > 0 ? `<h3>Daily Work Records</h3><table class="details-table"><thead><tr><th>Date/Time</th><th>Description</th><th>Budget</th><th>Amount</th></tr></thead><tbody>${dailyworkData.filter(w=>w.project_id==p.id).map(w=>`<tr><td>${new Date(w.date).toLocaleString()} </td><td>${escapeHtml(w.work_description||'-')}</td><td class="text-right">${formatMoney(w.budget)}</td><td class="text-right">${formatMoney(w.amount)}</td></tr>`).join('')}<tr><th colspan="2">Totals</th><th>${formatMoney(totalBudget)}</th><th>${formatMoney(totalAmount)}</th></td></tbody></table>` : ''}
+    ${dailyworkData.filter(w=>w.project_id==p.id).length > 0 ? `<h3>Daily Work Records</h3><table class="details-table"><thead><tr><th>Date/Time</th><th>Description</th><th>Budget</th><th>Amount</th></tr></thead><tbody>${dailyworkData.filter(w=>w.project_id==p.id).map(w=>`<tr><td class="text-left">${new Date(w.date).toLocaleString()} <td><td class="text-left">${escapeHtml(w.work_description||'-')}</td><td class="text-right">${formatMoney(w.budget)}</td<td class="text-right">${formatMoney(w.amount)}</td</tr`).join('')}<tr><th colspan="2">Totals</th><th>${formatMoney(totalBudget)}</th><th>${formatMoney(totalAmount)}</th></tr></tbody></table>` : ''}
     <div class="footer">GeoTraverse ERP System - Architectural Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
+}
+
+function exportAllProjectDocsToExcel() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']]; 
+    projectDocuments.forEach(d => ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at])); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Documents'); 
+    XLSX.writeFile(wb, `all_documents.xlsx`); 
+    showToast('Exported'); 
+}
+function exportAllProjectDocsToPDF() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let rows = projectDocuments.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><hr/></div>`).join(''); 
+    let w = window.open('', '_blank'); 
+    w.document.write(`<!DOCTYPE html><html><head><title>All Documents</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Documents</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
+}
+
+function openUploadProjectDocModal() { 
+    document.getElementById('projectDocTitle').value = ''; 
+    document.getElementById('projectDocDesc').value = ''; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+    currentProjectDocFile = null; 
+    openModal('projectDocUploadModal'); 
+}
+document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
+    if(e.target.files && e.target.files[0]) { 
+        currentProjectDocFile = e.target.files[0]; 
+        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
+        document.getElementById('projectDocPreview').classList.remove('hidden'); 
+    } 
+});
+function removeProjectDocument() { 
+    currentProjectDocFile = null; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+}
+async function saveProjectDocument() {
+    const title = document.getElementById('projectDocTitle').value.trim();
+    const description = document.getElementById('projectDocDesc').value;
+    if (!title) { showToast('Document title required', true); return; }
+    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', description);
+    formData.append('department_id', DEPARTMENT_ID);
+    formData.append('uploaded_by', CURRENT_USER);
+    formData.append('document_file', currentProjectDocFile);
+    const sendBtn = document.querySelector('#projectDocUploadModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.disabled = true;
+    try {
+        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
+        const result = await response.json();
+        if (result.success) { 
+            showToast('✅ Document uploaded successfully'); 
+            closeModal('projectDocUploadModal'); 
+            await loadProjects(); 
+        } else { 
+            showToast('❌ ' + (result.message || 'Upload failed'), true); 
+        }
+    } catch (error) { 
+        showToast('❌ Network error: ' + error.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
+}
+async function deleteProjectDocument(docId) {
+    if (confirm('Delete this document?')) {
+        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: CURRENT_USER });
+        if (res.success) { 
+            showToast('Document deleted'); 
+            await loadProjects(); 
+        } else { 
+            showToast(res.message || 'Failed', true); 
+        }
+    }
+}
+function exportDocumentToExcel(docId) { 
+    const doc = projectDocuments.find(d => d.id === docId); 
+    if(doc) { 
+        let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']]; 
+        ws.push([doc.title, doc.description||'-', doc.file_name, doc.uploaded_by, doc.created_at]); 
+        let wb = XLSX.utils.book_new(); 
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Document'); 
+        XLSX.writeFile(wb, `document_${doc.id}.xlsx`); 
+        showToast('Exported'); 
+    } 
+}
+
+// ==================== DAILY WORK ====================
+async function loadDailyWorkForProject(projectId) {
+    await fetchDailyWork();
+    const project = projectsData.find(p => p.id === projectId);
+    const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
+    const tbody = document.getElementById('dailyWorkTableBody');
+    if (!tbody) return;
+    if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</tr'; return; }
+    let html = '';
+    for (let w of projectDailyWork) {
+        html += `<tr id="daily-row-${w.id}">
+            <td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>
+            <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
+            <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td
+            <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td>
+            <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+function updateDailyWorkSummary() { 
+    const project = projectsData.find(p=>p.id===currentProjectId); 
+    if(!project) return; 
+    let totalBudget = 0, totalAmount = 0; 
+    dailyworkData.filter(w=>w.project_id==currentProjectId).forEach(w=>{ 
+        totalBudget += parseFloat(w.budget)||0; 
+        totalAmount += parseFloat(w.amount)||0; 
+    }); 
+    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget); 
+    document.getElementById('totalAmount').innerHTML = formatMoney(totalAmount); 
+    document.getElementById('remainingAmount').innerHTML = formatMoney((parseFloat(project.amount)||0)-totalAmount); 
+}
+function toggleDailyWorkTable() { 
+    const c = document.getElementById('dailyWorkListContainer'); 
+    const s = document.getElementById('dailyWorkSummary'); 
+    const a = document.getElementById('addDailyWorkBtn'); 
+    const e = document.getElementById('exportDailyWorkExcelBtn'); 
+    const p = document.getElementById('exportDailyWorkPDFBtn'); 
+    const t = document.getElementById('toggleDailyWorkBtn'); 
+    if(c.style.display === 'none' || c.style.display === '') { 
+        c.style.display = 'block'; s.style.display = 'grid'; 
+        if(a) a.style.display = 'inline-flex'; 
+        if(e) e.style.display = 'inline-flex'; 
+        if(p) p.style.display = 'inline-flex'; 
+        if(t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Hide Daily Work';
+    } else { 
+        c.style.display = 'none'; s.style.display = 'none'; 
+        if(a) a.style.display = 'none'; 
+        if(e) e.style.display = 'none'; 
+        if(p) p.style.display = 'none'; 
+        if(t) t.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
+    } 
+}
+function openDailyWorkModalForProject(projectId) { 
+    const p = projectsData.find(p=>p.id===projectId); 
+    if(p) { 
+        document.getElementById('dailyworkId').value = ''; 
+        document.getElementById('dailyworkProjectId').value = projectId; 
+        document.getElementById('dailyworkProjectName').value = p.name; 
+        document.getElementById('dailyworkDateTime').value = new Date().toISOString().slice(0,16); 
+        document.getElementById('dailyworkDesc').value = ''; 
+        document.getElementById('dailyworkBudget').value = ''; 
+        document.getElementById('dailyworkAmount').value = ''; 
+        document.getElementById('dailyworkStatus').value = 'pending'; 
+        openModal('dailyworkModal'); 
+    } 
+}
+async function saveDailyWork() { 
+    let id = document.getElementById('dailyworkId').value; 
+    let datetime = document.getElementById('dailyworkDateTime').value; 
+    let projectName = document.getElementById('dailyworkProjectName').value; 
+    let budget = parseMoneyValue(document.getElementById('dailyworkBudget').value); 
+    let amount = parseMoneyValue(document.getElementById('dailyworkAmount').value); 
+    if(!datetime) { showToast('Date & Time required', true); return; } 
+    let data = { date: datetime, project_name: projectName, work_description: document.getElementById('dailyworkDesc').value, budget: budget, amount: amount, status: document.getElementById('dailyworkStatus').value, department_id: DEPARTMENT_ID, created_by: CURRENT_USER }; 
+    let res = id ? await apiCall('update_dailywork.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_dailywork.php','POST',data); 
+    if(res.success) { 
+        showToast(id ? 'Updated' : 'Added'); 
+        closeModal('dailyworkModal'); 
+        if(currentProjectId) { await loadDailyWorkForProject(currentProjectId); updateDailyWorkSummary(); } 
+        await loadDashboard(); 
+    } else showToast(res.message||'Failed', true); 
+}
+async function viewDailyWork(id) { 
+    const w = dailyworkData.find(w=>w.id===id); 
+    if(w) { 
+        document.getElementById('viewDailyworkContent').innerHTML = `
+            <div><strong>Date/Time:</strong> ${new Date(w.date).toLocaleString()}</div>
+            <div><strong>Project:</strong> ${escapeHtml(w.project_name)}</div>
+            <div><strong>Description:</strong> ${escapeHtml(w.work_description||'-')}</div>
+            <div><strong>Budget:</strong> ${formatMoney(w.budget)}</div>
+            <div><strong>Amount:</strong> ${formatMoney(w.amount)}</div>
+            <div><strong>Status:</strong> ${w.status}</div>
+            <div class="text-[9px] text-gray-400 mt-2">Created by: ${escapeHtml(w.created_by||'System')}</div>
+        `; 
+        openModal('viewDailyworkModal'); 
+    } 
+}
+function editDailyWork(id) { 
+    const w = dailyworkData.find(w=>w.id===id); 
+    if(w) { 
+        document.getElementById('dailyworkId').value = w.id; 
+        document.getElementById('dailyworkProjectName').value = w.project_name; 
+        document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0,16) : new Date().toISOString().slice(0,16); 
+        document.getElementById('dailyworkDesc').value = w.work_description||''; 
+        document.getElementById('dailyworkBudget').value = w.budget; 
+        document.getElementById('dailyworkAmount').value = w.amount; 
+        document.getElementById('dailyworkStatus').value = w.status; 
+        openModal('dailyworkModal'); 
+    } 
+}
+async function deleteDailyWork(id) { 
+    if(confirm('Delete this daily work record?')) { 
+        let res = await apiCall('delete_dailywork.php','POST',{id:parseInt(id),is_deleted:1}); 
+        if(res.success) { 
+            showToast('Deleted'); 
+            if(currentProjectId) { await loadDailyWorkForProject(currentProjectId); updateDailyWorkSummary(); } 
+            await loadDashboard(); 
+        } else showToast(res.message||'Failed', true); 
+    } 
+}
+function exportDailyWorkToExcel() { 
+    const project = projectsData.find(p=>p.id===currentProjectId); 
+    if(!project) return; 
+    const work = dailyworkData.filter(w=>w.project_id==currentProjectId); 
+    if(work.length===0) { showToast('No records', true); return; } 
+    let ws = [['Date/Time','Description','Budget','Amount','Status','Created By']]; 
+    work.forEach(w=>ws.push([new Date(w.date).toLocaleString(), w.work_description||'-', w.budget, w.amount, w.status, w.created_by||'System'])); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); 
+    XLSX.writeFile(wb, `dailywork_${project.name}.xlsx`); 
+    showToast('Exported'); 
+}
+function exportDailyWorkToPDF() { 
+    const project = projectsData.find(p=>p.id===currentProjectId); 
+    if(!project) return; 
+    const work = dailyworkData.filter(w=>w.project_id==currentProjectId); 
+    if(work.length===0) { showToast('No records', true); return; } 
+    let rows = work.map(w=>`<tr><td class="border p-1">${new Date(w.date).toLocaleString()}</td><td class="border p-1">${escapeHtml(w.work_description||'-')}</td><td class="border p-1 text-right">${formatMoney(w.budget)}</td
+        <td class="border p-1 text-right">${formatMoney(w.amount)}</td
+        <td class="border p-1">${w.status}</td
+        <td class="border p-1">${escapeHtml(w.created_by||'System')}</td
+    </tr>`).join(''); 
+    let w = window.open('', '_blank'); 
+    w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;}th,td{border:1px solid #be123c;padding:8px;}th{background:#be123c;color:white;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody><table><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
 }
 
 // ==================== REQUESTS SECTION - ILIYOREKEBISHWA ====================
@@ -1145,30 +1456,7 @@ async function loadReports() {
 }
 
 function viewUploadedReport(docId) {
-    const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
-        let fileName = doc.file_name || '';
-        let isImage = fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-        let isPdf = fileName.match(/\.pdf$/i);
-        let previewContent = '';
-        if (isImage) {
-            previewContent = `<img src="${fileUrl}?t=${Date.now()}" class="max-w-full max-h-[400px] mx-auto object-contain rounded" onerror="this.parentElement.innerHTML='<div class=\'text-center py-10\'><i class=\'fas fa-image text-6xl text-gray-400 mb-3\'></i><p>Image not available</p></div>'">`;
-        } else if (isPdf) {
-            previewContent = `<iframe src="${fileUrl}" width="100%" height="500px" style="border:none;"></iframe>`;
-        } else {
-            previewContent = `<div class="text-center py-10"><i class="fas fa-file-alt text-6xl text-gray-400 mb-3"></i><p class="text-sm">Preview not available for this file type</p><p class="text-xs text-gray-500 mt-2">${escapeHtml(fileName)}</p><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary mt-3">Download File</button></div>`;
-        }
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">${escapeHtml(d.name)}</a>`; });
-        document.getElementById('viewReportContent').innerHTML = previewContent;
-        document.getElementById('viewReportButtons').innerHTML = `
-            <button onclick="exportDocumentToExcel(${doc.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
-            <button onclick="exportDocumentToPDF(${doc.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (New Window)</button>
-            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
-        `;
-        openModal('viewReportModal');
-    }
+    viewUploadedDocumentInfo(docId);
 }
 
 function viewReportDetailsModal(id) { 
@@ -1180,7 +1468,7 @@ function viewReportDetailsModal(id) {
         }
         let attachmentHtml = '';
         if (r.file_path) {
-            let fileUrl = getFileUrl(r.file_path, 'reports');
+            let fileUrl = getFullImageUrl(r.file_path);
             attachmentHtml = `<div class="mb-3"><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary text-sm py-1 px-3 rounded"><i class="fas fa-download mr-1"></i> Download File</button></div>`;
         }
         document.getElementById('viewReportContent').innerHTML = `
@@ -1450,258 +1738,6 @@ async function generateAndSaveReport() {
     } else { 
         showToast(res.message || 'Failed', true); 
     }
-}
-
-// ==================== DAILY WORK ====================
-async function loadDailyWorkForProject(projectId) {
-    await fetchDailyWork();
-    const project = projectsData.find(p => p.id === projectId);
-    const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
-    const tbody = document.getElementById('dailyWorkTableBody');
-    if (!tbody) return;
-    if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</tr'; return; }
-    let html = '';
-    for (let w of projectDailyWork) {
-        html += `<tr id="daily-row-${w.id}">
-            <td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>
-            <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
-            <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td>
-            <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td>
-            <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
-         </tr>`;
-    }
-    tbody.innerHTML = html;
-}
-function updateDailyWorkSummary() { 
-    const project = projectsData.find(p=>p.id===currentProjectId); 
-    if(!project) return; 
-    let totalBudget = 0, totalAmount = 0; 
-    dailyworkData.filter(w=>w.project_id==currentProjectId).forEach(w=>{ 
-        totalBudget += parseFloat(w.budget)||0; 
-        totalAmount += parseFloat(w.amount)||0; 
-    }); 
-    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget); 
-    document.getElementById('totalAmount').innerHTML = formatMoney(totalAmount); 
-    document.getElementById('remainingAmount').innerHTML = formatMoney((parseFloat(project.amount)||0)-totalAmount); 
-}
-function toggleDailyWorkTable() { 
-    const c = document.getElementById('dailyWorkListContainer'); 
-    const s = document.getElementById('dailyWorkSummary'); 
-    const a = document.getElementById('addDailyWorkBtn'); 
-    const e = document.getElementById('exportDailyWorkExcelBtn'); 
-    const p = document.getElementById('exportDailyWorkPDFBtn'); 
-    const t = document.getElementById('toggleDailyWorkBtn'); 
-    if(c.style.display === 'none' || c.style.display === '') { 
-        c.style.display = 'block'; s.style.display = 'grid'; 
-        if(a) a.style.display = 'inline-flex'; 
-        if(e) e.style.display = 'inline-flex'; 
-        if(p) p.style.display = 'inline-flex'; 
-        if(t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Hide Daily Work';
-    } else { 
-        c.style.display = 'none'; s.style.display = 'none'; 
-        if(a) a.style.display = 'none'; 
-        if(e) e.style.display = 'none'; 
-        if(p) p.style.display = 'none'; 
-        if(t) t.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
-    } 
-}
-function openDailyWorkModalForProject(projectId) { 
-    const p = projectsData.find(p=>p.id===projectId); 
-    if(p) { 
-        document.getElementById('dailyworkId').value = ''; 
-        document.getElementById('dailyworkProjectId').value = projectId; 
-        document.getElementById('dailyworkProjectName').value = p.name; 
-        document.getElementById('dailyworkDateTime').value = new Date().toISOString().slice(0,16); 
-        document.getElementById('dailyworkDesc').value = ''; 
-        document.getElementById('dailyworkBudget').value = ''; 
-        document.getElementById('dailyworkAmount').value = ''; 
-        document.getElementById('dailyworkStatus').value = 'pending'; 
-        openModal('dailyworkModal'); 
-    } 
-}
-async function saveDailyWork() { 
-    let id = document.getElementById('dailyworkId').value; 
-    let datetime = document.getElementById('dailyworkDateTime').value; 
-    let projectName = document.getElementById('dailyworkProjectName').value; 
-    let budget = parseMoneyValue(document.getElementById('dailyworkBudget').value); 
-    let amount = parseMoneyValue(document.getElementById('dailyworkAmount').value); 
-    if(!datetime) { showToast('Date & Time required', true); return; } 
-    let data = { date: datetime, project_name: projectName, work_description: document.getElementById('dailyworkDesc').value, budget: budget, amount: amount, status: document.getElementById('dailyworkStatus').value, department_id: DEPARTMENT_ID, created_by: CURRENT_USER }; 
-    let res = id ? await apiCall('update_dailywork.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_dailywork.php','POST',data); 
-    if(res.success) { 
-        showToast(id ? 'Updated' : 'Added'); 
-        closeModal('dailyworkModal'); 
-        if(currentProjectId) { await loadDailyWorkForProject(currentProjectId); updateDailyWorkSummary(); } 
-        await loadDashboard(); 
-    } else showToast(res.message||'Failed', true); 
-}
-async function viewDailyWork(id) { 
-    const w = dailyworkData.find(w=>w.id===id); 
-    if(w) { 
-        document.getElementById('viewDailyworkContent').innerHTML = `
-            <div><strong>Date/Time:</strong> ${new Date(w.date).toLocaleString()}</div>
-            <div><strong>Project:</strong> ${escapeHtml(w.project_name)}</div>
-            <div><strong>Description:</strong> ${escapeHtml(w.work_description||'-')}</div>
-            <div><strong>Budget:</strong> ${formatMoney(w.budget)}</div>
-            <div><strong>Amount:</strong> ${formatMoney(w.amount)}</div>
-            <div><strong>Status:</strong> ${w.status}</div>
-            <div class="text-[9px] text-gray-400 mt-2">Created by: ${escapeHtml(w.created_by||'System')}</div>
-        `; 
-        openModal('viewDailyworkModal'); 
-    } 
-}
-function editDailyWork(id) { 
-    const w = dailyworkData.find(w=>w.id===id); 
-    if(w) { 
-        document.getElementById('dailyworkId').value = w.id; 
-        document.getElementById('dailyworkProjectName').value = w.project_name; 
-        document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0,16) : new Date().toISOString().slice(0,16); 
-        document.getElementById('dailyworkDesc').value = w.work_description||''; 
-        document.getElementById('dailyworkBudget').value = w.budget; 
-        document.getElementById('dailyworkAmount').value = w.amount; 
-        document.getElementById('dailyworkStatus').value = w.status; 
-        openModal('dailyworkModal'); 
-    } 
-}
-async function deleteDailyWork(id) { 
-    if(confirm('Delete this daily work record?')) { 
-        let res = await apiCall('delete_dailywork.php','POST',{id:parseInt(id),is_deleted:1}); 
-        if(res.success) { 
-            showToast('Deleted'); 
-            if(currentProjectId) { await loadDailyWorkForProject(currentProjectId); updateDailyWorkSummary(); } 
-            await loadDashboard(); 
-        } else showToast(res.message||'Failed', true); 
-    } 
-}
-function exportDailyWorkToExcel() { 
-    const project = projectsData.find(p=>p.id===currentProjectId); 
-    if(!project) return; 
-    const work = dailyworkData.filter(w=>w.project_id==currentProjectId); 
-    if(work.length===0) { showToast('No records', true); return; } 
-    let ws = [['Date/Time','Description','Budget','Amount','Status','Created By']]; 
-    work.forEach(w=>ws.push([new Date(w.date).toLocaleString(), w.work_description||'-', w.budget, w.amount, w.status, w.created_by||'System'])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); 
-    XLSX.writeFile(wb, `dailywork_${project.name}.xlsx`); 
-    showToast('Exported'); 
-}
-function exportDailyWorkToPDF() { 
-    const project = projectsData.find(p=>p.id===currentProjectId); 
-    if(!project) return; 
-    const work = dailyworkData.filter(w=>w.project_id==currentProjectId); 
-    if(work.length===0) { showToast('No records', true); return; } 
-    let rows = work.map(w=>`<tr><td class="border p-1">${new Date(w.date).toLocaleString()}</td><td class="border p-1">${escapeHtml(w.work_description||'-')}</td><td class="border p-1 text-right">${formatMoney(w.budget)}</td><td class="border p-1 text-right">${formatMoney(w.amount)}</td><td class="border p-1">${w.status}</td><td class="border p-1">${escapeHtml(w.created_by||'System')}</td></tr>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;}th,td{border:1px solid #be123c;padding:8px;}th{background:#be123c;color:white;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody></table><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
-}
-
-// ==================== UPLOAD DOCUMENTS ====================
-function openUploadProjectDocModal() { 
-    document.getElementById('projectDocTitle').value = ''; 
-    document.getElementById('projectDocDesc').value = ''; 
-    document.getElementById('projectDocFile').value = ''; 
-    document.getElementById('projectDocPreview').classList.add('hidden'); 
-    currentProjectDocFile = null; 
-    openModal('projectDocUploadModal'); 
-}
-document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
-    if(e.target.files && e.target.files[0]) { 
-        currentProjectDocFile = e.target.files[0]; 
-        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
-        document.getElementById('projectDocPreview').classList.remove('hidden'); 
-    } 
-});
-function removeProjectDocument() { 
-    currentProjectDocFile = null; 
-    document.getElementById('projectDocFile').value = ''; 
-    document.getElementById('projectDocPreview').classList.add('hidden'); 
-}
-async function saveProjectDocument() {
-    const title = document.getElementById('projectDocTitle').value.trim();
-    const description = document.getElementById('projectDocDesc').value;
-    if (!title) { showToast('Document title required', true); return; }
-    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('department_id', DEPARTMENT_ID);
-    formData.append('uploaded_by', CURRENT_USER);
-    formData.append('document_file', currentProjectDocFile);
-    const sendBtn = document.querySelector('#projectDocUploadModal .btn-primary');
-    const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
-    sendBtn.disabled = true;
-    try {
-        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
-        const result = await response.json();
-        if (result.success) { 
-            showToast('✅ Document uploaded successfully'); 
-            closeModal('projectDocUploadModal'); 
-            await loadProjects(); 
-        } else { 
-            showToast('❌ ' + (result.message || 'Upload failed'), true); 
-        }
-    } catch (error) { 
-        showToast('❌ Network error: ' + error.message, true); 
-    } finally { 
-        sendBtn.innerHTML = originalText; 
-        sendBtn.disabled = false; 
-    }
-}
-async function deleteProjectDocument(docId) {
-    if (confirm('Delete this document?')) {
-        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: CURRENT_USER });
-        if (res.success) { 
-            showToast('Document deleted'); 
-            await loadProjects(); 
-        } else { 
-            showToast(res.message || 'Failed', true); 
-        }
-    }
-}
-function exportDocumentToExcel(docId) { 
-    const doc = projectDocuments.find(d => d.id === docId); 
-    if(doc) { 
-        let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']]; 
-        ws.push([doc.title, doc.description||'-', doc.file_name, doc.uploaded_by, doc.created_at]); 
-        let wb = XLSX.utils.book_new(); 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Document'); 
-        XLSX.writeFile(wb, `document_${doc.id}.xlsx`); 
-        showToast('Exported'); 
-    } 
-}
-function exportDocumentToPDF(docId) { 
-    const doc = projectDocuments.find(d => d.id === docId); 
-    if(doc) { 
-        let w = window.open('', '_blank'); 
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
-        w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(doc.title)}</title><style>body{font-family:Arial;padding:20px;}h1{color:#be123c;}</style></head><body><h1>${escapeHtml(doc.title)}</h1><p><strong>Description:</strong> ${escapeHtml(doc.description||'-')}</p><p><strong>File:</strong> ${doc.file_name}</p><p><strong>Uploaded:</strong> ${doc.uploaded_by} at ${new Date(doc.created_at).toLocaleString()}</p><hr/><iframe src="${fileUrl}" width="100%" height="600px"></iframe><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-        w.document.close(); 
-        showToast("PDF preview opened - Click Print to save"); 
-    } 
-}
-function sendDocumentToDept(docId, deptId) { 
-    showToast(`Document sent to ${departmentNames[deptId] || 'Department'}`, false); 
-}
-
-function exportAllProjectDocsToExcel() { 
-    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
-    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']]; 
-    projectDocuments.forEach(d => ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Documents'); 
-    XLSX.writeFile(wb, `all_documents.xlsx`); 
-    showToast('Exported'); 
-}
-function exportAllProjectDocsToPDF() { 
-    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
-    let rows = projectDocuments.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><hr/></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Documents</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Documents</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
 }
 
 // ==================== SETTINGS ====================
