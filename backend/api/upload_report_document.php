@@ -1,71 +1,90 @@
 <?php
-error_reporting(0);
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST');
 header('Access-Control-Allow-Headers: Content-Type');
 
-require_once 'db_connect.php';
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 
-$response = ['success' => false, 'message' => 'Upload failed'];
+require_once '../config/database.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    
-    $title = isset($_POST['title']) ? trim($_POST['title']) : '';
-    $description = isset($_POST['description']) ? $_POST['description'] : '';
-    $period = isset($_POST['period']) ? $_POST['period'] : 'monthly';
-    $department_id = isset($_POST['department_id']) ? intval($_POST['department_id']) : 1;
-    $uploaded_by = isset($_POST['uploaded_by']) ? $_POST['uploaded_by'] : 'System';
-    
-    if (empty($title)) {
-        echo json_encode(['success' => false, 'message' => 'Title is required']);
-        exit;
-    }
-    
+$response = ['success' => false, 'message' => ''];
+
+try {
+    // Check if file was uploaded
     if (!isset($_FILES['report_file']) || $_FILES['report_file']['error'] !== UPLOAD_ERR_OK) {
-        echo json_encode(['success' => false, 'message' => 'Please select a valid file']);
-        exit;
+        $uploadError = isset($_FILES['report_file']) ? $_FILES['report_file']['error'] : 'No file';
+        throw new Exception('File upload failed. Error code: ' . $uploadError);
     }
-    
-    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/';
-    
+
+    $title = $_POST['title'] ?? '';
+    $period = $_POST['period'] ?? 'monthly';
+    $department_id = intval($_POST['department_id'] ?? 1);
+    $uploaded_by = $_POST['uploaded_by'] ?? 'System';
+
+    if (empty($title)) {
+        throw new Exception('Title is required');
+    }
+
+    // Create upload directory if not exists
+    $uploadDir = dirname(__DIR__, 2) . '/frontend/assets/uploads/reports/';
     if (!file_exists($uploadDir)) {
         mkdir($uploadDir, 0777, true);
     }
-    
+
+    // Generate unique filename
     $file = $_FILES['report_file'];
     $originalName = basename($file['name']);
-    $fileExt = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-    $allowedExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'gif', 'txt'];
-    
-    if (!in_array($fileExt, $allowedExts)) {
-        echo json_encode(['success' => false, 'message' => 'File type not allowed']);
-        exit;
+    $fileExt = pathinfo($originalName, PATHINFO_EXTENSION);
+    $fileName = 'report_' . time() . '_' . uniqid() . '.' . $fileExt;
+    $filePath = $uploadDir . $fileName;
+    $relativePath = '/geotraverse/frontend/assets/uploads/reports/' . $fileName;
+
+    // Move uploaded file
+    if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+        throw new Exception('Failed to save file to server. Check directory permissions.');
     }
+
+    // Save to database
+    $database = new Database();
+    $db = $database->getConnection();
+
+    $query = "INSERT INTO reports (title, period, content, file_name, file_path, file_type, file_size, department_id, created_by, status, created_at) 
+              VALUES (:title, :period, :content, :file_name, :file_path, :file_type, :file_size, :department_id, :created_by, 'draft', NOW())";
     
-    $newFileName = time() . '_' . uniqid() . '.' . $fileExt;
-    $uploadPath = $uploadDir . $newFileName;
+    $stmt = $db->prepare($query);
     
-    if (move_uploaded_file($file['tmp_name'], $uploadPath)) {
-        $filePathForDB = '/geotraverse/frontend/assets/uploads/reports/' . $newFileName;
-        $fileType = $file['type'];
-        $fileSize = $file['size'];
-        
-        $stmt = $conn->prepare("INSERT INTO report_documents (title, description, period, department_id, file_name, file_path, file_type, file_size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
-        $stmt->bind_param("sssissssis", $title, $description, $period, $department_id, $originalName, $filePathForDB, $fileType, $fileSize, $uploaded_by);
-        
-        if ($stmt->execute()) {
-            $response = ['success' => true, 'message' => 'Report uploaded successfully', 'document_id' => $stmt->insert_id];
-        } else {
-            unlink($uploadPath);
-            $response['message'] = 'Database error: ' . $stmt->error;
-        }
-        $stmt->close();
+    $content = "📎 UPLOADED REPORT\nTitle: " . $title . "\nFile: " . $originalName . "\nUploaded: " . date('Y-m-d H:i:s');
+    $fileSize = $file['size'];
+    $fileType = $file['type'];
+
+    $stmt->bindParam(':title', $title);
+    $stmt->bindParam(':period', $period);
+    $stmt->bindParam(':content', $content);
+    $stmt->bindParam(':file_name', $originalName);
+    $stmt->bindParam(':file_path', $relativePath);
+    $stmt->bindParam(':file_type', $fileType);
+    $stmt->bindParam(':file_size', $fileSize);
+    $stmt->bindParam(':department_id', $department_id);
+    $stmt->bindParam(':created_by', $uploaded_by);
+
+    if ($stmt->execute()) {
+        $response['success'] = true;
+        $response['message'] = 'Report uploaded successfully';
+        $response['file_path'] = $relativePath;
+        $response['id'] = $db->lastInsertId();
     } else {
-        $response['message'] = 'Failed to move uploaded file. Check folder permissions.';
+        // Delete file if database insert fails
+        if (file_exists($filePath)) {
+            unlink($filePath);
+        }
+        throw new Exception('Failed to save to database');
     }
+
+} catch (Exception $e) {
+    $response['message'] = $e->getMessage();
 }
 
 echo json_encode($response);
-$conn->close();
 ?>
