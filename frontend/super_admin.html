@@ -1849,31 +1849,142 @@ async function loadDailyWorkForProject(projectId) {
     const project = projectsData.find(p => p.id === projectId);
     const projectDailyWork = dailyworkData.filter(w => w.project_name === project?.name);
     const tbody = document.getElementById('dailyWorkTableBody');
+    const thead = document.getElementById('dailyWorkTableHeader');
+    
     if (!tbody) return;
-    if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</tr'; return; }
+    
+    if (projectDailyWork.length === 0) { 
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-400">No daily work records</td</tr'; 
+        if (thead) thead.innerHTML = ''; // Clear header
+        return; 
+    }
+    
+    // Determine what columns to show based on actual data
+    let hasBudget = false, hasAmount = false, hasQuantity = false, hasIncome = false, hasExpenses = false;
+    let hasBudgetAmount = false; // For budget vs amount (Super Admin style)
+    
+    for (let w of projectDailyWork) {
+        if (w.budget !== undefined && w.budget !== null && parseFloat(w.budget) !== 0) hasBudget = true;
+        if (w.amount !== undefined && w.amount !== null && parseFloat(w.amount) !== 0) hasAmount = true;
+        if (w.quantity_produced !== undefined && w.quantity_produced !== null) hasQuantity = true;
+        if (w.quantity_sold !== undefined && w.quantity_sold !== null) hasQuantity = true;
+        if (w.income !== undefined && w.income !== null && parseFloat(w.income) !== 0) hasIncome = true;
+        if (w.expenses !== undefined && w.expenses !== null && parseFloat(w.expenses) !== 0) hasExpenses = true;
+        // Check if we have budget and amount together (Super Admin style)
+        if ((w.budget !== undefined || w.amount !== undefined) && 
+            (parseFloat(w.budget) !== 0 || parseFloat(w.amount) !== 0)) hasBudgetAmount = true;
+    }
+    
+    // Also check from all dailywork data for consistency
+    const allWork = dailyworkData.filter(w => w.project_name === project?.name);
+    for (let w of allWork) {
+        if (w.budget !== undefined && parseFloat(w.budget) !== 0) hasBudget = true;
+        if (w.amount !== undefined && parseFloat(w.amount) !== 0) hasAmount = true;
+    }
+    
+    // Build header dynamically
+    let headers = ['<th>Date/Time</th>', '<th>Description</th>'];
+    
+    if (hasQuantity) {
+        headers.push('<th class="text-right">Produced</th>');
+        headers.push('<th class="text-right">Sold</th>');
+        if (hasIncome) headers.push('<th class="text-right">Price/Unit</th>');
+    }
+    
+    if (hasBudgetAmount || hasBudget || hasAmount) {
+        headers.push('<th class="text-right">Budget (TZS)</th>');
+        headers.push('<th class="text-right">Amount (TZS)</th>');
+        headers.push('<th class="text-right">Variance (TZS)</th>');
+    }
+    
+    if (hasIncome && hasExpenses) {
+        headers.push('<th class="text-right">Income (TZS)</th>');
+        headers.push('<th class="text-right">Expenses (TZS)</th>');
+        headers.push('<th class="text-right">Profit (TZS)</th>');
+    }
+    
+    headers.push('<th class="text-center">Status</th>');
+    headers.push('<th class="text-center">Actions</th>');
+    
+    if (thead) {
+        thead.innerHTML = `<tr>${headers.join('')}</tr>`;
+    }
+    
+    // Build rows
     let html = '';
     for (let w of projectDailyWork) {
-        html += `<tr id="daily-row-${w.id}"><td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td
-        <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td
-        <td class="p-2 text-xs text-right">${formatMoney(w.budget || 0)}</td
-        <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td
-        <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td
-        <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="softDeleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td
-    </tr>`;
+        let row = '<tr id="daily-row-${w.id}">';
+        row += `<td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>`;
+        row += `<td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>`;
+        
+        let budget = parseFloat(w.budget) || 0;
+        let amount = parseFloat(w.amount) || 0;
+        let variance = amount - budget;
+        let varianceClass = variance >= 0 ? 'text-green-600' : 'text-red-600';
+        
+        if (hasQuantity) {
+            row += `<td class="p-2 text-xs text-right">${w.quantity_produced || 0}</td>`;
+            row += `<td class="p-2 text-xs text-right">${w.quantity_sold || 0}</td>`;
+            if (hasIncome) {
+                let pricePerUnit = (w.quantity_sold > 0) ? (parseFloat(w.income) / w.quantity_sold) : 0;
+                row += `<td class="p-2 text-xs text-right">${formatMoney(pricePerUnit)}</td>`;
+            }
+        }
+        
+        if (hasBudgetAmount || hasBudget || hasAmount) {
+            row += `<td class="p-2 text-xs text-right">${formatMoney(budget)}</td>`;
+            row += `<td class="p-2 text-xs text-right">${formatMoney(amount)}</td>`;
+            row += `<td class="p-2 text-xs text-right ${varianceClass}">${formatMoney(variance)}</td>`;
+        }
+        
+        if (hasIncome && hasExpenses) {
+            let income = parseFloat(w.income) || 0;
+            let expenses = parseFloat(w.expenses) || 0;
+            let profit = income - expenses;
+            let profitClass = profit >= 0 ? 'text-green-600' : 'text-red-600';
+            row += `<td class="p-2 text-xs text-right">${formatMoney(income)}</td>`;
+            row += `<td class="p-2 text-xs text-right">${formatMoney(expenses)}</td>`;
+            row += `<td class="p-2 text-xs text-right ${profitClass}">${formatMoney(profit)}</td>`;
+        }
+        
+        // Status
+        let statusClass = w.status === 'completed' ? 'status-completed' : 
+                         w.status === 'partial' ? 'status-partial' : 'status-pending';
+        let statusText = w.status === 'completed' ? 'Completed' : 
+                        w.status === 'partial' ? 'Partial' : 'Pending';
+        row += `<td class="p-2 text-center"><span class="status-badge ${statusClass}">${statusText}</span></td>`;
+        
+        // Actions
+        row += `<td class="p-2 text-center">
+            <div class="flex gap-1 justify-center">
+                <button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
+                <button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
+                <button onclick="softDeleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
+            </div>
+        </td>`;
+        row += '</tr>';
+        html += row;
     }
     tbody.innerHTML = html;
 }
 function updateDailyWorkSummary() { 
     const project = projectsData.find(p=>p.id===currentProjectId); 
     if(!project) return; 
+    
+    // Calculate totals from daily work records
     let totalBudget = 0, totalAmount = 0; 
     dailyworkData.filter(w=>w.project_name===project.name).forEach(w=>{ 
-        totalBudget += parseFloat(w.budget)||0; 
-        totalAmount += parseFloat(w.amount)||0; 
+        totalBudget += parseFloat(w.budget)||0;      // This is the BUDGET ALLOCATED per day
+        totalAmount += parseFloat(w.amount)||0;      // This is the AMOUNT SPENT per day
     }); 
-    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget); 
-    document.getElementById('totalAmount').innerHTML = formatMoney(totalAmount); 
-    document.getElementById('remainingAmount').innerHTML = formatMoney((parseFloat(project.amount)||0)-totalAmount); 
+    
+    // Project amount is for reference only, NOT used for remaining calculation
+    // Remaining is based on total budget allocated minus total amount spent
+    let remainingBudget = totalBudget - totalAmount;
+    
+    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget);
+    document.getElementById('totalAmount').innerHTML = formatMoney(totalAmount);
+    document.getElementById('remainingAmount').innerHTML = formatMoney(remainingBudget);
 }
 function toggleDailyWorkTable() { 
     const c = document.getElementById('dailyWorkListContainer'); 
@@ -1956,30 +2067,96 @@ function exportDailyWorkToExcel() {
     if(!project) return; 
     const work = dailyworkData.filter(w=>w.project_name===project.name); 
     if(work.length===0) { showToast('No records', true); return; } 
-    let ws = [['Date/Time','Description','Budget','Amount','Status','Created By','Updated By']]; 
-    work.forEach(w=>ws.push([new Date(w.date).toLocaleString(), w.work_description||'-', w.budget, w.amount, w.status, w.created_by||'System', w.updated_by||'-'])); 
+    let ws = [['Date/Time','Description','Budget Allocated','Amount Spent','Variance','Status','Created By','Updated By']]; 
+    work.forEach(w=>{
+        let budget = parseFloat(w.budget) || 0;
+        let amount = parseFloat(w.amount) || 0;
+        let variance = amount - budget;
+        ws.push([
+            new Date(w.date).toLocaleString(), 
+            w.work_description||'-', 
+            budget, 
+            amount, 
+            variance,
+            w.status, 
+            w.created_by||'System', 
+            w.updated_by||'-'
+        ]);
+    }); 
     let wb = XLSX.utils.book_new(); 
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); 
     XLSX.writeFile(wb, `dailywork_${project.name}.xlsx`); 
     showToast('Exported'); 
 }
-function exportDailyWorkToPDF() { 
-    const project = projectsData.find(p=>p.id===currentProjectId); 
-    if(!project) return; 
-    const work = dailyworkData.filter(w=>w.project_name===project.name); 
-    if(work.length===0) { showToast('No records', true); return; } 
-    let rows = work.map(w=>`<tr><td class="border p-1">${new Date(w.date).toLocaleString()}</td
-        <td class="border p-1">${escapeHtml(w.work_description||'-')}</td
-        <td class="border p-1 text-right">${formatMoney(w.budget)}</td
-        <td class="border p-1 text-right">${formatMoney(w.amount)}</td
-        <td class="border p-1">${w.status}</td
-        <td class="border p-1">${escapeHtml(w.created_by||'System')}</td
-        <td class="border p-1">${escapeHtml(w.updated_by||'-')}</td
-    </tr>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;}th,td{border:1px solid #0f74ba;padding:8px;}th{background:#0f74ba;color:white;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th><th>Updated By</th></tr></thead><tbody>${rows}</tbody></tr><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened"); 
+async function loadDailyWorkForProject(projectId) {
+    await fetchDailyWork();
+    const project = projectsData.find(p => p.id === projectId);
+    const projectDailyWork = dailyworkData.filter(w => w.project_name === project?.name);
+    const tbody = document.getElementById('dailyWorkTableBody');
+    
+    if (!tbody) return;
+    
+    console.log('Daily work records:', projectDailyWork); // Debug
+    
+    if (projectDailyWork.length === 0) { 
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:#9ca3af;">No daily work records</td></tr>'; 
+        return; 
+    }
+    
+    let html = '';
+    for (let w of projectDailyWork) {
+        let budget = parseFloat(w.budget) || 0;
+        let amount = parseFloat(w.amount) || 0;
+        let statusClass = w.status === 'completed' ? 'status-completed' : 
+                         w.status === 'partial' ? 'status-partial' : 'status-pending';
+        let statusText = w.status === 'completed' ? 'Completed' : 
+                        w.status === 'partial' ? 'Partial' : 'Pending';
+        
+        // Create a proper table row with separate cells
+        html += '<tr style="border-bottom:1px solid #e5e7eb;">';
+        
+        // Date/Time cell
+        html += '<td style="padding:12px 8px; white-space:nowrap; font-size:12px;">';
+        html += new Date(w.date).toLocaleString();
+        html += '</td>';
+        
+        // Description cell
+        html += '<td style="padding:12px 8px; font-size:12px; word-break:break-word;">';
+        html += escapeHtml(w.work_description || '-');
+        html += '</td>';
+        
+        // Budget cell (right aligned)
+        html += '<td style="padding:12px 8px; text-align:right; font-size:12px;">';
+        html += formatMoney(budget);
+        html += '</td>';
+        
+        // Amount cell (right aligned)
+        html += '<td style="padding:12px 8px; text-align:right; font-size:12px;">';
+        html += formatMoney(amount);
+        html += '</td>';
+        
+        // Status cell (center aligned)
+        html += '<td style="padding:12px 8px; text-align:center;">';
+        html += '<span class="status-badge ' + statusClass + '" style="padding:3px 10px; border-radius:20px; font-size:10px;">';
+        html += statusText;
+        html += '</span>';
+        html += '</td>';
+        
+        // Actions cell (center aligned)
+        html += '<td style="padding:12px 8px; text-align:center;">';
+        html += '<div class="flex gap-1 justify-center">';
+        html += '<button onclick="viewDailyWork(' + w.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>';
+        html += '<button onclick="editDailyWork(' + w.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>';
+        html += '<button onclick="softDeleteDailyWork(' + w.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>';
+        html += '</div>';
+        html += '</td>';
+        
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
+    
+    // Update summary
+    updateDailyWorkSummary();
 }
 
 function openAddProjectModal() { 

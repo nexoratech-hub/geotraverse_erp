@@ -1070,35 +1070,90 @@ async function viewProjectDetails(id) {
 // ==================== DAILY WORK ====================
 async function loadDailyWorkForProject(projectId) {
     await fetchDailyWork();
+    
+    // Filter daily work for this specific project
     const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
     const tbody = document.getElementById('dailyWorkTableBody');
     if (!tbody) return;
-    if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td</tr'; return; }
+    
+    console.log('Loading daily work for project:', projectId, 'Records found:', projectDailyWork.length);
+    
+    if (projectDailyWork.length === 0) { 
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>'; 
+        return; 
+    }
+    
     let html = '';
     for (let w of projectDailyWork) {
+        // Get budget and amount - CORRECT columns
+        let budgetValue = (w.budget !== undefined && w.budget !== null) ? parseFloat(w.budget) : 0;
+        let amountValue = (w.amount !== undefined && w.amount !== null) ? parseFloat(w.amount) : 0;
+        let workDesc = w.work_description || '-';
+        let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+        
+        // Determine status class
+        let statusClass = '';
+        let statusText = w.status || 'pending';
+        if (statusText === 'completed') {
+            statusClass = 'status-completed';
+        } else if (statusText === 'partial') {
+            statusClass = 'status-partial';
+        } else {
+            statusClass = 'status-pending';
+        }
+        
         html += `<tr id="daily-row-${w.id}">
-            <td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>
-            <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
-            <td class="p-2 text-xs text-right">${formatMoney(w.budget || 0)}</td
-            <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td
-            <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td>
-            <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
-        </table>`;
+            <td class="p-2 text-xs">${escapeHtml(recordDate)}</td>
+            <td class="p-2 text-xs">${escapeHtml(workDesc)}</td>
+            <td class="p-2 text-xs text-right">${formatMoney(budgetValue)}</td>
+            <td class="p-2 text-xs text-right">${formatMoney(amountValue)}</td>
+            <td class="p-2 text-center"><span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></td>
+            <td class="p-2 text-center">
+                <div class="flex gap-1 justify-center">
+                    <button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
+                    <button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
+                </div>
+            </td>
+        </tr>`;
     }
     tbody.innerHTML = html;
 }
 
 function updateDailyWorkSummary() { 
-    const project = projectsData.find(p=>p.id===currentProjectId); 
+    const project = projectsData.find(p => p.id === currentProjectId); 
     if(!project) return; 
+    
     let totalBudget = 0, totalAmount = 0; 
-    dailyworkData.filter(w=>w.project_id==currentProjectId).forEach(w=>{ 
-        totalBudget += parseFloat(w.budget)||0; 
-        totalAmount += parseFloat(w.amount)||0; 
-    }); 
-    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget); 
-    document.getElementById('totalAmount').innerHTML = formatMoney(totalAmount); 
-    document.getElementById('remainingAmount').innerHTML = formatMoney((parseFloat(project.amount)||0)-totalAmount); 
+    const projectWork = dailyworkData.filter(w => w.project_id == currentProjectId);
+    
+    for (let w of projectWork) { 
+        totalBudget += parseFloat(w.budget) || 0; 
+        totalAmount += parseFloat(w.amount) || 0; 
+    } 
+    
+    // Calculate remaining based on BUDGET only, NOT project amount
+    let remainingBudget = totalBudget - totalAmount;
+    
+    // Update summary elements
+    const totalBudgetSpan = document.getElementById('totalBudget');
+    const totalAmountSpan = document.getElementById('totalAmount');
+    const remainingAmountSpan = document.getElementById('remainingAmount');
+    
+    if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatMoney(totalBudget);
+    if (totalAmountSpan) totalAmountSpan.innerHTML = formatMoney(totalAmount);
+    if (remainingAmountSpan) {
+        remainingAmountSpan.innerHTML = formatMoney(remainingBudget);
+        
+        // Add color coding for remaining budget
+        if (remainingBudget < 0) {
+            remainingAmountSpan.style.color = '#ef4444'; // Red for overspent
+        } else if (remainingBudget === 0) {
+            remainingAmountSpan.style.color = '#f59e0b'; // Yellow for exact
+        } else {
+            remainingAmountSpan.style.color = '#10b981'; // Green for remaining
+        }
+    }
 }
 
 function toggleDailyWorkTable() { 
@@ -1141,18 +1196,75 @@ function openDailyWorkModalForProject(projectId) {
 async function saveDailyWork() { 
     let id = document.getElementById('dailyworkId').value; 
     let datetime = document.getElementById('dailyworkDateTime').value; 
+    let projectId = document.getElementById('dailyworkProjectId').value;
     let projectName = document.getElementById('dailyworkProjectName').value; 
     let budget = parseMoneyValue(document.getElementById('dailyworkBudget').value); 
     let amount = parseMoneyValue(document.getElementById('dailyworkAmount').value); 
-    if(!datetime) { showToast('Date & Time required', true); return; } 
-    let data = { date: datetime, project_name: projectName, work_description: document.getElementById('dailyworkDesc').value, budget: budget, amount: amount, status: document.getElementById('dailyworkStatus').value, department_id: DEPARTMENT_ID, created_by: CURRENT_USER }; 
-    let res = id ? await apiCall('update_dailywork.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_dailywork.php','POST',data); 
-    if(res.success) { 
-        showToast(id ? 'Updated' : 'Added'); 
-        closeModal('dailyworkModal'); 
-        if(currentProjectId) { await loadDailyWorkForProject(currentProjectId); updateDailyWorkSummary(); } 
-        await loadDashboard(); 
-    } else showToast(res.message||'Failed', true); 
+    let description = document.getElementById('dailyworkDesc').value;
+    let status = document.getElementById('dailyworkStatus').value;
+    
+    if(!datetime) { 
+        showToast('Date & Time required', true); 
+        return; 
+    }
+    
+    if(!projectName) {
+        showToast('Project name required', true);
+        return;
+    }
+    
+    // Build data object with correct fields for Architectural department
+    let data = { 
+        date: datetime,
+        project_id: parseInt(projectId) || null,
+        project_name: projectName,
+        work_description: description,
+        budget: budget,
+        amount: amount,
+        status: status,
+        department_id: DEPARTMENT_ID,
+        created_by: CURRENT_USER,
+        work_type: 'general'  // General type for architectural work
+    };
+    
+    const sendBtn = document.querySelector('#dailyworkModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+    sendBtn.disabled = true;
+    
+    try {
+        let res;
+        if (id) {
+            // Update existing record
+            data.updated_by = CURRENT_USER;
+            res = await apiCall('update_dailywork.php', 'POST', { ...data, id: parseInt(id) });
+        } else {
+            // Add new record
+            res = await apiCall('add_dailywork.php', 'POST', data);
+        }
+        
+        if(res && res.success) { 
+            showToast(id ? 'Daily work updated' : 'Daily work added'); 
+            addLog(id ? `Daily work updated for ${projectName}` : `Daily work added for ${projectName}`);
+            closeModal('dailyworkModal'); 
+            
+            // Refresh the daily work display for current project
+            if(currentProjectId) { 
+                await fetchDailyWork();           // Fetch fresh data from server
+                await loadDailyWorkForProject(currentProjectId);  // Reload the table
+                updateDailyWorkSummary();          // Update summary cards
+            } 
+            await loadDashboard(); 
+        } else { 
+            showToast(res?.message || 'Failed to save daily work', true); 
+        }
+    } catch(e) {
+        console.error('Save daily work error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
 }
 
 async function viewDailyWork(id) { 
