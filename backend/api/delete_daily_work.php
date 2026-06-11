@@ -1,22 +1,37 @@
 <?php
-require_once 'config.php';
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, DELETE, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-$data = json_decode(file_get_contents('php://input'), true);
+require_once '../config/database.php';
 
-if (!$data || empty($data['id'])) {
-    sendResponse(false, 'Daily work ID required');
-}
+$database = new Database();
+$db = $database->getConnection();
 
-try {
-    $stmt = $pdo->prepare("UPDATE daily_work SET is_deleted = 1 WHERE id = :id");
-    $stmt->execute(['id' => $data['id']]);
-    
-    // Add to recycle bin
-    $stmt2 = $pdo->prepare("INSERT INTO recycle_bin (item_id, item_type, item_name) VALUES (?, 'daily_work', (SELECT project_name FROM daily_work WHERE id = ?))");
-    $stmt2->execute([$data['id'], $data['id']]);
-    
-    sendResponse(true, 'Daily work moved to recycle bin');
-} catch(PDOException $e) {
-    sendResponse(false, 'Database error: ' . $e->getMessage());
+$data = json_decode(file_get_contents("php://input"));
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'DELETE') {
+    $id = $data->id ?? null;
+    $is_deleted = $data->is_deleted ?? 1;
+
+    if (!$id) {
+        echo json_encode(['success' => false, 'message' => 'ID is required']);
+        exit;
+    }
+
+    // Soft delete - just mark as deleted
+    $query = "UPDATE daily_work SET is_deleted = :is_deleted, updated_at = NOW() WHERE id = :id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':id', $id);
+    $stmt->bindParam(':is_deleted', $is_deleted);
+
+    if ($stmt->execute()) {
+        echo json_encode(['success' => true, 'message' => 'Daily work deleted successfully']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to delete daily work']);
+    }
+} else {
+    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
 }
 ?>

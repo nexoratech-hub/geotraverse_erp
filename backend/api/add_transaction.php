@@ -1,44 +1,48 @@
 <?php
+require_once 'config.php';
+
+// Ensure JSON response is sent
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
-require_once 'db_connect.php';
+// Get input data
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
 
-$data = json_decode(file_get_contents('php://input'), true);
+// Debug: Log the received data
+error_log("Add transaction received: " . $input);
 
 if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'Invalid data']);
+    echo json_encode(['success' => false, 'message' => 'Invalid JSON data received']);
     exit;
 }
 
-$type = $data['type'] ?? 'expense';
-$source = $data['source'] ?? '';
-$amount = $data['amount'] ?? 0;
-$transaction_date = $data['transaction_date'] ?? date('Y-m-d');
-$status = $data['status'] ?? 'pending';
-$paid_amount = $data['paid_amount'] ?? 0;
-$description = $data['description'] ?? '';
-$department_id = $data['department_id'] ?? 0;
-
-if (empty($source) || $amount <= 0) {
-    echo json_encode(['success' => false, 'message' => 'Source and amount required']);
+if (empty($data['source']) || empty($data['amount'])) {
+    echo json_encode(['success' => false, 'message' => 'Source and amount are required']);
     exit;
 }
 
 try {
-    $query = "INSERT INTO transactions (type, source, amount, transaction_date, status, paid_amount, description, department_id, created_at) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param('ssdssdsi', $type, $source, $amount, $transaction_date, $status, $paid_amount, $description, $department_id);
-    $stmt->execute();
+    $stmt = $pdo->prepare("INSERT INTO transactions (type, source, amount, paid_amount, transaction_date, status, description, department_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     
-    echo json_encode(['success' => true, 'message' => 'Transaction added successfully', 'id' => $conn->insert_id]);
+    $result = $stmt->execute([
+        $data['type'] ?? 'expense',
+        $data['source'],
+        $data['amount'] ?? 0,
+        $data['paid_amount'] ?? ($data['status'] === 'partial' ? ($data['paid_amount'] ?? 0) : ($data['amount'] ?? 0)),
+        $data['transaction_date'] ?? date('Y-m-d'),
+        $data['status'] ?? 'pending',
+        $data['description'] ?? null,
+        $data['department_id'] ?? 1,
+        $data['created_by'] ?? 'System'
+    ]);
     
-} catch (Exception $e) {
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    if ($result) {
+        echo json_encode(['success' => true, 'message' => 'Transaction added successfully', 'id' => $pdo->lastInsertId()]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to insert transaction']);
+    }
+} catch(PDOException $e) {
+    error_log("Database error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
-
-$conn->close();
 ?>

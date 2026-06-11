@@ -9,68 +9,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-require_once '../config/database.php';
+require_once 'config/db_connection.php';
 
 $data = json_decode(file_get_contents('php://input'), true);
 
 if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'Invalid request data']);
+    echo json_encode(['success' => false, 'message' => 'Invalid data']);
     exit();
 }
 
-$database = new Database();
-$db = $database->getConnection();
-
-try {
-    $query = "INSERT INTO daily_work (work_type, project_id, project_name, campaign_id, campaign_name, date, work_description, 
-              quantity_produced, quantity_sold, price_per_unit, income, expenses, budget, amount, status, department_id, created_by) 
-              VALUES (:work_type, :project_id, :project_name, :campaign_id, :campaign_name, :date, :work_description,
-              :quantity_produced, :quantity_sold, :price_per_unit, :income, :expenses, :budget, :amount, :status, :dept_id, :created_by)";
-    
-    $stmt = $db->prepare($query);
-    
-    $workType = isset($data['work_type']) ? $data['work_type'] : 'general';
-    $projectId = isset($data['project_id']) ? $data['project_id'] : null;
-    $projectName = isset($data['project_name']) ? $data['project_name'] : '';
-    $campaignId = isset($data['campaign_id']) ? $data['campaign_id'] : null;
-    $campaignName = isset($data['campaign_name']) ? $data['campaign_name'] : null;
-    $date = isset($data['date']) ? $data['date'] : date('Y-m-d H:i:s');
-    $description = isset($data['work_description']) ? $data['work_description'] : '';
-    $quantityProduced = isset($data['quantity_produced']) ? intval($data['quantity_produced']) : 0;
-    $quantitySold = isset($data['quantity_sold']) ? intval($data['quantity_sold']) : 0;
-    $pricePerUnit = isset($data['price_per_unit']) ? floatval($data['price_per_unit']) : 0;
-    $income = isset($data['income']) ? floatval($data['income']) : 0;
-    $expenses = isset($data['expenses']) ? floatval($data['expenses']) : 0;
-    $budget = isset($data['budget']) ? floatval($data['budget']) : 0;
-    $amount = isset($data['amount']) ? floatval($data['amount']) : 0;
-    $status = isset($data['status']) ? $data['status'] : 'pending';
-    $departmentId = isset($data['department_id']) ? intval($data['department_id']) : null;
-    $createdBy = isset($data['created_by']) ? $data['created_by'] : 'System';
-    
-    $stmt->bindParam(':work_type', $workType);
-    $stmt->bindParam(':project_id', $projectId);
-    $stmt->bindParam(':project_name', $projectName);
-    $stmt->bindParam(':campaign_id', $campaignId);
-    $stmt->bindParam(':campaign_name', $campaignName);
-    $stmt->bindParam(':date', $date);
-    $stmt->bindParam(':work_description', $description);
-    $stmt->bindParam(':quantity_produced', $quantityProduced);
-    $stmt->bindParam(':quantity_sold', $quantitySold);
-    $stmt->bindParam(':price_per_unit', $pricePerUnit);
-    $stmt->bindParam(':income', $income);
-    $stmt->bindParam(':expenses', $expenses);
-    $stmt->bindParam(':budget', $budget);
-    $stmt->bindParam(':amount', $amount);
-    $stmt->bindParam(':status', $status);
-    $stmt->bindParam(':dept_id', $departmentId);
-    $stmt->bindParam(':created_by', $createdBy);
-    
-    if ($stmt->execute()) {
-        echo json_encode(['success' => true, 'message' => 'Daily work added successfully', 'id' => $db->lastInsertId()]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Failed to add daily work']);
+// Required fields
+$required = ['date', 'project_name', 'work_type', 'department_id', 'created_by'];
+foreach ($required as $field) {
+    if (empty($data[$field])) {
+        echo json_encode(['success' => false, 'message' => "Missing field: $field"]);
+        exit();
     }
-} catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
+
+// Prepare data
+$date = $data['date'];
+$project_name = $data['project_name'];
+$work_type = $data['work_type'];
+$work_description = $data['work_description'] ?? '';
+$quantity_produced = $data['quantity_produced'] ?? 0;
+$quantity_sold = $data['quantity_sold'] ?? 0;
+$price_per_unit = $data['price_per_unit'] ?? 0;
+$total_amount = $data['total_amount'] ?? ($quantity_sold * $price_per_unit);
+$income = $data['income'] ?? $total_amount;
+$expenses = $data['expenses'] ?? 0;
+$payment_status = $data['payment_status'] ?? 'pending';
+$partial_amount = $data['partial_amount'] ?? 0;
+$status = $data['status'] ?? $payment_status;
+$department_id = $data['department_id'];
+$created_by = $data['created_by'];
+
+$query = "INSERT INTO daily_work (date, project_name, work_type, work_description, 
+          quantity_produced, quantity_sold, price_per_unit, total_amount, income, 
+          expenses, payment_status, partial_amount, status, department_id, created_by, created_at) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+
+$stmt = $conn->prepare($query);
+$stmt->bind_param("ssssiiidddsssiss", 
+    $date, $project_name, $work_type, $work_description,
+    $quantity_produced, $quantity_sold, $price_per_unit, $total_amount, $income,
+    $expenses, $payment_status, $partial_amount, $status, $department_id, $created_by
+);
+
+if ($stmt->execute()) {
+    $id = $conn->insert_id;
+    echo json_encode(['success' => true, 'message' => 'Daily work added', 'id' => $id]);
+} else {
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $stmt->error]);
+}
+
+$stmt->close();
+$conn->close();
 ?>
