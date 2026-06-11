@@ -11,7 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <style>
         * { font-family: 'Inter', sans-serif; }
@@ -39,8 +38,10 @@
         body.dark-mode .status-paid { background: #064e3b; color: #34d399; }
         body.dark-mode .status-partial { background: #451a03; color: #fbbf24; }
         body.dark-mode .scroll-top { background: #4338ca; }
-        body.dark-mode .toast-notification { background: #1f2937; color: white; }
-        body.dark-mode .toast-notification.error { background: #7f1d1d; }
+        body.dark-mode .doc-info-container { background: #0f172a; border-color: #334155; }
+        body.dark-mode .doc-info-item { border-bottom-color: #334155; }
+        body.dark-mode .doc-info-label { color: #94a3b8; }
+        body.dark-mode .doc-info-value { color: #f1f5f9; }
         
         .search-highlight {
             background: #fef3c7 !important;
@@ -89,6 +90,7 @@
         .action-btn.preview { background: #8b5cf6; color: white; }
         .action-btn.send { background: #10b981; color: white; }
         .action-btn.restore { background: #10b981; color: white; }
+        .action-btn.download { background: #10b981; color: white; }
         
         .status-badge { padding: 3px 8px; border-radius: 16px; font-size: 10px; font-weight: 500; display: inline-block; }
         .status-pending { background: #fef3c7; color: #d97706; }
@@ -129,6 +131,7 @@
         
         .project-image { width: 100%; height: 200px; object-fit: cover; cursor: pointer; background: #f3f4f6; }
         .no-image { width: 100%; height: 200px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; color: #9ca3af; flex-direction: column; }
+        .no-image i { font-size: 48px; margin-bottom: 8px; }
         .new-badge { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border-radius: 20px; padding: 3px 10px; font-size: 9px; font-weight: bold; z-index: 10; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
         
@@ -138,7 +141,8 @@
         .search-result-item:hover { background-color: #f3f4f6; }
         
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
-        .modal-content { background: white; border-radius: 20px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; padding: 20px; animation: fadeIn 0.2s ease; }
+        .modal-content { background: white; border-radius: 20px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; padding: 0; animation: fadeIn 0.2s ease; }
+        .modal-content .modal-body { padding: 20px; }
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         
         .form-group { margin-bottom: 14px; }
@@ -176,16 +180,9 @@
         .toast-notification { position: fixed; bottom: 20px; right: 20px; background: #10b981; color: white; padding: 10px 16px; border-radius: 10px; z-index: 1000; animation: slideInRight 0.3s ease; font-size: 12px; }
         .toast-notification.error { background: #ef4444; }
         
-        .file-preview-container { min-height: 300px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
-        .file-preview-container img { max-width: 100%; max-height: 400px; object-fit: contain; }
-        .file-preview-container iframe { width: 100%; height: 500px; border: none; }
-        
         .recycle-bin-item { background: white; border-radius: 12px; padding: 12px; margin-bottom: 8px; border-left: 4px solid #f59e0b; display: flex; justify-content: space-between; align-items: center; }
         
         .user-info { font-size: 9px; color: #6b7280; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e5e7eb; }
-        
-        .income-row { background-color: #f0fdf4; }
-        .expense-row { background-color: #fef2f2; }
         
         .tab-container { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
         .tab-button { padding: 8px 24px; border-radius: 30px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; background: white; border: 1px solid #e5e7eb; color: #374151; }
@@ -209,8 +206,7 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 12px;
-            min-width: 900px;
-            table-layout: fixed;
+            min-width: 700px;
         }
         .requests-table th {
             background: #4338ca;
@@ -229,35 +225,42 @@
         .requests-table tr:hover {
             background: #eef2ff;
         }
-        body.dark-mode .requests-table th {
-            background: #4338ca;
-        }
-        body.dark-mode .requests-table tr:hover {
-            background: #2d1b2e;
-        }
         
-        .date-cell {
-            white-space: nowrap;
-            font-family: monospace;
+        .date-cell { white-space: nowrap; font-family: monospace; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        
+        .project-detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+        .info-label { font-weight: 600; color: #4338ca; }
+        body.dark-mode .info-label { color: #a5b4fc; }
+        
+        .modal-header { background: linear-gradient(135deg, #4338ca, #3730a3); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; border-radius: 20px 20px 0 0; }
+        .modal-header h3 { color: white; font-weight: bold; font-size: 18px; margin: 0; }
+        .modal-header button { background: none; border: none; color: white; font-size: 28px; cursor: pointer; line-height: 1; }
+        
+        .doc-info-container {
+            max-width: 550px;
+            margin: 0 auto;
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
         }
-        .text-right {
-            text-align: right;
+        .doc-info-item {
+            display: flex;
+            padding: 10px 0;
+            border-bottom: 1px solid #e5e7eb;
         }
-        .text-center {
-            text-align: center;
-        }
-        .project-detail-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .info-label {
+        .doc-info-label {
+            width: 130px;
             font-weight: 600;
-            color: #4338ca;
+            color: #374151;
+            flex-shrink: 0;
         }
-        body.dark-mode .info-label {
-            color: #a5b4fc;
+        .doc-info-value {
+            flex: 1;
+            word-break: break-word;
+            color: #1f2937;
         }
     </style>
 </head>
@@ -274,7 +277,7 @@
     <aside id="mainSidebar" class="sidebar shadow-xl flex flex-col z-20">
         <div class="px-5 py-5 border-b border-white/20 flex-shrink-0">
             <div class="flex items-center gap-3 cursor-pointer" onclick="goToMainWebsite()">
-                <div class="sidebar-logo"><img src="https://i.postimg.cc/MT6jTVHh/weblogo.png" alt="GeoTraverse Logo" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%234338ca%22/%3E%3Ctext x=%2250%22 y=%2265%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2240%22 font-weight=%22bold%22%3EG%3C/text%3E%3C/svg%3E';"></div>
+                <div class="sidebar-logo"><img src="https://i.postimg.cc/MT6jTVHh/weblogo.png" alt="GeoTraverse Logo" style="width:42px;height:42px;border-radius:10px;object-fit:contain;" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%234338ca%22/%3E%3Ctext x=%2250%22 y=%2265%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2240%22 font-weight=%22bold%22%3EG%3C/text%3E%3C/svg%3E';"></div>
                 <div><span class="text-lg font-bold text-white">GeoTraverse</span><p class="text-[9px] text-white/50">TOWN PLANNING ERP</p></div>
             </div>
         </div>
@@ -327,33 +330,80 @@
 </div>
 
 <!-- MODALS -->
-<div id="projectModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-plus-circle text-indigo-600 mr-2"></i>Add/Edit Project</h3><button onclick="closeModal('projectModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="editProjectId"><div class="form-group"><label>Project Name *</label><input type="text" id="projectName"></div><div class="form-group"><label>Client Name</label><input type="text" id="projectClient"></div><div class="form-group"><label>Amount (TZS)</label><input type="text" id="projectAmount" class="amount-input"></div><div class="form-group"><label>Location</label><input type="text" id="projectLocation"></div><div class="form-group"><label>Description</label><textarea id="projectDesc" rows="2"></textarea></div><div class="form-group"><label>Status</label><select id="projectStatus"><option>pending</option><option>in_progress</option><option>completed</option><option>approved</option></select></div><div class="form-group"><label>Progress (%)</label><input type="number" id="projectProgress" min="0" max="100"></div><div class="form-group"><label>Start Date</label><input type="date" id="projectStartDate"></div><div class="form-group"><label>End Date</label><input type="date" id="projectEndDate"></div>
-<div class="form-group"><label>Upload Image or PDF</label><div id="projImageUploadArea" class="image-upload-area" onclick="document.getElementById('projImageFile').click()"><i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i><p>Click to upload image or PDF</p></div><input type="file" id="projImageFile" accept="image/*,application/pdf" class="hidden"><div id="projImagePreviewContainer" class="hidden mt-2"><div id="projPreviewFile" class="flex items-center gap-2 p-2 bg-gray-100 rounded"><i id="previewIcon" class="fas fa-file-alt text-indigo-600"></i><span id="previewFileName"></span></div><button type="button" onclick="removeProjectImage()" class="mt-1 text-red-500 text-sm w-full">Remove</button></div></div>
+<div id="projectModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-plus-circle mr-2"></i>Add/Edit Project</h3><button onclick="closeModal('projectModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="editProjectId"><div class="form-group"><label>Project Name *</label><input type="text" id="projectName"></div><div class="form-group"><label>Client Name</label><input type="text" id="projectClient"></div><div class="form-group"><label>Amount (TZS)</label><input type="text" id="projectAmount" class="amount-input"></div><div class="form-group"><label>Location</label><input type="text" id="projectLocation"></div><div class="form-group"><label>Description</label><textarea id="projectDesc" rows="2"></textarea></div><div class="form-group"><label>Status</label><select id="projectStatus"><option>pending</option><option>in_progress</option><option>completed</option><option>approved</option></select></div><div class="form-group"><label>Progress (%)</label><input type="number" id="projectProgress" min="0" max="100"></div><div class="form-group"><label>Start Date</label><input type="date" id="projectStartDate"></div><div class="form-group"><label>End Date</label><input type="date" id="projectEndDate"></div>
+<div class="form-group"><label>Upload Image or PDF</label><div id="projImageUploadArea" class="image-upload-area" onclick="document.getElementById('projImageFile').click()"><i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i><p>Click to upload image or PDF (max 5MB)</p></div><input type="file" id="projImageFile" accept="image/*,application/pdf" class="hidden"><div id="projImagePreviewContainer" class="hidden mt-2"><div id="projPreviewFile" class="flex items-center gap-2 p-2 bg-gray-100 rounded"><i id="previewIcon" class="fas fa-file-alt text-indigo-600"></i><span id="previewFileName"></span></div><button type="button" onclick="removeProjectImage()" class="mt-1 text-red-500 text-sm w-full">Remove</button></div></div>
 <div class="flex gap-3"><button onclick="saveProject()" class="flex-1 btn-primary py-2 rounded">Save</button><button onclick="closeModal('projectModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="viewProjectModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-folder-open text-indigo-600 mr-2"></i>Project Details</h3><button onclick="closeModal('viewProjectModal')">&times;</button></div><div class="modal-body"><div id="viewProjectContent"></div><div id="viewProjButtons" class="detail-buttons"></div></div></div></div>
+<div id="viewProjectModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-folder-open mr-2"></i>Project Details</h3><button onclick="closeModal('viewProjectModal')">&times;</button></div><div class="modal-body"><div id="viewProjectContent"></div><div id="viewProjButtons" class="detail-buttons"></div></div></div></div>
 
-<div id="dailyworkModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-calendar-day mr-2"></i>Daily Work Record</h3><button onclick="closeModal('dailyworkModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="dailyworkId"><div class="form-group"><label>Date & Time</label><input type="datetime-local" id="dailyworkDateTime"></div><div class="form-group"><label>Project</label><input type="text" id="dailyworkProjectName" readonly class="bg-gray-100"></div><input type="hidden" id="dailyworkProjectId"><div class="form-group"><label>Work Description</label><textarea id="dailyworkDesc" rows="2"></textarea></div><div class="form-group"><label>Budget (TZS)</label><input type="text" id="dailyworkBudget" class="amount-input"></div><div class="form-group"><label>Amount Spent (TZS)</label><input type="text" id="dailyworkAmount" class="amount-input"></div><div class="form-group"><label>Status</label><select id="dailyworkStatus"><option value="pending">Pending</option><option value="partial">Partial</option><option value="completed">Completed</option></select></div><div class="flex gap-3"><button onclick="saveDailyWork()" class="flex-1 btn-primary py-2 rounded">Save</button><button onclick="closeModal('dailyworkModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="dailyworkModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-calendar-day mr-2"></i>Daily Work Record</h3><button onclick="closeModal('dailyworkModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="dailyworkId"><div class="form-group"><label>Date & Time</label><input type="datetime-local" id="dailyworkDateTime"></div><div class="form-group"><label>Project</label><input type="text" id="dailyworkProjectName" readonly class="bg-gray-100"></div><input type="hidden" id="dailyworkProjectId"><div class="form-group"><label>Work Description</label><textarea id="dailyworkDesc" rows="2"></textarea></div><div class="form-group"><label>Budget (TZS)</label><input type="text" id="dailyworkBudget" class="amount-input"></div><div class="form-group"><label>Amount Spent (TZS)</label><input type="text" id="dailyworkAmount" class="amount-input"></div><div class="form-group"><label>Status</label><select id="dailyworkStatus"><option value="pending">Pending</option><option value="partial">Partial</option><option value="completed">Completed</option></select></div><div class="flex gap-3"><button onclick="saveDailyWork()" class="flex-1 btn-primary py-2 rounded">Save</button><button onclick="closeModal('dailyworkModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="viewDailyworkModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-eye mr-2"></i>Daily Work Details</h3><button onclick="closeModal('viewDailyworkModal')">&times;</button></div><div class="modal-body"><div id="viewDailyworkContent"></div></div></div></div>
+<div id="viewDailyworkModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-eye mr-2"></i>Daily Work Details</h3><button onclick="closeModal('viewDailyworkModal')">&times;</button></div><div class="modal-body"><div id="viewDailyworkContent"></div></div></div></div>
 
-<div id="requestModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-hand-holding-usd text-orange-600 mr-2"></i>Add Fund Request</h3><button onclick="closeModal('requestModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="reqId"><div class="form-group"><label>Date *</label><input type="date" id="reqDate"></div><div class="form-group"><label>Type</label><select id="reqType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="reqSource" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="reqAmount" class="amount-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="reqDesc" rows="3"></textarea></div><div class="flex gap-3"><button onclick="submitRequest()" class="flex-1 btn-primary py-2 rounded">Submit</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="documentInfoModal" class="modal"><div class="modal-content" style="max-width: 600px;"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Document Information</h3><button onclick="closeModal('documentInfoModal')">&times;</button></div><div class="modal-body"><div id="documentInfoContent" class="doc-info-container"></div><div id="documentInfoButtons" class="detail-buttons mt-4"></div></div></div></div>
 
-<div id="viewRequestModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-hand-holding-usd text-orange-600 mr-2"></i>Request Details</h3><button onclick="closeModal('viewRequestModal')">&times;</button></div><div class="modal-body"><div id="viewRequestContent"></div><div id="viewRequestButtons" class="detail-buttons"></div></div></div></div>
+<div id="requestModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Add Fund Request</h3><button onclick="closeModal('requestModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="reqId"><div class="form-group"><label>Date *</label><input type="date" id="reqDate"></div><div class="form-group"><label>Type</label><select id="reqType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="reqSource" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="reqAmount" class="amount-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="reqDesc" rows="3"></textarea></div><div class="flex gap-3"><button onclick="submitRequest()" class="flex-1 btn-primary py-2 rounded">Submit</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="addReportModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-chart-line text-purple-600 mr-2"></i>Add Report</h3><button onclick="closeModal('addReportModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Title *</label><input type="text" id="newReportTitle"></div><div class="form-group"><label>Period</label><select id="newReportPeriod"><option>daily</option><option>weekly</option><option>monthly</option><option>quarterly</option><option>annual</option></select></div><div class="form-group"><label>Content *</label><textarea id="newReportContent" rows="6"></textarea></div><div class="flex gap-3"><button onclick="addReport()" class="flex-1 btn-primary py-2 rounded">Add</button><button onclick="closeModal('addReportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="viewRequestModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Request Details</h3><button onclick="closeModal('viewRequestModal')">&times;</button></div><div class="modal-body"><div id="viewRequestContent"></div><div id="viewRequestButtons" class="detail-buttons"></div></div></div></div>
 
-<div id="editReportModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-edit text-purple-600 mr-2"></i>Edit Report</h3><button onclick="closeModal('editReportModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="editReportId"><div class="form-group"><label>Title</label><input type="text" id="editReportTitle"></div><div class="form-group"><label>Period</label><select id="editReportPeriod"><option>daily</option><option>weekly</option><option>monthly</option><option>quarterly</option><option>annual</option></select></div><div class="form-group"><label>Content</label><textarea id="editReportContent" rows="6"></textarea></div><div class="flex gap-3"><button onclick="updateReport()" class="flex-1 btn-primary py-2 rounded">Update</button><button onclick="closeModal('editReportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="addReportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-chart-line mr-2"></i>Add Report</h3><button onclick="closeModal('addReportModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Title *</label><input type="text" id="newReportTitle"></div><div class="form-group"><label>Period</label><select id="newReportPeriod"><option>daily</option><option>weekly</option><option>monthly</option><option>quarterly</option><option>annual</option></select></div><div class="form-group"><label>Content *</label><textarea id="newReportContent" rows="6"></textarea></div><div class="flex gap-3"><button onclick="addReport()" class="flex-1 btn-primary py-2 rounded">Add</button><button onclick="closeModal('addReportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="viewReportModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-file-alt text-purple-600 mr-2"></i>Report Details</h3><button onclick="closeModal('viewReportModal')">&times;</button></div><div class="modal-body"><div id="viewReportContent" class="report-content-view"></div><div id="viewReportButtons" class="detail-buttons"></div></div></div></div>
+<div id="editReportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-edit mr-2"></i>Edit Report</h3><button onclick="closeModal('editReportModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="editReportId"><div class="form-group"><label>Title</label><input type="text" id="editReportTitle"></div><div class="form-group"><label>Period</label><select id="editReportPeriod"><option>daily</option><option>weekly</option><option>monthly</option><option>quarterly</option><option>annual</option></select></div><div class="form-group"><label>Content</label><textarea id="editReportContent" rows="6"></textarea></div><div class="flex gap-3"><button onclick="updateReport()" class="flex-1 btn-primary py-2 rounded">Update</button><button onclick="closeModal('editReportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="projectDocUploadModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-upload text-cyan-600 mr-2"></i>Upload Document</h3><button onclick="closeModal('projectDocUploadModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Document Title *</label><input type="text" id="projectDocTitle"></div><div class="form-group"><label>Description</label><textarea id="projectDocDesc" rows="2"></textarea></div><div class="form-group"><label>Select File</label><input type="file" id="projectDocFile" accept=".pdf,.doc,.docx,.xlsx,.jpg,.png" class="w-full border rounded p-1"><div id="projectDocPreview" class="hidden mt-2 text-xs text-gray-500"><i class="fas fa-file mr-1"></i><span id="projectDocFileName"></span></div></div><div class="flex gap-3"><button onclick="saveProjectDocument()" class="flex-1 btn-primary py-2 rounded">Upload</button><button onclick="closeModal('projectDocUploadModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="viewReportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Report Details</h3><button onclick="closeModal('viewReportModal')">&times;</button></div><div class="modal-body"><div id="viewReportContent" class="report-content-view"></div><div id="viewReportButtons" class="detail-buttons"></div></div></div></div>
 
-<div id="documentPreviewModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-file-alt text-cyan-600 mr-2"></i>Document Preview</h3><button onclick="closeModal('documentPreviewModal')">&times;</button></div><div class="modal-body"><div id="documentPreviewContent" class="file-preview-container"></div><div id="documentPreviewButtons" class="detail-buttons mt-3"></div></div></div></div>
+<div id="projectDocUploadModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-upload mr-2"></i>Upload Document</h3><button onclick="closeModal('projectDocUploadModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Document Title *</label><input type="text" id="projectDocTitle"></div><div class="form-group"><label>Description</label><textarea id="projectDocDesc" rows="2"></textarea></div><div class="form-group"><div class="image-upload-area" onclick="document.getElementById('projectDocFile').click()"><i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i><p>Click to upload document (PDF, DOC, XLS, Images)</p></div><input type="file" id="projectDocFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="hidden"><div id="projectDocPreview" class="hidden mt-2 text-xs text-gray-500"><i class="fas fa-file mr-1"></i><span id="projectDocFileName"></span></div></div><div class="flex gap-3"><button onclick="saveProjectDocument()" class="flex-1 btn-primary py-2 rounded">Upload</button><button onclick="closeModal('projectDocUploadModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
-<div id="backupRestoreModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-database text-green-600 mr-2"></i>Backup & Restore</h3><button onclick="closeModal('backupRestoreModal')">&times;</button></div><div class="modal-body"><div class="flex gap-3"><button onclick="createBackup()" class="flex-1 btn-success py-2 rounded">Backup</button><button onclick="restoreBackup()" class="flex-1 bg-orange-600 text-white py-2 rounded">Restore</button><button onclick="emptyRecycleBin()" class="flex-1 bg-red-600 text-white py-2 rounded">Empty Recycle Bin</button></div></div></div></div>
+<div id="uploadReportModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-upload mr-2"></i>Upload Report Document</h3>
+            <button onclick="closeModal('uploadReportModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Title *</label>
+                <input type="text" id="uploadReportTitle" required>
+            </div>
+            <div class="form-group">
+                <label>Period</label>
+                <select id="uploadReportPeriod">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <div class="image-upload-area" onclick="document.getElementById('reportFileInput').click()">
+                    <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
+                    <p>Click to upload document (PDF, DOC, XLS, Images) - Max 10MB</p>
+                </div>
+                <input type="file" id="reportFileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="hidden">
+            </div>
+            <div id="uploadedFilePreview" class="hidden mt-2">
+                <div class="flex justify-between items-center p-2 bg-gray-100 rounded">
+                    <span id="fileNameDisplay"></span>
+                    <div class="flex gap-2">
+                        <button onclick="previewUploadedFile()" class="action-btn view text-[9px]">Preview</button>
+                        <button onclick="removeUploadedFile()" class="action-btn delete text-[9px]">Remove</button>
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-3">
+                <button onclick="saveUploadedReport()" class="flex-1 btn-primary py-1.5 rounded">Save Report</button>
+                <button onclick="closeModal('uploadReportModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
 
-<div id="pwdModal" class="modal"><div class="modal-content"><div class="modal-header" style="background: linear-gradient(135deg, #4338ca, #3730a3);"><h3><i class="fas fa-key mr-2"></i>Change Password</h3><button onclick="closeModal('pwdModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Current Password</label><input type="password" id="oldPwd"></div><div class="form-group"><label>New Password</label><input type="password" id="newPwd"></div><div class="form-group"><label>Confirm Password</label><input type="password" id="confirmPwd"></div><div class="flex gap-3"><button onclick="changePassword()" class="flex-1 btn-primary py-2 rounded">Change</button><button onclick="closeModal('pwdModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+<div id="backupRestoreModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-database mr-2"></i>Backup & Restore</h3><button onclick="closeModal('backupRestoreModal')">&times;</button></div><div class="modal-body"><div class="flex gap-3"><button onclick="createBackup()" class="flex-1 btn-success py-2 rounded">Backup</button><button onclick="restoreBackup()" class="flex-1 bg-orange-600 text-white py-2 rounded">Restore</button><button onclick="emptyRecycleBin()" class="flex-1 bg-red-600 text-white py-2 rounded">Empty Recycle Bin</button></div></div></div></div>
+
+<div id="pwdModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-key mr-2"></i>Change Password</h3><button onclick="closeModal('pwdModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Current Password</label><input type="password" id="oldPwd"></div><div class="form-group"><label>New Password</label><input type="password" id="newPwd"></div><div class="form-group"><label>Confirm Password</label><input type="password" id="confirmPwd"></div><div class="flex gap-3"><button onclick="changePassword()" class="flex-1 btn-primary py-2 rounded">Change</button><button onclick="closeModal('pwdModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
+
+<div id="generateReportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-chart-line mr-2"></i>Generate Report</h3><button onclick="closeModal('generateReportModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Report Title</label><input type="text" id="genReportTitle" placeholder="Enter report title"></div><div class="form-group"><label>Period Type</label><select id="genPeriodType"><option value="daily">Daily (Today)</option><option value="weekly">Weekly (Last 7 days)</option><option value="monthly">Monthly (Last 30 days)</option><option value="quarterly">Quarterly (Last 3 months)</option><option value="annual">Annually (Last 12 months)</option></select></div><div class="flex gap-3 mt-3"><button onclick="generateAndSaveReport()" class="flex-1 btn-primary py-2 rounded">Generate & Save</button><button onclick="closeModal('generateReportModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
 <script>
 // ==================== MONEY FORMATTING ====================
@@ -417,9 +467,11 @@ function showToast(msg, isError) {
 }
 
 function addLog(action) { 
-    activityLogs.unshift({ action: action, created_at: new Date().toISOString() }); 
-    if (activityLogs.length > 100) activityLogs.pop(); 
-    localStorage.setItem('townplanning_activity_logs', JSON.stringify(activityLogs));
+    try {
+        activityLogs.unshift({ action: action, created_at: new Date().toISOString() }); 
+        if (activityLogs.length > 100) activityLogs.pop(); 
+        localStorage.setItem('townplanning_activity_logs', JSON.stringify(activityLogs));
+    } catch(e) { console.log("Log error:", e); }
 }
 
 function closeModal(id) { 
@@ -461,35 +513,162 @@ function closeFullImageModal() {
     if (modal) modal.style.display = 'none'; 
 }
 
-document.addEventListener('click', function(e) {
+// ==================== CLICK OUTSIDE MODAL TO CLOSE ====================
+window.addEventListener('click', function(e) {
     if (e.target.classList.contains('modal')) {
         closeModal(e.target.id);
     }
-    if (!e.target.closest('.send-dropdown')) {
-        document.querySelectorAll('.send-dropdown-content').forEach(d => d.style.display = 'none');
+});
+
+// ==================== FIXED UPLOAD REPORT FUNCTIONS ====================
+let currentUploadedFile = null;
+
+document.getElementById('reportFileInput')?.addEventListener('change', function(e) {
+    if (e.target.files && e.target.files[0]) {
+        currentUploadedFile = e.target.files[0];
+        const fileName = currentUploadedFile.name;
+        const fileSize = (currentUploadedFile.size / 1024).toFixed(2);
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        if (fileNameDisplay) {
+            fileNameDisplay.innerHTML = `<i class="fas fa-file mr-1"></i> ${fileName} (${fileSize} KB)`;
+        }
+        const previewContainer = document.getElementById('uploadedFilePreview');
+        if (previewContainer) {
+            previewContainer.classList.remove('hidden');
+        }
+        showToast(`File selected: ${fileName}`, false);
+    } else {
+        currentUploadedFile = null;
+        const previewContainer = document.getElementById('uploadedFilePreview');
+        if (previewContainer) {
+            previewContainer.classList.add('hidden');
+        }
     }
 });
 
-document.addEventListener('DOMContentLoaded', function() {
-    ['projectAmount', 'reqAmount', 'dailyworkBudget', 'dailyworkAmount'].forEach(id => { 
-        const el = document.getElementById(id); 
-        if (el) el.addEventListener('input', function() { formatMoneyInput(this); }); 
-    });
-});
+function previewUploadedFile() { 
+    if(currentUploadedFile) { 
+        const fileType = currentUploadedFile.type; 
+        if(fileType.startsWith('image/')) { 
+            const reader = new FileReader(); 
+            reader.onload = ev => showFullImage(ev.target.result); 
+            reader.readAsDataURL(currentUploadedFile); 
+        } else { 
+            const url = URL.createObjectURL(currentUploadedFile); 
+            window.open(url, '_blank'); 
+            URL.revokeObjectURL(url); 
+        } 
+    } else {
+        showToast('No file selected', true);
+    }
+}
+
+function removeUploadedFile() { 
+    currentUploadedFile = null; 
+    const fileInput = document.getElementById('reportFileInput');
+    const previewContainer = document.getElementById('uploadedFilePreview');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (fileInput) fileInput.value = ''; 
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (fileNameDisplay) fileNameDisplay.innerHTML = '';
+    showToast('File removed', false);
+}
+
+function openUploadReportModal() { 
+    document.getElementById('uploadReportTitle').value = ''; 
+    document.getElementById('uploadReportPeriod').value = 'monthly'; 
+    const previewContainer = document.getElementById('uploadedFilePreview');
+    const fileInput = document.getElementById('reportFileInput');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (previewContainer) previewContainer.classList.add('hidden'); 
+    if (fileInput) fileInput.value = '';
+    if (fileNameDisplay) fileNameDisplay.innerHTML = '';
+    currentUploadedFile = null; 
+    openModal('uploadReportModal'); 
+}
+
+async function saveUploadedReport() {
+    const title = document.getElementById('uploadReportTitle').value.trim();
+    const period = document.getElementById('uploadReportPeriod').value;
+    
+    if (!title) {
+        showToast('Title required', true);
+        return;
+    }
+    
+    if (!currentUploadedFile) {
+        showToast('Please select a file to upload', true);
+        return;
+    }
+    
+    if (currentUploadedFile.size > 10 * 1024 * 1024) {
+        showToast('File too large. Max size is 10MB', true);
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('period', period);
+    formData.append('department_id', DEPARTMENT_ID);
+    formData.append('uploaded_by', CURRENT_USER);
+    formData.append('report_file', currentUploadedFile);
+    
+    const sendBtn = document.querySelector('#uploadReportModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.disabled = true;
+    
+    try {
+        const response = await fetch(API_BASE + 'upload_report_document.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('✅ Report uploaded successfully!', false);
+            addLog(`Report uploaded: ${title}`);
+            closeModal('uploadReportModal');
+            
+            document.getElementById('uploadReportTitle').value = '';
+            document.getElementById('uploadReportPeriod').value = 'monthly';
+            const previewContainer = document.getElementById('uploadedFilePreview');
+            const fileInput = document.getElementById('reportFileInput');
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            if (previewContainer) previewContainer.classList.add('hidden');
+            if (fileInput) fileInput.value = '';
+            if (fileNameDisplay) fileNameDisplay.innerHTML = '';
+            currentUploadedFile = null;
+            
+            await renderReports();
+            await renderDashboard();
+        } else {
+            showToast('❌ ' + (result.message || 'Upload failed. Please try again.'), true);
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        showToast('❌ Network error: ' + error.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
+}
 
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 8;
-const CURRENT_USER = "Town Planning Manager";
-
-const allDepartmentsForSend = [ 
-    { id: 1, name: "👑 Super Admin" }, { id: 2, name: "Finance" }, { id: 3, name: "Sales & Marketing" }, 
-    { id: 4, name: "Manager" }, { id: 5, name: "Secretary" }, { id: 6, name: "Bricks & Timber" }, 
-    { id: 7, name: "Aluminium" }, { id: 9, name: "Architectural" }, { id: 10, name: "Survey" }, 
-    { id: 11, name: "Construction" }, { id: 12, name: "Hatimiliki" } 
-];
+let CURRENT_USER = "Town Planning Manager";
 
 const departmentNames = { 1: "Super Admin", 2: "Finance", 3: "Sales & Marketing", 4: "Manager", 5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium", 8: "Town Planning", 9: "Architectural", 10: "Survey", 11: "Construction", 12: "Hatimiliki" };
+
+const departmentIcons = { 1: "fa-crown", 2: "fa-coins", 3: "fa-chart-line", 4: "fa-user-tie", 5: "fa-calendar-check", 6: "fa-cubes", 7: "fa-industry", 8: "fa-city", 9: "fa-draw-polygon", 10: "fa-drafting-compass", 11: "fa-hard-hat", 12: "fa-file-contract" };
+
+const allDepartmentsForSend = Object.keys(departmentNames).filter(id => parseInt(id) !== DEPARTMENT_ID).map(id => ({ id: parseInt(id), name: departmentNames[id], icon: departmentIcons[id] || "fa-building" }));
 
 let projectsData = [], requestsData = [], reportsList = [], projectDocuments = [], uploadedReportsData = [], recycleBinData = [], dailyworkData = [];
 let currentProjectTab = 'added';
@@ -510,15 +689,11 @@ try {
     if (activityLogs.length === 0) activityLogs = [{ action: "Town Planning Dashboard initialized", created_at: new Date().toISOString() }];
 } catch(e) {}
 
-// ==================== API CALLS - CONNECTED TO DATABASE ====================
+// ==================== API CALLS ====================
 async function apiCall(endpoint, method = 'GET', data = null) {
     try {
         const url = API_BASE + endpoint;
-        const opts = { 
-            method, 
-            headers: { 'Content-Type': 'application/json' }, 
-            credentials: 'include' 
-        };
+        const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' };
         if (data && method !== 'GET') opts.body = JSON.stringify(data);
         const res = await fetch(url, opts);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -577,7 +752,7 @@ async function emptyRecycleBin() {
     } 
 }
 
-// ==================== FETCH FUNCTIONS - DATABASE ====================
+// ==================== FETCH FUNCTIONS ====================
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
@@ -664,31 +839,112 @@ function updateRequestBadge() {
     } 
 }
 
-function getProjectStatusClass(s) { 
-    const classes = { pending: "status-pending", in_progress: "status-progress", completed: "status-completed", approved: "status-approved" };
-    return classes[s] || "status-pending"; 
-}
-function getProjectStatusText(s) { 
-    const texts = { pending: "Pending", in_progress: "In Progress", completed: "Completed", approved: "Approved" };
-    return texts[s] || s; 
-}
-
-function getFileUrl(fileData) {
-    if (!fileData) return null;
-    if (fileData.startsWith('data:')) return fileData;
-    if (fileData.startsWith('http')) return fileData;
-    if (fileData.startsWith('/')) return fileData;
-    return null;
+function markProjectViewed(id) { 
+    if(!viewedProjectIds.includes(id)) { 
+        viewedProjectIds.push(id); 
+        localStorage.setItem('townplanning_viewedProjectIds', JSON.stringify(viewedProjectIds)); 
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
+        updateProjectBadge(); 
+    } 
 }
 
-function getImageAsBase64(file) { 
-    return new Promise((resolve) => { 
-        if(!file || !(file instanceof File)) { resolve(''); return; } 
-        if(file.size > 5 * 1024 * 1024) { showToast('File too large. Max 5MB', true); resolve(''); return; } 
-        let reader = new FileReader(); 
-        reader.onload = () => resolve(reader.result); 
-        reader.readAsDataURL(file); 
-    }); 
+function markReportViewed(id) { 
+    if(!viewedReportIds.includes(id)) { 
+        viewedReportIds.push(id); 
+        localStorage.setItem('townplanning_viewedReportIds', JSON.stringify(viewedReportIds)); 
+        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
+        updateReportBadge(); 
+    } 
+}
+
+function markRequestViewed(id) { 
+    if(!viewedRequestIds.includes(id)) { 
+        viewedRequestIds.push(id); 
+        localStorage.setItem('townplanning_viewedRequestIds', JSON.stringify(viewedRequestIds)); 
+        unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1); 
+        updateRequestBadge(); 
+    } 
+}
+
+// ==================== FIXED IMAGE PATH FUNCTION ====================
+function getCleanImageUrl(imagePath) {
+    if (!imagePath || imagePath === '' || imagePath === 'null' || imagePath === 'undefined') {
+        return null;
+    }
+    
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+        return imagePath;
+    }
+    
+    if (imagePath.startsWith('data:')) {
+        return imagePath;
+    }
+    
+    let cleanPath = imagePath;
+    while (cleanPath.startsWith('../')) {
+        cleanPath = cleanPath.substring(3);
+    }
+    while (cleanPath.startsWith('./')) {
+        cleanPath = cleanPath.substring(2);
+    }
+    
+    let finalUrl = '';
+    
+    if (cleanPath.startsWith('assets/')) {
+        finalUrl = '/geotraverse/frontend/' + cleanPath;
+    }
+    else if (cleanPath.startsWith('uploads/')) {
+        finalUrl = '/geotraverse/frontend/assets/' + cleanPath;
+    }
+    else if (cleanPath.startsWith('frontend/')) {
+        finalUrl = '/' + cleanPath;
+    }
+    else if (!cleanPath.includes('/')) {
+        finalUrl = '/geotraverse/frontend/assets/uploads/projects/' + cleanPath;
+    }
+    else {
+        finalUrl = '/geotraverse/frontend/' + cleanPath;
+    }
+    
+    return finalUrl;
+}
+
+async function uploadProjectImage(file) {
+    if (!file || !(file instanceof File)) return '';
+    if (file.size > 5 * 1024 * 1024) { 
+        showToast('Image too large. Max 5MB', true); 
+        return '';
+    }
+    
+    const formData = new FormData();
+    formData.append('project_image', file);
+    formData.append('department_id', DEPARTMENT_ID);
+    
+    try {
+        const response = await fetch(API_BASE + 'upload_project_image.php', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+        
+        if (result.success && result.file_path) {
+            let returnPath = result.file_path;
+            if (returnPath.startsWith('../../')) {
+                returnPath = returnPath.substring(6);
+            }
+            if (returnPath.startsWith('./')) {
+                returnPath = returnPath.substring(2);
+            }
+            return returnPath;
+        } else {
+            showToast(result.message || 'Upload failed', true);
+            return '';
+        }
+    } catch(e) {
+        console.error('Upload error:', e);
+        showToast('Network error during upload: ' + e.message, true);
+        return '';
+    }
 }
 
 document.getElementById('projImageFile')?.addEventListener('change', function(e) { 
@@ -718,6 +974,73 @@ function removeProjectImage() {
     if (fileInput) fileInput.value = ''; 
     if (previewContainer) previewContainer.classList.add('hidden'); 
     if (uploadArea) uploadArea.classList.remove('hidden'); 
+}
+
+// ==================== DOCUMENT INFO ====================
+function showDocumentInfo(doc, type) {
+    let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
+    let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    let fileUrl = '';
+    if (type === 'project') {
+        fileUrl = '/geotraverse/backend/api/download_document.php?id=' + doc.id + '&type=project';
+    } else if (type === 'uploaded_report') {
+        fileUrl = '/geotraverse/backend/api/download_report_document.php?id=' + doc.id;
+    } else {
+        fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
+    }
+    
+    let infoHtml = `
+        <div class="doc-info-container">
+            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+        </div>
+    `;
+    
+    document.getElementById('documentInfoContent').innerHTML = infoHtml;
+    
+    let deptOptions = ''; 
+    allDepartmentsForSend.forEach(d => { 
+        deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+    });
+    
+    document.getElementById('documentInfoButtons').innerHTML = `
+        <button onclick="downloadDocumentFile('${fileUrl}', '${escapeHtml(doc.file_name)}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
+        <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
+    `;
+    openModal('documentInfoModal');
+}
+
+function downloadDocumentFile(url, fileName) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`Downloading: ${fileName}`, false);
+}
+
+function sendDocumentToDept(docId, deptId, type) { 
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    showToast(`✅ Document sent to ${deptName}`, false);
+    toggleSendDropdown(`docSendDropdown-${docId}`);
+    closeModal('documentInfoModal');
+}
+
+function viewUploadedDocument(docId) {
+    const doc = projectDocuments.find(d => d.id === docId);
+    if(doc) showDocumentInfo(doc, 'project');
+}
+
+function viewUploadedReportDocument(docId) {
+    const doc = uploadedReportsData.find(d => d.id === docId);
+    if(doc) showDocumentInfo(doc, 'uploaded_report');
 }
 
 // ==================== DASHBOARD ====================
@@ -752,7 +1075,7 @@ async function renderDashboard() {
         </div>
         <div class="grid grid-cols-3 gap-3 mb-5">
             <button onclick="openAddProjectModal()" class="bg-indigo-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-plus-circle mr-2"></i>Add Project</button>
-            <button onclick="openModal('requestModal'); document.getElementById('reqId').value='';document.getElementById('reqDate').value=new Date().toISOString().split('T')[0];" class="bg-orange-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-plus-circle mr-2"></i>New Request</button>
+            <button onclick="openModal('requestModal'); document.getElementById('reqId').value='';document.getElementById('reqDate').value=new Date().toISOString().split('T')[0];document.getElementById('reqAmount').value='';document.getElementById('reqDesc').value='';" class="bg-orange-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-plus-circle mr-2"></i>New Request</button>
             <button onclick="openModal('addReportModal')" class="bg-purple-600 text-white py-2 rounded-lg text-sm"><i class="fas fa-chart-line mr-2"></i>Add Report</button>
         </div>
         <div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-indigo-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">${activityLogs.slice(0,5).map(l=>`<div class="py-1 border-b flex justify-between"><span>${escapeHtml(l.action)}</span><span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('')}</div></div>
@@ -761,121 +1084,18 @@ async function renderDashboard() {
     if (ctx) { 
         new Chart(ctx, { type: 'doughnut', data: { labels: ['Pending', 'In Progress', 'Completed', 'Approved'], datasets: [{ data: [pending, inProgress, completed, projectsData.filter(p=>p.status==='approved').length], backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], borderWidth: 0 }] }, options: { responsive: true, plugins: { legend: { position: 'bottom' } } } }); 
     }
+    addLog("Dashboard loaded");
 }
 
 // ==================== PROJECTS SECTION ====================
-async function renderProjects(highlightId = null) {
-    await Promise.all([fetchProjects(), fetchProjectDocuments()]);
-    
-    const projectsSection = document.getElementById('projectsSection');
-    if (!projectsSection) return;
-    
-    let html = `
-        <div class="tab-container">
-            <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span></button>
-            <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span></button>
-        </div>
-    `;
-    
-    if (currentProjectTab === 'added') {
-        html += `
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
-                <div class="flex gap-2">
-                    <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Project</button>
-                    <button onclick="exportAllProjectsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
-                    <button onclick="exportAllProjectsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
-                </div>
-            </div>
-            <div class="projects-grid" id="projectsGrid"></div>
-        `;
-        projectsSection.innerHTML = html;
-        
-        if (projectsData.length === 0) {
-            const projectsGrid = document.getElementById('projectsGrid');
-            if (projectsGrid) projectsGrid.innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No projects found</div>';
-            return;
-        }
-        
-        let gridHtml = '';
-        for (let p of projectsData) {
-            let isUnviewed = (p.is_viewed_by_department === 0 && p.sent_from_dept !== DEPARTMENT_ID) && !viewedProjectIds.includes(p.id);
-            let isHighlighted = highlightId && p.id === highlightId;
-            let imageUrl = getFileUrl(p.image);
-            let isPdf = imageUrl && imageUrl.startsWith('data:application/pdf');
-            let imageHtml = imageUrl ? 
-                (isPdf ? 
-                    `<div class="project-image flex items-center justify-center bg-gray-100 cursor-pointer" onclick="event.stopPropagation(); window.open('${imageUrl}', '_blank')"><i class="fas fa-file-pdf text-red-600 text-5xl"></i><span class="text-xs text-gray-500 ml-2">PDF Document</span></div>` :
-                    `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">`) :
-                `<div class="no-image"><i class="fas fa-image text-4xl"></i><p class="text-xs mt-1">No File</p></div>`;
-            gridHtml += `<div class="project-card ${isHighlighted ? 'search-highlight' : ''}" id="proj-card-${p.id}" onclick="viewProjectDetails(${p.id})">
-                <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
-                ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                ${imageHtml}
-                <div class="p-3">
-                    <div class="flex justify-between items-start mt-1"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name||'N/A')}</p><span class="px-1.5 py-0.5 text-[8px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span></div>
-                    <p class="text-sm font-semibold text-purple-600 mt-1">${formatMoney(p.amount)}</p>
-                    <p class="text-xs text-gray-500">Location: ${escapeHtml(p.location||'N/A')}</p>
-                    <div class="mt-2"><div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-indigo-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div>
-                    <div class="flex gap-2 mt-3 pt-2 border-t">
-                        <button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                        <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                        <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                    </div>
-                    <div class="user-info">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
-                </div>
-            </div>`;
-        }
-        const projectsGrid = document.getElementById('projectsGrid');
-        if (projectsGrid) projectsGrid.innerHTML = gridHtml;
-        if (highlightId) { const el = document.getElementById(`proj-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
-    } else {
-        html += `
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
-                <div class="flex gap-2">
-                    <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
-                    <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
-                    <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
-                </div>
-            </div>
-            <div class="documents-grid" id="uploadedDocsGrid"></div>
-        `;
-        projectsSection.innerHTML = html;
-        
-        if (projectDocuments.length === 0) {
-            const uploadedDocsGrid = document.getElementById('uploadedDocsGrid');
-            if (uploadedDocsGrid) uploadedDocsGrid.innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents.</div>';
-            return;
-        }
-        
-        let docsHtml = '';
-        for (let doc of projectDocuments) {
-            let isHighlighted = highlightId && doc.id === highlightId;
-            docsHtml += `
-                <div class="document-card ${isHighlighted ? 'search-highlight' : ''}" id="doc-card-${doc.id}">
-                    <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
-                    <div class="p-3">
-                        <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span></div>
-                        <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
-                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                            <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                            <button onclick="exportDocumentToExcel(${doc.id})" class="action-btn preview" style="background:#10b981;"><i class="fas fa-file-excel"></i> Excel</button>
-                            <button onclick="exportDocumentToPDF(${doc.id})" class="action-btn edit" style="background:#ef4444;"><i class="fas fa-file-pdf"></i> PDF</button>
-                        </div>
-                        <div class="user-info">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
-                    </div>
-                </div>`;
-        }
-        const uploadedDocsGrid = document.getElementById('uploadedDocsGrid');
-        if (uploadedDocsGrid) uploadedDocsGrid.innerHTML = docsHtml;
-        if (highlightId) { const el = document.getElementById(`doc-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
-    }
-    updateProjectBadge();
+function getProjectStatusClass(s) { 
+    const classes = { pending: "status-pending", in_progress: "status-progress", completed: "status-completed", approved: "status-approved" };
+    return classes[s] || "status-pending"; 
 }
-
-function switchProjectTab(tab) { currentProjectTab = tab; renderProjects(); }
+function getProjectStatusText(s) { 
+    const texts = { pending: "Pending", in_progress: "In Progress", completed: "Completed", approved: "Approved" };
+    return texts[s] || s; 
+}
 
 function openAddProjectModal() { 
     document.getElementById('editProjectId').value = ''; 
@@ -890,6 +1110,66 @@ function openAddProjectModal() {
     document.getElementById('projectEndDate').value = ''; 
     removeProjectImage();
     openModal('projectModal'); 
+}
+
+async function saveProject() { 
+    let id = document.getElementById('editProjectId').value; 
+    let name = document.getElementById('projectName').value.trim(); 
+    if(!name) { showToast('Project name required', true); return; } 
+    
+    let imagePath = '';
+    if (currentProjectImageFile) {
+        imagePath = await uploadProjectImage(currentProjectImageFile);
+    }
+    
+    let data = { 
+        name: name, 
+        client_name: document.getElementById('projectClient').value, 
+        amount: parseMoneyValue(document.getElementById('projectAmount').value), 
+        location: document.getElementById('projectLocation').value, 
+        description: document.getElementById('projectDesc').value, 
+        status: document.getElementById('projectStatus').value, 
+        progress: parseInt(document.getElementById('projectProgress').value) || 0, 
+        start_date: document.getElementById('projectStartDate').value, 
+        end_date: document.getElementById('projectEndDate').value, 
+        image: imagePath, 
+        department_id: DEPARTMENT_ID, 
+        created_by: CURRENT_USER 
+    }; 
+    
+    const sendBtn = document.querySelector('#projectModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+    sendBtn.disabled = true;
+    try {
+        let res = id ? await apiCall('update_project.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_project.php', 'POST', data); 
+        if(res && res.success) { 
+            showToast(id ? 'Project updated' : 'Project added'); 
+            addLog(id ? `Project updated: ${name}` : `Project added: ${name}`);
+            closeModal('projectModal'); 
+            await renderProjects(); 
+            await renderDashboard(); 
+        } else { 
+            showToast(res?.message || 'Failed', true); 
+        } 
+    } catch(e) { 
+        showToast('Network error: ' + e.message, true); 
+    }
+    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+}
+
+async function deleteProject(id) { 
+    if(confirm('Delete this project? It will be moved to recycle bin.')) { 
+        const p = projectsData.find(p => p.id === id);
+        if(p) await addToRecycleBin(id, 'project', p.name);
+        let res = await apiCall('delete_project.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1 }); 
+        if(res.success) { 
+            showToast('Project moved to recycle bin'); 
+            addLog(`Project deleted: ${p?.name}`);
+            await renderProjects(); 
+            await renderDashboard(); 
+        } else { showToast(res.message || 'Failed', true); } 
+    } 
 }
 
 function editProject(id) { 
@@ -910,7 +1190,7 @@ function editProject(id) {
             const previewIcon = document.getElementById('previewIcon');
             const previewFileName = document.getElementById('previewFileName');
             const uploadArea = document.getElementById('projImageUploadArea');
-            const isPdf = p.image.startsWith('data:application/pdf');
+            const isPdf = p.image.endsWith('.pdf');
             if (previewIcon) {
                 previewIcon.className = isPdf ? "fas fa-file-pdf text-red-600 text-2xl" : "fas fa-image text-indigo-600 text-2xl";
             }
@@ -924,69 +1204,49 @@ function editProject(id) {
     } 
 }
 
-async function saveProject() { 
-    let id = document.getElementById('editProjectId').value; 
-    let name = document.getElementById('projectName').value.trim(); 
-    if(!name) { showToast('Project name required', true); return; } 
-    let img = '';
-    if (currentProjectImageFile) {
-        img = await getImageAsBase64(currentProjectImageFile);
-    }
-    let data = { 
-        name: name, 
-        client_name: document.getElementById('projectClient').value, 
-        amount: parseMoneyValue(document.getElementById('projectAmount').value), 
-        location: document.getElementById('projectLocation').value, 
-        description: document.getElementById('projectDesc').value, 
-        status: document.getElementById('projectStatus').value, 
-        progress: parseInt(document.getElementById('projectProgress').value) || 0, 
-        start_date: document.getElementById('projectStartDate').value, 
-        end_date: document.getElementById('projectEndDate').value, 
-        image: img, 
-        department_id: DEPARTMENT_ID, 
-        created_by: CURRENT_USER 
-    }; 
-    
-    const sendBtn = document.querySelector('#projectModal .btn-primary');
-    const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
-    sendBtn.disabled = true;
-    try {
-        let res = id ? await apiCall('update_project.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_project.php', 'POST', data); 
-        if(res && res.success) { 
-            showToast(id ? 'Project updated' : 'Project added'); 
-            addLog(id ? `Project updated: ${name}` : `Project added: ${name}`);
-            closeModal('projectModal'); 
-            await renderProjects(); 
-            await renderDashboard(); 
-        } else { showToast(res?.message || 'Failed', true); } 
-    } catch(e) { showToast('Network error: ' + e.message, true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+function exportSingleProjectExcel(id) { 
+    const p = projectsData.find(p=>p.id===id); 
+    if(p) { 
+        let ws = [['Name','Client','Amount','Status','Progress','Location','Start Date','End Date','Created By']]; 
+        ws.push([p.name, p.client_name||'-', p.amount, p.status, p.progress, p.location||'-', p.start_date||'', p.end_date||'', p.created_by||'System']); 
+        let wb = XLSX.utils.book_new(); 
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); 
+        XLSX.writeFile(wb, `project_${p.id}.xlsx`); 
+        showToast('Exported'); 
+    } 
 }
 
-async function deleteProject(id) { 
-    if(confirm('Delete this project? It will be moved to recycle bin.')) { 
-        const p = projectsData.find(p => p.id === id);
-        if(p) await addToRecycleBin(id, 'project', p.name);
-        let res = await apiCall('delete_project.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1 }); 
-        if(res.success) { 
-            showToast('Project moved to recycle bin'); 
-            addLog(`Project deleted: ${p?.name}`);
-            await renderProjects(); 
-            await renderDashboard(); 
-        } else { showToast(res.message || 'Failed', true); } 
-    } 
+function exportAllProjectsToExcel() { 
+    let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Created By','Created At']]; 
+    projectsData.forEach(p => ws.push([p.id, p.name, p.client_name||'-', p.amount, p.status, p.progress, p.location||'-', p.created_by||'System', p.created_at])); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Projects'); 
+    XLSX.writeFile(wb, `all_projects.xlsx`); 
+    showToast('Exported'); 
+}
+
+function exportAllProjectsToPDF() { 
+    let rows = projectsData.map(p => `<div style="margin-bottom:20px;border-bottom:1px solid #4338ca;"><h3 style="color:#4338ca;">${escapeHtml(p.name)}</h3><p><strong>Client:</strong> ${escapeHtml(p.client_name||'-')}</p><p><strong>Amount:</strong> ${formatMoney(p.amount)}</p><p><strong>Status:</strong> ${p.status}</p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Created by:</strong> ${escapeHtml(p.created_by||'System')}</p></div>`).join(''); 
+    let w = window.open('', '_blank'); 
+    if(!w) { showToast("Please allow popups", true); return; }
+    w.document.write(`<!DOCTYPE html><html><head><title>All Projects - Town Planning Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;border-radius:10px;}h1{color:#4338ca;text-align:center;}.footer{text-align:center;font-size:10px;margin-top:20px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#4338ca;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>All Projects - Town Planning Department</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div class="footer">GeoTraverse ERP System - Town Planning Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
+}
+
+function sendProjectToDept(projectId, deptId) { 
+    const dept = allDepartmentsForSend.find(d=>d.id==deptId);
+    const deptName = dept ? dept.name : 'Department';
+    showToast(`✅ Project sent to ${deptName}`, false);
+    toggleSendDropdown(`projSendDropdown-${projectId}`);
+    closeModal('viewProjectModal');
 }
 
 async function viewProjectDetails(id) {
     const p = projectsData.find(p => p.id === id);
     if(p) {
         if (p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedProjectIds.includes(id)) {
-            viewedProjectIds.push(id);
-            localStorage.setItem('townplanning_viewedProjectIds', JSON.stringify(viewedProjectIds));
-            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
-            updateProjectBadge();
-            await apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
+            markProjectViewed(id);
         }
         currentProjectId = id;
         await fetchDailyWork();
@@ -994,12 +1254,15 @@ async function viewProjectDetails(id) {
         let totalBudget = 0, totalAmount = 0;
         projectDailyWork.forEach(w => { totalBudget += parseFloat(w.budget)||0; totalAmount += parseFloat(w.amount)||0; });
         
-        let fileUrl = getFileUrl(p.image);
-        let isPdf = fileUrl && fileUrl.startsWith('data:application/pdf');
+        let fileUrl = getCleanImageUrl(p.image);
+        let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
+        let isPdf = fileUrl && (fileUrl.match(/\.pdf$/i));
         let filePreviewHtml = fileUrl ? 
-            (isPdf ? 
-                `<div class="w-full h-52 mb-4 flex items-center justify-center bg-gray-100 rounded-lg cursor-pointer border-2 border-dashed border-indigo-300" onclick="window.open('${fileUrl}', '_blank')"><i class="fas fa-file-pdf text-red-600 text-6xl"></i><span class="text-sm text-gray-600 ml-3">Click to open PDF</span></div>` :
-                `<img src="${fileUrl}?t=${Date.now()}" class="w-full h-52 object-cover rounded-lg mb-4 cursor-pointer border-2 border-indigo-200" onclick="showFullImage('${fileUrl}')">`) : 
+            (isImage ? 
+                `<img src="${fileUrl}?t=${Date.now()}" class="w-full h-52 object-cover rounded-lg mb-4 cursor-pointer border-2 border-indigo-200" onclick="showFullImage('${fileUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo%20Image%3C/text%3E%3C/svg%3E'">` :
+                (isPdf ?
+                    `<div class="w-full h-52 mb-4 flex items-center justify-center bg-gray-100 rounded-lg cursor-pointer border-2 border-dashed border-indigo-300" onclick="showFullImage('${fileUrl}')"><i class="fas fa-file-pdf text-red-600 text-6xl"></i><span class="text-sm text-gray-600 ml-3">PDF Document - Click to view</span></div>` :
+                    `<div class="w-full h-52 mb-4 flex items-center justify-center bg-gray-100 rounded-lg cursor-pointer border-2 border-indigo-200" onclick="window.open('${fileUrl}', '_blank')"><i class="fas fa-file-alt text-4xl text-gray-500"></i><p class="text-sm text-gray-600 ml-3">Click to view file</p></div>`)) : 
             '<div class="no-image w-full h-52 mb-4 flex items-center justify-center bg-gray-100 rounded-lg"><i class="fas fa-image text-4xl text-gray-400"></i><p class="text-sm text-gray-500 ml-2">No file attached</p></div>';
         
         document.getElementById('viewProjectContent').innerHTML = `
@@ -1043,18 +1306,18 @@ async function viewProjectDetails(id) {
         
         let tbody = document.getElementById('dailyWorkTableBody');
         if (tbody) {
-            if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</tr>'; }
+            if (projectDailyWork.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td</tr'; }
             else {
                 let dwHtml = '';
                 for (let w of projectDailyWork) {
                     dwHtml += `<tr id="daily-row-${w.id}">
                         <td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>
                         <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
-                        <td class="p-2 text-xs text-right">${formatMoney(w.budget || 0)}</td>
-                        <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td>
+                        <td class="p-2 text-xs text-right">${formatMoney(w.budget || 0)}</td
+                        <td class="p-2 text-xs text-right">${formatMoney(w.amount || 0)}</td
                         <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td>
                         <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
-                    </tr>`;
+                    <tr>`;
                 }
                 tbody.innerHTML = dwHtml;
             }
@@ -1062,15 +1325,13 @@ async function viewProjectDetails(id) {
         
         let deptOptions = ''; 
         allDepartmentsForSend.forEach(d => { 
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">${escapeHtml(d.name)}</a>`; 
-            }
+            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
         });
         
         document.getElementById('viewProjButtons').innerHTML = `
             <button onclick="exportSingleProjectExcel(${p.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-            <button onclick="exportProjectToPDF(${p.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
-            ${fileUrl ? `<button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary"><i class="fas fa-eye"></i> View File</button>` : ''}
+            <button onclick="exportProjectToPDFNewWindow(${p.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
+            ${fileUrl ? `<button onclick="showFullImage('${fileUrl}')" class="btn-primary"><i class="fas fa-eye"></i> View Full Image</button>` : ''}
             <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
         `;
         openModal('viewProjectModal');
@@ -1194,82 +1455,327 @@ function exportDailyWorkToPDF() {
     if(!project) return;
     const work = dailyworkData.filter(w=>w.project_id==currentProjectId);
     if(work.length===0) { showToast('No records', true); return; }
-    let rows = work.map(w=>`<tr><td class="border p-1">${new Date(w.date).toLocaleString()}</td><td class="border p-1">${escapeHtml(w.work_description||'-')}</td><td class="border p-1 text-right">${formatMoney(w.budget)}</td><td class="border p-1 text-right">${formatMoney(w.amount)}</td><td class="border p-1">${w.status}</td><td class="border p-1">${escapeHtml(w.created_by||'System')}</td></tr>`).join('');
+    let rows = work.map(w=>`<tr><td class="border p-1">${new Date(w.date).toLocaleString()}</td><td class="border p-1">${escapeHtml(w.work_description||'-')}</td><td class="border p-1 text-right">${formatMoney(w.budget)}</td
+        <td class="border p-1 text-right">${formatMoney(w.amount)}</td
+        <td class="border p-1">${w.status}</td
+        <td class="border p-1">${escapeHtml(w.created_by||'System')}</td
+    </tr>`).join('');
     let w = window.open('', '_blank');
     w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;}th,td{border:1px solid #4338ca;padding:8px;}th{background:#4338ca;color:white;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody></table><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
 
-function sendProjectToDept(projectId, deptId) { 
-    const deptName = allDepartmentsForSend.find(d=>d.id==deptId)?.name || 'Department';
-    showToast(`✅ Project sent to ${deptName}`, false);
-    toggleSendDropdown(`projSendDropdown-${projectId}`);
-    closeModal('viewProjectModal');
-}
-
-function exportSingleProjectExcel(id) { 
-    const p = projectsData.find(p=>p.id===id); 
-    if(p) { 
-        let ws = [['Name','Client','Amount','Status','Progress','Location','Start Date','End Date','Created By']]; 
-        ws.push([p.name, p.client_name||'-', p.amount, p.status, p.progress, p.location||'-', p.start_date||'', p.end_date||'', p.created_by||'System']); 
-        let wb = XLSX.utils.book_new(); 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); 
-        XLSX.writeFile(wb, `project_${p.id}.xlsx`); 
-        showToast('Exported'); 
-    } 
-}
-
-function exportAllProjectsToExcel() { 
-    let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Created By','Created At']]; 
-    projectsData.forEach(p => ws.push([p.id, p.name, p.client_name||'-', p.amount, p.status, p.progress, p.location||'-', p.created_by||'System', p.created_at])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Projects'); 
-    XLSX.writeFile(wb, `all_projects.xlsx`); 
-    showToast('Exported'); 
-}
-
-function exportAllProjectsToPDF() { 
-    let rows = projectsData.map(p => `<div style="margin-bottom:20px;border-bottom:1px solid #4338ca;"><h3 style="color:#4338ca;">${escapeHtml(p.name)}</h3><p><strong>Client:</strong> ${escapeHtml(p.client_name||'-')}</p><p><strong>Amount:</strong> ${formatMoney(p.amount)}</p><p><strong>Status:</strong> ${p.status}</p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Created by:</strong> ${escapeHtml(p.created_by||'System')}</p></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    if(!w) { showToast("Please allow popups", true); return; }
-    w.document.write(`<!DOCTYPE html><html><head><title>All Projects - Town Planning Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;border-radius:10px;}h1{color:#4338ca;text-align:center;}.footer{text-align:center;font-size:10px;margin-top:20px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#4338ca;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>All Projects - Town Planning Department</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div class="footer">GeoTraverse ERP System - Town Planning Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
-}
-
-async function exportProjectToPDF(projectId) {
+function exportProjectToPDFNewWindow(projectId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { showToast('Project not found', true); return; }
-    let fileUrl = getFileUrl(p.image);
-    let isPdf = fileUrl && fileUrl.startsWith('data:application/pdf');
+    let fileUrl = getCleanImageUrl(p.image);
+    let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
     let statusBadgeClass = getProjectStatusClass(p.status);
     let statusText = getProjectStatusText(p.status);
     let totalBudget = 0, totalAmount = 0;
-    dailyworkData.filter(w => w.project_id == p.id).forEach(w => { totalBudget += parseFloat(w.budget)||0; totalAmount += parseFloat(w.amount)||0; });
+    const projectWork = dailyworkData.filter(w => w.project_id == p.id);
+    projectWork.forEach(w => { totalBudget += parseFloat(w.budget)||0; totalAmount += parseFloat(w.amount)||0; });
     
-    let dailyRows = dailyworkData.filter(w=>w.project_id==p.id).map(w => `<tr><td>${new Date(w.date).toLocaleString()}</td><td class="text-left">${escapeHtml(w.work_description||'-')}</td><td class="text-right">${formatMoney(w.budget)}</td<td class="text-right">${formatMoney(w.amount)}</td<td>${w.status}</td</tr`).join('');
+    let dailyRows = '';
+    if (projectWork.length > 0) {
+        dailyRows = '<table style="width:100%; border-collapse:collapse; margin-top:15px;"><thead><tr style="background:#4338ca; color:white;"><th style="padding:8px; border:1px solid #4338ca;">Date/Time</th><th style="padding:8px; border:1px solid #4338ca;">Description</th><th style="padding:8px; border:1px solid #4338ca; text-align:right;">Budget</th><th style="padding:8px; border:1px solid #4338ca; text-align:right;">Amount</th><th style="padding:8px; border:1px solid #4338ca; text-align:right;">Variance</th><th style="padding:8px; border:1px solid #4338ca;">Status</th></tr></thead><tbody>';
+        for (let w of projectWork) {
+            dailyRows += `<tr style="border-bottom:1px solid #4338ca;">
+                <td style="padding:8px; border:1px solid #4338ca;">${new Date(w.date).toLocaleString()}</td>
+                <td style="padding:8px; border:1px solid #4338ca;">${escapeHtml(w.work_description||'-')}</td
+                <td style="padding:8px; border:1px solid #4338ca; text-align:right;">${formatMoney(w.budget)}</td
+                <td style="padding:8px; border:1px solid #4338ca; text-align:right;">${formatMoney(w.amount)}</td
+                <td style="padding:8px; border:1px solid #4338ca; text-align:right;">${formatMoney((w.amount||0)-(w.budget||0))}</td
+                <td style="padding:8px; border:1px solid #4338ca;">${w.status}</td
+            </tr>`;
+        }
+        dailyRows += '</tbody></table>';
+    } else {
+        dailyRows = '<div style="text-align:center; padding:20px; color:#999;">No daily work records found.</div>';
+    }
     
     let w = window.open('', '_blank');
     if (!w) { showToast("Please allow popups", true); return; }
-    w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(p.name)} - Project Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;border-radius:12px;}h1{color:#4338ca;text-align:center;}.details-table{width:100%;border-collapse:collapse;margin:10px 0;}.details-table th,.details-table td{border:1px solid #4338ca;padding:8px;text-align:left;}.details-table th{background:#4338ca;color:white;}.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;}.footer{text-align:center;font-size:10px;margin-top:20px;}.print-btn{text-align:center;margin-top:20px;}@media print{.print-btn{display:none;}}</style></head><body><h1>${escapeHtml(p.name)}</h1><p>Generated: ${new Date().toLocaleString()} | Department: Town Planning</p><table class="details-table"><tr><th style="width:35%">Project Name</th><td><strong>${escapeHtml(p.name)}</strong></tr
-    <tr><th>Client Name</th><td>${escapeHtml(p.client_name||'N/A')}</tr
-    <tr><th>Amount</th><td>${formatMoney(p.amount)}</tr
-    <tr><th>Status</th><td><span class="status-badge ${statusBadgeClass}">${statusText}</span></tr
-    <tr><th>Progress</th><td>${p.progress}%</tr
-    <tr><th>Location</th><td>${escapeHtml(p.location||'N/A')}</tr
-    <tr><th>Description</th><td>${escapeHtml(p.description||'No description')}</tr
-    <tr><th>Created By</th><td>${escapeHtml(p.created_by||'System')} on ${formatDateTime(p.created_at)}</tr
-    ${fileUrl ? `<tr><th>Attached File</th><td>${isPdf ? 'PDF Document attached' : 'Image attached'}</td</tr` : ''} 
-    </table>
-    ${dailyRows ? `<h3>Daily Work Records</h3><table class="details-table"><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th></tr></thead><tbody>${dailyRows}<tr><th colspan="2">Totals</th><th class="text-right">${formatMoney(totalBudget)}</th><th class="text-right">${formatMoney(totalAmount)}</th><th></th></tr></tbody></table>` : ''}
-    <div class="footer">GeoTraverse ERP System - Town Planning Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
+    
+    w.document.write(`<!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>${escapeHtml(p.name)} - Project Report</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+        .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #4338ca; }
+        .header { background: linear-gradient(135deg, #4338ca, #3730a3); color: white; padding: 25px; text-align: center; }
+        .header h1 { font-size: 24px; margin: 0; }
+        .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+        .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; }
+        .image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+        .image-section img { max-width: 200px; max-height: 150px; border-radius: 8px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+        .section-title { background: #4338ca; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin: 20px 0 10px 0; }
+        .details-vertical { margin: 20px 25px; }
+        .details-row { display: flex; border-bottom: 1px solid #e5e7eb; padding: 10px 0; }
+        .details-label { width: 35%; font-weight: 600; color: #374151; }
+        .details-value { width: 65%; color: #1f2937; }
+        .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 15px 25px; background: #f0fdf4; border-radius: 10px; text-align: center; }
+        .summary-card { padding: 12px; border-right: 1px solid #10b981; }
+        .summary-card:last-child { border-right: none; }
+        .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; margin-top: 20px; }
+        .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+        .print-btn button { background: #4338ca; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #4338ca !important; -webkit-print-color-adjust: exact; } }
+    </style>
+    </head>
+    <body>
+    <div class="container">
+        <div class="header"><h1>${escapeHtml(p.name)}</h1><p>Project Report - Generated: ${new Date().toLocaleString()}</p></div>
+        <div class="info-bar"><span><strong>Project ID:</strong> #${p.id}</span><span><strong>Department:</strong> Town Planning</span><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span></div>
+        <div class="image-section">${fileUrl ? (isImage ? `<img src="${fileUrl}?t=${Date.now()}" onerror="this.parentElement.innerHTML='<div style=\'color:#999;\'>No Image</div>'">` : `<div style="color:#999;">${escapeHtml(p.image)}</div>`) : '<div style="color:#999;">No Image Available</div>'}</div>
+        
+        <div class="section-title"><i class="fas fa-info-circle"></i> Project Details</div>
+        <div class="details-vertical">
+            <div class="details-row"><div class="details-label">Project Name:</div><div class="details-value"><strong>${escapeHtml(p.name)}</strong></div></div>
+            <div class="details-row"><div class="details-label">Client:</div><div class="details-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
+            <div class="details-row"><div class="details-label">Amount:</div><div class="details-value"><span style="color:#059669; font-weight:bold;">${formatMoney(p.amount)}</span></div></div>
+            <div class="details-row"><div class="details-label">Status:</div><div class="details-value"><span class="status-badge ${statusBadgeClass}">${statusText}</span></div></div>
+            <div class="details-row"><div class="details-label">Progress:</div><div class="details-value">${p.progress || 0}%</div></div>
+            <div class="details-row"><div class="details-label">Location:</div><div class="details-value">${escapeHtml(p.location || 'N/A')}</div></div>
+            <div class="details-row"><div class="details-label">Start Date:</div><div class="details-value">${p.start_date || 'Not specified'}</div></div>
+            <div class="details-row"><div class="details-label">End Date:</div><div class="details-value">${p.end_date || 'Not specified'}</div></div>
+            <div class="details-row"><div class="details-label">Description:</div><div class="details-value">${escapeHtml(p.description || 'No description')}</div></div>
+            <div class="details-row"><div class="details-label">Created By:</div><div class="details-value">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div></div>
+        </div>
+        
+        <div class="section-title"><i class="fas fa-calendar-day"></i> Daily Work Records</div>
+        ${projectWork.length > 0 ? `<div class="summary-cards">
+            <div class="summary-card"><h4>Total Budget</h4><p>${formatMoney(totalBudget)}</p></div>
+            <div class="summary-card"><h4>Total Amount</h4><p>${formatMoney(totalAmount)}</p></div>
+            <div class="summary-card"><h4>Variance</h4><p>${formatMoney(totalAmount - totalBudget)}</p></div>
+        </div>` : ''}
+        <div style="margin: 0 25px 25px 25px;">${dailyRows}</div>
+        
+        <div class="footer">GeoTraverse ERP System - Town Planning Department | Official Project Document</div>
+        <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div>
+    </div>
+    </body></html>`);
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
 
-// ==================== REQUESTS SECTION ====================
-// ==================== REQUESTS SECTION ====================
+// ==================== RENDER PROJECTS ====================
+async function renderProjects(highlightId = null) {
+    try {
+        await Promise.all([fetchProjects(), fetchProjectDocuments()]);
+        
+        const projectsSection = document.getElementById('projectsSection');
+        if (!projectsSection) return;
+        
+        let html = `
+            <div class="tab-container">
+                <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span></button>
+                <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span></button>
+            </div>
+        `;
+        
+        if (currentProjectTab === 'added') {
+            html += `
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Project</button>
+                        <button onclick="exportAllProjectsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllProjectsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="projects-grid" id="projectsGrid"></div>
+            `;
+            projectsSection.innerHTML = html;
+            
+            if (projectsData.length === 0) {
+                document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No projects found. Click "Add Project" to create one.</div>';
+                return;
+            }
+            
+            let gridHtml = '';
+            for (let p of projectsData) {
+                let isUnviewed = (p.is_viewed_by_department === 0 && p.sent_from_dept !== DEPARTMENT_ID) && !viewedProjectIds.includes(p.id);
+                let isHighlighted = highlightId && p.id === highlightId;
+                let imageUrl = getCleanImageUrl(p.image);
+                
+                // FIXED: Better image display logic - image opens in modal when clicked
+                let imageHtml = '';
+                if (imageUrl && imageUrl.startsWith('data:')) {
+                    imageHtml = `<div class="project-image-container" style="width:100%; height:200px; background:#f3f4f6; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="event.stopPropagation(); showFullImage('${imageUrl}')">
+                        <img src="${imageUrl}" style="max-width:100%; max-height:100%; object-fit:contain;">
+                    </div>`;
+                } else if (imageUrl) {
+                    imageHtml = `<div class="project-image-container" style="position:relative; width:100%; height:200px; background:#f3f4f6; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="event.stopPropagation(); showFullImage('${imageUrl}')">
+                        <img src="${imageUrl}?t=${Date.now()}" 
+                            style="max-width:100%; max-height:100%; object-fit:contain;" 
+                            onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\'no-image\' style=\'width:100%; height:200px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#f3f4f6;\'><i class=\'fas fa-image text-4xl text-gray-400\'></i><p class=\'text-xs text-gray-500 mt-2\'>Image not found</p></div>'">
+                    </div>`;
+                } else {
+                    imageHtml = `<div class="no-image" style="width:100%; height:200px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#f3f4f6;"><i class="fas fa-image text-4xl text-gray-400"></i><p class="text-xs text-gray-500 mt-2">No Image</p></div>`;
+                }
+                
+                gridHtml += `<div class="project-card ${isHighlighted ? 'search-highlight' : ''}" id="proj-card-${p.id}" onclick="viewProjectDetails(${p.id})">
+                    <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    ${imageHtml}
+                    <div class="p-3">
+                        <div class="flex justify-between items-start mt-1"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name||'N/A')}</p><span class="px-1.5 py-0.5 text-[8px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span></div>
+                        <p class="text-sm font-semibold text-purple-600 mt-1">${formatMoney(p.amount)}</p>
+                        <p class="text-xs text-gray-500">Location: ${escapeHtml(p.location||'N/A')}</p>
+                        <div class="mt-2"><div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-indigo-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div>
+                        <div class="flex gap-2 mt-3 pt-2 border-t">
+                            <button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                            <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                        <div class="user-info">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
+                    </div>
+                </div>`;
+            }
+            document.getElementById('projectsGrid').innerHTML = gridHtml;
+            if (highlightId) { const el = document.getElementById(`proj-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+        } else {
+            html += `
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
+                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="documents-grid" id="uploadedDocsGrid"></div>
+            `;
+            projectsSection.innerHTML = html;
+            
+            if (projectDocuments.length === 0) {
+                document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents. Click "Upload Document" to add one.</div>';
+                return;
+            }
+            
+            let docsHtml = '';
+            for (let doc of projectDocuments) {
+                let isHighlighted = highlightId && doc.id === highlightId;
+                docsHtml += `
+                    <div class="document-card ${isHighlighted ? 'search-highlight' : ''}" id="doc-card-${doc.id}">
+                        <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
+                        <div class="p-3">
+                            <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span></div>
+                            <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
+                            <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                                <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                                <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            </div>
+                            <div class="user-info">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
+                        </div>
+                    </div>`;
+            }
+            document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+            if (highlightId) { const el = document.getElementById(`doc-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
+        }
+        updateProjectBadge();
+    } catch(e) {
+        console.error("renderProjects error:", e);
+        showToast("Error loading projects: " + e.message, true);
+    }
+}
+
+function switchProjectTab(tab) { 
+    currentProjectTab = tab; 
+    renderProjects(); 
+}
+
+function openUploadProjectDocModal() { 
+    document.getElementById('projectDocTitle').value = ''; 
+    document.getElementById('projectDocDesc').value = ''; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+    currentProjectDocFile = null; 
+    openModal('projectDocUploadModal'); 
+}
+document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
+    if(e.target.files && e.target.files[0]) { 
+        currentProjectDocFile = e.target.files[0]; 
+        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
+        document.getElementById('projectDocPreview').classList.remove('hidden'); 
+    } 
+});
+function removeProjectDocument() { 
+    currentProjectDocFile = null; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+}
+async function saveProjectDocument() {
+    const title = document.getElementById('projectDocTitle').value.trim();
+    const description = document.getElementById('projectDocDesc').value;
+    if (!title) { showToast('Document title required', true); return; }
+    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', description);
+    formData.append('department_id', DEPARTMENT_ID);
+    formData.append('uploaded_by', CURRENT_USER);
+    formData.append('document_file', currentProjectDocFile);
+    const sendBtn = document.querySelector('#projectDocUploadModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.disabled = true;
+    try {
+        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
+        const result = await response.json();
+        if (result.success) { 
+            showToast('✅ Document uploaded successfully'); 
+            addLog(`Document uploaded: ${title}`);
+            closeModal('projectDocUploadModal'); 
+            await renderProjects(); 
+        } else { 
+            showToast('❌ ' + (result.message || 'Upload failed'), true); 
+        }
+    } catch (error) { 
+        showToast('❌ Network error: ' + error.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
+}
+async function deleteProjectDocument(docId) {
+    if (confirm('Delete this document?')) {
+        const doc = projectDocuments.find(d => d.id === docId);
+        if(doc) await addToRecycleBin(docId, 'project_document', doc.title);
+        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: CURRENT_USER });
+        if (res.success) { 
+            showToast('Document moved to recycle bin'); 
+            await renderProjects(); 
+        } else { 
+            showToast(res.message || 'Failed', true); 
+        }
+    }
+}
+
+function exportAllProjectDocsToExcel() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
+    projectDocuments.forEach(d => { let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at, fileSize]); }); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Documents'); 
+    XLSX.writeFile(wb, `all_documents.xlsx`); 
+    showToast('Exported'); 
+}
+function exportAllProjectDocsToPDF() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let rows = projectDocuments.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><p><strong>Description:</strong> ${escapeHtml(d.description || '')}</p><hr/></div>`).join(''); 
+    let w = window.open('', '_blank'); 
+    w.document.write(`<!DOCTYPE html><html><head><title>All Documents</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Documents</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
+}
+
+// ==================== REQUESTS SECTION - FIXED COLUMNS ====================
+// ==================== REQUESTS SECTION - FIXED COLUMNS ====================
 async function loadRequests(highlightId = null) {
     await fetchRequests();
     
@@ -1285,38 +1791,64 @@ async function loadRequests(highlightId = null) {
                 <button onclick="exportAllRequestsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
             </div>
         </div>
-        <div class="requests-table-wrapper">
-            <table class="requests-table">
-                <thead><tr><th>Date</th><th>Type</th><th>Source</th><th class="text-right">Amount (TZS)</th><th>Description</th><th>Status</th><th class="text-center">Actions</th></tr></thead>
-                <tbody>
+        <div class="requests-table-wrapper" style="overflow-x: auto; border-radius: 12px; border: 1px solid #e5e7eb; background: white;">
+            <table class="requests-table" style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 800px; table-layout: fixed;">
+                <thead>
+                    <tr style="background: #4338ca; color: white;">
+                        <th style="width: 10%; padding: 12px 10px; text-align: left;">Date</th>
+                        <th style="width: 8%; padding: 12px 10px; text-align: left;">Type</th>
+                        <th style="width: 18%; padding: 12px 10px; text-align: left;">Source</th>
+                        <th style="width: 12%; padding: 12px 10px; text-align: right;">Amount (TZS)</th>
+                        <th style="width: 25%; padding: 12px 10px; text-align: left;">Description</th>
+                        <th style="width: 12%; padding: 12px 10px; text-align: left;">Status</th>
+                        <th style="width: 15%; padding: 12px 10px; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="requestsTableBody"></tbody>
+            </table>
+        </div>
     `;
+    requestsSection.innerHTML = html;
     
     if (requestsData.length === 0) {
-        html += '<tr><td colspan="7" class="text-center py-8 text-gray-400">No requests found.</td></tr>';
-    } else {
-        for (let r of requestsData) {
-            let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
-            let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-            let isNew = !viewedRequestIds.includes(r.id);
-            let amount = parseFloat(r.amount) || 0;
-            html += `<tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}">
-                <td class="date-cell">${formatDisplayDate(r.transaction_date)}</td>
-                <td><span class="status-badge ${r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${r.type}</span></td>
-                <td>${escapeHtml(r.source)}</td>
-                <td class="text-right font-bold text-orange-600">${formatMoney(amount)}</td>
-                <td>${escapeHtml(r.description ? r.description.substring(0, 50) : '-')}</td>
-                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                <td class="text-center"><div class="flex gap-1 justify-center"><button onclick="viewRequestDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editRequest(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteRequest(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
-              </tr>`;
-        }
+        document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">No requests found. Click "Add Request" to create one.</td></tr>';
+        return;
     }
     
-    html += `</tbody></table></div>`;
-    requestsSection.innerHTML = html;
-    if (highlightId) { const el = document.getElementById(`req-row-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+    let tableHtml = '';
+    for (let r of requestsData) {
+        let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
+        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
+        let isNew = !viewedRequestIds.includes(r.id);
+        let isHighlighted = highlightId && r.id === highlightId;
+        let amount = parseFloat(r.amount) || 0;
+        
+        tableHtml += `<tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 12px 10px; white-space: nowrap;">${formatDisplayDate(r.transaction_date)}</td>
+            <td style="padding: 12px 10px;"><span class="status-badge ${r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${r.type}</span></td>
+            <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td>
+            <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatMoney(amount)}</td>
+            <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml(r.description ? r.description.substring(0, 60) : '-')}${r.description && r.description.length > 60 ? '...' : ''}</td>
+            <td style="padding: 12px 10px;"><span class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${statusText}</span></td>
+            <td style="padding: 12px 10px; text-align: center;">
+                <div class="flex gap-1 justify-center">
+                    <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                    <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }
+    document.getElementById('requestsTableBody').innerHTML = tableHtml;
+    
+    if (highlightId) { 
+        const el = document.getElementById(`req-row-${highlightId}`); 
+        if(el) { 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+        } 
+    }
     updateRequestBadge();
 }
-
 async function submitRequest() {
     let id = document.getElementById('reqId').value;
     let transaction_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
@@ -1348,10 +1880,7 @@ async function viewRequestDetails(id) {
     const r = requestsData.find(r => r.id == id);
     if(r) {
         if(!viewedRequestIds.includes(id)) {
-            viewedRequestIds.push(id);
-            localStorage.setItem('townplanning_viewedRequestIds', JSON.stringify(viewedRequestIds));
-            unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
-            updateRequestBadge();
+            markRequestViewed(id);
         }
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
@@ -1422,8 +1951,7 @@ function exportSingleRequestPDFWindow(id) {
         if(!w) { showToast("Please allow popups", true); return; }
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-        w.document.write(`<!DOCTYPE html><html><head><title>Request Details</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;}h1{color:#4338ca;}</style></head><body><h1>Fund Request Details</h1><p>Request ID: #${r.id}</p><p><strong>Date:</strong> ${formatDisplayDate(r.transaction_date)}</p><p><strong>Type:</strong> ${r.type}</p><p><strong>Source:</strong> ${escapeHtml(r.source)}</p><p><strong>Amount:</strong> ${formatMoney(r.amount)}</p><p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p><p><strong>Status:</strong> ${statusText}</p><div style="margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
+        w.document.write(`<!DOCTYPE html><html><head><title>Request Details</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;}h1{color:#4338ca;text-align:center;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#4338ca;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>Fund Request Details</h1><p><strong>Date:</strong> ${formatDisplayDate(r.transaction_date)}</p><p><strong>Type:</strong> ${r.type}</p><p><strong>Source:</strong> ${escapeHtml(r.source)}</p><p><strong>Amount:</strong> ${formatMoney(r.amount)}</p><p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p><p><strong>Status:</strong> ${statusText}</p><p><strong>Submitted by:</strong> ${escapeHtml(r.created_by||CURRENT_USER)}</p><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
         w.document.close();
         showToast("PDF preview opened - Click Print to save");
     } 
@@ -1438,12 +1966,305 @@ function exportAllRequestsToExcel() {
     showToast('Exported'); 
 }
 
-function exportAllRequestsToPDF() { 
-    let rows = requestsData.map(r => `<div style="margin-bottom:20px;"><h3>${escapeHtml(r.source)}</h3><p>Date: ${formatDisplayDate(r.transaction_date)}</p><p>Amount: ${formatMoney(r.amount)}</p><p>Status: ${r.status}</p></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Requests</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Fund Requests</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
+// ==================== EXPORT ALL REQUESTS TO PDF (NEW WINDOW WITH TABLE) ====================
+function exportAllRequestsToPDF() {
+    if (requestsData.length === 0) {
+        showToast('No requests to export', true);
+        return;
+    }
+    
+    // Calculate totals
+    let totalIncome = 0, totalExpense = 0, totalAmount = 0;
+    let pendingCount = 0, approvedCount = 0, cancelledCount = 0;
+    
+    for (let r of requestsData) {
+        let amount = parseFloat(r.amount) || 0;
+        totalAmount += amount;
+        if (r.type === 'income') {
+            totalIncome += amount;
+        } else if (r.type === 'expense') {
+            totalExpense += amount;
+        }
+        
+        if (r.status === 'pending') pendingCount++;
+        else if (r.status === 'approved') approvedCount++;
+        else if (r.status === 'cancelled') cancelledCount++;
+    }
+    
+    let netProfit = totalIncome - totalExpense;
+    
+    // Build table rows
+    let tableRows = '';
+    for (let r of requestsData) {
+        let amount = parseFloat(r.amount) || 0;
+        let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
+        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
+        let typeClass = r.type === 'income' ? 'income' : 'expense';
+        let typeText = r.type === 'income' ? 'Income' : 'Expense';
+        let typeColor = r.type === 'income' ? '#10b981' : '#ef4444';
+        let typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+        
+        tableRows += `
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${formatDisplayDate(r.transaction_date)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;"><span style="background: ${typeBg}; color: ${typeColor}; padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${typeText}</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb; font-weight: 500;">${escapeHtml(r.source)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb; text-align: right; font-weight: 700; color: #ea580c;">${formatMoney(amount)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb; word-break: break-word;">${escapeHtml(r.description || '-')}</td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;"><span style="background: ${r.status === 'approved' ? '#d1fae5' : (r.status === 'cancelled' ? '#fee2e2' : '#fef3c7')}; color: ${r.status === 'approved' ? '#059669' : (r.status === 'cancelled' ? '#dc2626' : '#d97706')}; padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${escapeHtml(r.created_by || CURRENT_USER)}</td>
+            </tr>`;
+    }
+    
+    // Create print window
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to generate PDF', true);
+        return;
+    }
+    
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Town Planning Department - All Fund Requests Report</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                body {
+                    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+                    background: #f0f2f5;
+                    padding: 30px;
+                }
+                .report-container {
+                    max-width: 1300px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 16px;
+                    overflow: hidden;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                    border: 2px solid #4338ca;
+                }
+                .report-header {
+                    background: linear-gradient(135deg, #4338ca, #3730a3);
+                    color: white;
+                    padding: 25px;
+                    text-align: center;
+                }
+                .report-header h1 {
+                    font-size: 24px;
+                    margin: 0;
+                }
+                .report-header p {
+                    font-size: 12px;
+                    opacity: 0.85;
+                    margin-top: 6px;
+                }
+                .info-bar {
+                    background: #f8fafc;
+                    padding: 12px 25px;
+                    display: flex;
+                    justify-content: space-between;
+                    border-bottom: 1px solid #e5e7eb;
+                    font-size: 12px;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                }
+                .summary-cards {
+                    display: grid;
+                    grid-template-columns: repeat(5, 1fr);
+                    gap: 15px;
+                    padding: 20px 25px;
+                    background: #f9fafb;
+                    border-bottom: 1px solid #e5e7eb;
+                }
+                .summary-card {
+                    background: white;
+                    border-radius: 12px;
+                    padding: 15px;
+                    text-align: center;
+                    border: 1px solid #e5e7eb;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                }
+                .summary-card .label {
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #6b7280;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                .summary-card .value {
+                    font-size: 18px;
+                    font-weight: 800;
+                    margin-top: 8px;
+                    font-family: monospace;
+                }
+                .summary-card.income .value { color: #10b981; }
+                .summary-card.expense .value { color: #ef4444; }
+                .summary-card.profit .value { color: #3b82f6; }
+                .summary-card.total .value { color: #8b5cf6; }
+                .summary-card.pending .value { color: #f59e0b; }
+                .table-container {
+                    overflow-x: auto;
+                    padding: 20px 25px;
+                }
+                .data-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 11px;
+                }
+                .data-table th {
+                    background: #4338ca;
+                    color: white;
+                    padding: 12px 8px;
+                    font-weight: 700;
+                    text-align: left;
+                    border: 1px solid #3730a3;
+                    font-size: 11px;
+                }
+                .data-table td {
+                    padding: 10px 8px;
+                    border: 1px solid #e5e7eb;
+                    vertical-align: top;
+                }
+                .data-table .text-right {
+                    text-align: right;
+                }
+                .data-table .text-center {
+                    text-align: center;
+                }
+                .footer {
+                    text-align: center;
+                    font-size: 9px;
+                    color: #6b7280;
+                    padding: 15px;
+                    border-top: 1px solid #e5e7eb;
+                    background: #f9fafb;
+                }
+                .print-btn {
+                    text-align: center;
+                    padding: 15px;
+                    background: #f9fafb;
+                    border-top: 1px solid #e5e7eb;
+                }
+                .print-btn button {
+                    background: #4338ca;
+                    color: white;
+                    border: none;
+                    padding: 10px 24px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 13px;
+                    font-weight: 600;
+                    margin: 0 5px;
+                }
+                .print-btn button:hover {
+                    background: #3730a3;
+                }
+                @media print {
+                    body {
+                        background: white;
+                        padding: 0;
+                    }
+                    .print-btn {
+                        display: none;
+                    }
+                    .report-container {
+                        border: none;
+                        box-shadow: none;
+                    }
+                    .report-header {
+                        background: #4338ca !important;
+                        -webkit-print-color-adjust: exact;
+                        print-color-adjust: exact;
+                    }
+                    .data-table th {
+                        background: #4338ca !important;
+                        -webkit-print-color-adjust: exact;
+                        print-color-adjust: exact;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="report-container">
+                <div class="report-header">
+                    <h1>🏛️ Town Planning Department - Fund Requests Report</h1>
+                    <p>All Fund Requests Summary | Generated: ${new Date().toLocaleString()}</p>
+                </div>
+                <div class="info-bar">
+                    <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                    <span><strong>Total Requests:</strong> ${requestsData.length}</span>
+                    <span><strong>Generated By:</strong> ${CURRENT_USER}</span>
+                    <span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span>
+                </div>
+                
+                <div class="summary-cards">
+                    <div class="summary-card income">
+                        <div class="label">💰 Total Income</div>
+                        <div class="value">${formatMoney(totalIncome)}</div>
+                    </div>
+                    <div class="summary-card expense">
+                        <div class="label">💸 Total Expenses</div>
+                        <div class="value">${formatMoney(totalExpense)}</div>
+                    </div>
+                    <div class="summary-card profit">
+                        <div class="label">📈 Net Profit</div>
+                        <div class="value ${netProfit >= 0 ? 'positive' : 'negative'}" style="color: ${netProfit >= 0 ? '#10b981' : '#ef4444'};">${formatMoney(netProfit)}</div>
+                    </div>
+                    <div class="summary-card total">
+                        <div class="label">📊 Total Amount</div>
+                        <div class="value">${formatMoney(totalAmount)}</div>
+                    </div>
+                    <div class="summary-card pending">
+                        <div class="label">⏳ Pending Requests</div>
+                        <div class="value">${pendingCount}</div>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 10%;">Date</th>
+                                <th style="width: 8%;">Type</th>
+                                <th style="width: 18%;">Source</th>
+                                <th style="width: 12%;" class="text-right">Amount (TZS)</th>
+                                <th style="width: 22%;">Description</th>
+                                <th style="width: 10%;">Status</th>
+                                <th style="width: 20%;">Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="footer">
+                    GeoTraverse ERP System - Town Planning Department | Official Fund Requests Report<br>
+                    This report includes all fund requests submitted by the Town Planning Department.
+                    ${new Date().toLocaleString()}
+                </div>
+                <div class="print-btn">
+                    <button onclick="window.print(); setTimeout(() => window.close(), 1000);">
+                        <i class="fas fa-print"></i> Save as PDF / Print
+                    </button>
+                    <button onclick="window.close();">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+    
+    printWindow.document.close();
+    showToast("PDF preview opened - Click 'Save as PDF' to download");
 }
 
 // ==================== REPORTS SECTION ====================
@@ -1457,63 +2278,214 @@ async function renderReports(highlightId = null) {
             <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsList.length}</span></button>
             <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span></button>
         </div>
-        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-            <h2 class="text-xl font-bold"><i class="fas fa-chart-bar text-indigo-600 mr-2"></i>Reports</h2>
-            <div class="flex gap-2">
-                <button onclick="openModal('addReportModal')" class="btn-primary">Add Report</button>
-                <button onclick="exportAllReportsToExcel()" class="btn-success">Excel All</button>
-                <button onclick="exportAllReportsToPDF()" class="btn-danger">PDF All</button>
-            </div>
-        </div>
-        <div class="reports-grid" id="reportsGridContainer"></div>
     `;
-    reportsSection.innerHTML = html;
     
-    if (reportsList.length === 0) {
-        document.getElementById('reportsGridContainer').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No reports found</div>';
-        return;
-    }
-    
-    let gridHtml = '';
-    for (let r of reportsList) {
-        let isUnviewed = (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && r.sent_from_department !== DEPARTMENT_ID && !viewedReportIds.includes(r.id);
-        let isHighlighted = highlightId && r.id === highlightId;
-        let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
-        let shortContent = (r.content||'').substring(0,100)+(r.content?.length>100?'...':'');
-        gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetail(${r.id})">
-            <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report</p></div>
-            ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-            <div class="p-4"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${formatDateTime(r.created_at)}</span><span class="status-badge ${statusClass}">${r.status==='sent'?'Sent':'Draft'}</span></div>
-            <p class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(shortContent)}</p>
-            <div class="flex gap-2 mt-3 pt-2 border-t">
-                <button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                <button onclick="event.stopPropagation(); editReportDetail(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                <button onclick="event.stopPropagation(); deleteReportDetail(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+    if (currentReportTab === 'added') {
+        html += `
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h2 class="text-xl font-bold"><i class="fas fa-chart-bar text-indigo-600 mr-2"></i>Added Reports (${reportsList.length})</h2>
+                <div class="flex gap-2">
+                    <button onclick="openModal('addReportModal')" class="btn-primary">Add Report</button>
+                    <button onclick="openGenerateReportModal()" class="btn-cyan"><i class="fas fa-chart-line mr-1"></i> Generate Report</button>
+                    <button onclick="exportAllReportsToExcel()" class="btn-success">Excel All</button>
+                    <button onclick="exportAllReportsToPDF()" class="btn-danger">PDF All</button>
+                </div>
             </div>
-            <div class="user-info mt-2">Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)}</div>
+            <div class="reports-grid" id="reportsGridContainer"></div>
+        `;
+        reportsSection.innerHTML = html;
+        
+        if (reportsList.length === 0) {
+            document.getElementById('reportsGridContainer').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No reports found. Click "Add Report" to create one.</div>';
+            return;
+        }
+        
+        let gridHtml = '';
+        for (let r of reportsList) {
+            let isUnviewed = (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && r.sent_from_department !== DEPARTMENT_ID && !viewedReportIds.includes(r.id);
+            let isHighlighted = highlightId && r.id === highlightId;
+            let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+            let shortContent = (r.content||'').substring(0,100)+(r.content?.length>100?'...':'');
+            gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetail(${r.id})">
+                <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report</p></div>
+                ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                <div class="p-4"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${formatDateTime(r.created_at)}</span><span class="status-badge ${statusClass}">${r.status==='sent'?'Sent':'Draft'}</span></div>
+                <p class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(shortContent)}</p>
+                <div class="flex gap-2 mt-3 pt-2 border-t">
+                    <button onclick="event.stopPropagation(); viewReportDetail(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                    <button onclick="event.stopPropagation(); editReportDetail(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                    <button onclick="event.stopPropagation(); deleteReportDetail(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                </div>
+                <div class="user-info mt-2">Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)}</div>
+                </div>
+            </div>`;
+        }
+        document.getElementById('reportsGridContainer').innerHTML = gridHtml;
+    } else {
+        html += `
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Reports (${uploadedReportsData.length})</h2>
+                <div class="flex gap-2">
+                    <button onclick="openUploadReportModal()" class="btn-warning"><i class="fas fa-upload mr-1"></i> Upload Report</button>
+                    <button onclick="exportAllUploadedReportsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                </div>
             </div>
-        </div>`;
+            <div class="reports-grid" id="uploadedReportsGridContainer"></div>
+        `;
+        reportsSection.innerHTML = html;
+        
+        if (uploadedReportsData.length === 0) {
+            document.getElementById('uploadedReportsGridContainer').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded reports found. Click "Upload Report" to add one.</div>';
+            return;
+        }
+        
+        let gridHtml = '';
+        for (let doc of uploadedReportsData) {
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+            let isHighlighted = highlightId && doc.id === highlightId;
+            gridHtml += `
+                <div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}">
+                    <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
+                    <div class="p-3">
+                        <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span></div>
+                        <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
+                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                            <button onclick="viewUploadedReportDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                        <div class="user-info mt-2">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
+                    </div>
+                </div>`;
+        }
+        document.getElementById('uploadedReportsGridContainer').innerHTML = gridHtml;
     }
-    document.getElementById('reportsGridContainer').innerHTML = gridHtml;
     updateReportBadge();
 }
 
 function switchReportTab(tab) { currentReportTab = tab; renderReports(); }
 
+function openGenerateReportModal() {
+    document.getElementById('genReportTitle').value = '';
+    document.getElementById('genPeriodType').value = 'daily';
+    openModal('generateReportModal');
+}
+
+async function generateAndSaveReport() {
+    const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`;
+    const period = document.getElementById('genPeriodType').value;
+    
+    let startDate, endDate;
+    const now = new Date();
+    if (period === 'daily') {
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+        endDate.setHours(23, 59, 59, 999);
+    } else if (period === 'weekly') {
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'monthly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'quarterly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 3);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else {
+        startDate = new Date(now);
+        startDate.setFullYear(now.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    }
+    
+    await Promise.all([fetchRequests(), fetchDailyWork()]);
+    
+    let totalIncome = 0, totalExpense = 0;
+    let filteredRequests = requestsData.filter(t => {
+        let tDate = new Date(t.transaction_date);
+        return tDate >= startDate && tDate <= endDate;
+    });
+    filteredRequests.forEach(t => { 
+        if(t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; 
+        if(t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0; 
+    });
+    
+    let filteredDailyWork = dailyworkData.filter(w => {
+        let wDate = new Date(w.date);
+        return wDate >= startDate && wDate <= endDate;
+    });
+    let totalDailyBudget = filteredDailyWork.reduce((s,w) => s + (parseFloat(w.budget)||0), 0);
+    let totalDailyAmount = filteredDailyWork.reduce((s,w) => s + (parseFloat(w.amount)||0), 0);
+    
+    let content = `${period.toUpperCase()} REPORT\n`;
+    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    content += `Generated by: ${CURRENT_USER}\n`;
+    content += `Generated: ${new Date().toLocaleString()}\n`;
+    content += `Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\n`;
+    content += `Department: Town Planning\n\n`;
+    content += `📈 FINANCIAL SUMMARY\n`;
+    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    content += `Total Income: ${formatMoney(totalIncome)}\n`;
+    content += `Total Expenses: ${formatMoney(totalExpense)}\n`;
+    content += `Net Profit: ${formatMoney(totalIncome - totalExpense)}\n\n`;
+    content += `📋 REQUESTS SUMMARY\n`;
+    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    content += `Total Requests: ${requestsData.length}\n`;
+    content += `Pending: ${requestsData.filter(r => r.status === 'pending').length}\n`;
+    content += `Approved: ${requestsData.filter(r => r.status === 'approved').length}\n\n`;
+    content += `📅 DAILY WORK SUMMARY\n`;
+    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    content += `Records in period: ${filteredDailyWork.length}\n`;
+    content += `Total Budget: ${formatMoney(totalDailyBudget)}\n`;
+    content += `Total Amount: ${formatMoney(totalDailyAmount)}\n`;
+    content += `Variance: ${formatMoney(totalDailyAmount - totalDailyBudget)}\n`;
+    
+    let res = await apiCall('add_report.php', 'POST', { title, period, content, department_id: DEPARTMENT_ID, status: 'draft', created_by: CURRENT_USER });
+    if(res.success) { 
+        showToast(`✅ ${period} report generated and saved`); 
+        addLog(`Report generated: ${title}`);
+        closeModal('generateReportModal'); 
+        await renderReports(); 
+        await renderDashboard(); 
+    } else { 
+        showToast(res.message || 'Failed', true); 
+    }
+}
+
 async function viewReportDetail(id) { 
     const r = reportsList.find(r => r.id == id); 
     if(r) { 
         if((r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && r.sent_from_department !== DEPARTMENT_ID && !viewedReportIds.includes(id)){ 
-            viewedReportIds.push(id);
-            localStorage.setItem('townplanning_viewedReportIds', JSON.stringify(viewedReportIds));
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-            updateReportBadge();
-            await apiCall('mark_report_viewed.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID });
+            markReportViewed(id);
         }
         document.getElementById('viewReportContent').innerHTML = `<div class="bg-indigo-800 p-3 rounded text-white"><strong>${escapeHtml(r.title)}</strong> <span class="float-right">${r.period}</span></div><div class="mt-3 report-content-view">${escapeHtml(r.content || 'No content available')}</div><div class="user-info mt-3">Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)} | Status: ${r.status === 'sent' ? 'Sent' : 'Draft'}</div>`;
-        document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success">Excel</button><button onclick="exportSingleReportPDFWindow(${r.id})" class="btn-danger">PDF</button>`;
+        let deptOptions = '';
+        allDepartmentsForSend.forEach(d => {
+            deptOptions += `<a onclick="sendReportToDept(${r.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+        });
+        document.getElementById('viewReportButtons').innerHTML = `
+            <button onclick="exportSingleReportExcel(${r.id})" class="btn-success">Excel</button>
+            <button onclick="exportSingleReportPDFWindow(${r.id})" class="btn-danger">PDF</button>
+            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content">${deptOptions}</div></div>
+        `;
         openModal('viewReportModal'); 
     } 
+}
+
+async function sendReportToDept(reportId, deptId) {
+    const r = reportsList.find(r => r.id === reportId);
+    if (!r) return;
+    const dept = allDepartmentsForSend.find(d=>d.id==deptId);
+    const deptName = dept ? dept.name : 'Department';
+    showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    closeModal('viewReportModal');
 }
 
 function exportSingleReportExcel(id) { 
@@ -1533,7 +2505,7 @@ function exportSingleReportPDFWindow(id) {
     if(r) { 
         let w = window.open('', '_blank'); 
         if(!w) { showToast("Please allow popups", true); return; }
-        w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(r.title)}</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDateTime(r.created_at)}</p><div style="border:1px solid #ddd;padding:15px;margin-top:15px;">${escapeHtml(r.content||'No content')}</div><button style="margin-top:20px;" onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></body></html>`);
+        w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(r.title)}</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#8b5cf6;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDateTime(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><div style="border:1px solid #ddd;padding:15px;margin-top:15px;background:#f5f5f5;">${escapeHtml(r.content||'No content')}</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
         w.document.close();
         showToast("PDF preview opened - Click Print to save");
     } 
@@ -1549,11 +2521,40 @@ function exportAllReportsToExcel() {
 }
 
 function exportAllReportsToPDF() { 
-    let rows = reportsList.map(r => `<div style="margin-bottom:20px;"><h3>${escapeHtml(r.title)}</h3><p>${r.period} | ${formatDateTime(r.created_at)}</p><div>${escapeHtml(r.content)}</div><hr/></div>`).join(''); 
+    let rows = reportsList.map(r => `<div style="margin-bottom:20px;"><h3 style="color:#8b5cf6;">${escapeHtml(r.title)}</h3><p>${r.period} | ${formatDateTime(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><div style="background:#f5f5f5; padding:10px; border-radius:5px;">${escapeHtml(r.content)}</div><hr/></div>`).join(''); 
     let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Reports</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></body></html>`); 
+    w.document.write(`<!DOCTYPE html><html><head><title>All Reports - Town Planning Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;}</style></head><body><h1>All Reports - Town Planning Department</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
     w.document.close(); 
     showToast("PDF preview opened - Click Print to save"); 
+}
+
+function exportAllUploadedReportsToExcel() { 
+    if(uploadedReportsData.length===0) { showToast('No reports', true); return; } 
+    let ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']]; 
+    uploadedReportsData.forEach(d => { let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; ws.push([d.title, d.file_name, d.description||'-', d.period, d.uploaded_by, d.created_at, fileSize]); }); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports'); 
+    XLSX.writeFile(wb, `uploaded_reports.xlsx`); 
+    showToast('Exported'); 
+}
+
+function exportAllUploadedReportsToPDF() { 
+    if(uploadedReportsData.length===0) { showToast('No reports', true); return; } 
+    let rows = uploadedReportsData.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Period:</strong> ${d.period}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><p>${escapeHtml(d.description || '')}</p><hr/></div>`).join(''); 
+    let w = window.open('', '_blank'); 
+    w.document.write(`<!DOCTYPE html><html><head><title>All Uploaded Reports</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Reports</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
+}
+
+async function deleteUploadedReport(id) {
+    if(confirm('Delete this uploaded report?')) {
+        const doc = uploadedReportsData.find(d => d.id === id);
+        if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title);
+        const res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, deleted_by: CURRENT_USER });
+        if(res.success) { showToast('Uploaded report moved to recycle bin'); await renderReports(); await renderDashboard(); }
+        else { showToast(res.message || 'Failed', true); }
+    }
 }
 
 function editReportDetail(id){ 
@@ -1587,7 +2588,7 @@ async function deleteReportDetail(id){
         let res = await apiCall('delete_report.php','POST',{report_id:id,department_id:DEPARTMENT_ID,deleted_by_department:1}); 
         if(res && res.success){ 
             showToast("Report moved to recycle bin"); 
-            addLog(`Report deleted: ${r?.title}`); 
+            addLog(`Report deleted: ${r?.title}`);
             await renderReports(); 
             await renderDashboard(); 
         } else { showToast(res?.message||"Failed", true); } 
@@ -1602,137 +2603,11 @@ async function addReport() {
     let res = await apiCall('add_report.php','POST',{title,period,content,department_id:DEPARTMENT_ID,status:'draft',created_by:CURRENT_USER}); 
     if(res && res.success){ 
         showToast("Report added"); 
-        addLog(`Report added: ${title}`); 
+        addLog(`Report added: ${title}`);
         closeModal('addReportModal'); 
         await renderReports(); 
         await renderDashboard(); 
     } else { showToast(res?.message||"Failed",true); } 
-}
-
-// ==================== DOCUMENT UPLOAD ====================
-document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
-    if(e.target.files && e.target.files[0]) { 
-        currentProjectDocFile = e.target.files[0]; 
-        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
-        document.getElementById('projectDocPreview').classList.remove('hidden'); 
-    } 
-});
-
-function openUploadProjectDocModal() { 
-    document.getElementById('projectDocTitle').value = ''; 
-    document.getElementById('projectDocDesc').value = ''; 
-    document.getElementById('projectDocFile').value = ''; 
-    document.getElementById('projectDocPreview').classList.add('hidden'); 
-    currentProjectDocFile = null; 
-    openModal('projectDocUploadModal'); 
-}
-
-async function saveProjectDocument() {
-    const title = document.getElementById('projectDocTitle').value.trim();
-    const description = document.getElementById('projectDocDesc').value;
-    if (!title) { showToast('Document title required', true); return; }
-    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
-    
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('department_id', DEPARTMENT_ID);
-    formData.append('uploaded_by', CURRENT_USER);
-    formData.append('document_file', currentProjectDocFile);
-    
-    try {
-        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
-        const result = await response.json();
-        if (result.success) { 
-            showToast('Document uploaded successfully'); 
-            addLog(`Document uploaded: ${title}`);
-            closeModal('projectDocUploadModal'); 
-            await renderProjects(); 
-        } else { 
-            showToast(result.message || 'Upload failed', true); 
-        }
-    } catch (error) { 
-        showToast('Network error: ' + error.message, true); 
-    }
-}
-
-async function deleteProjectDocument(docId) {
-    if (confirm('Delete this document?')) {
-        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: CURRENT_USER });
-        if (res.success) { 
-            showToast('Document deleted'); 
-            await renderProjects(); 
-        } else { 
-            showToast(res.message || 'Failed', true); 
-        }
-    }
-}
-
-function viewUploadedDocument(docId) {
-    const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
-        let fileName = doc.file_name || '';
-        let isImage = fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-        let isPdf = fileName.match(/\.pdf$/i);
-        let previewContent = '';
-        if (isImage) {
-            previewContent = `<img src="${fileUrl}?t=${Date.now()}" class="max-w-full max-h-[400px] mx-auto object-contain rounded" onclick="showFullImage('${fileUrl}')">`;
-        } else if (isPdf) {
-            previewContent = `<iframe src="${fileUrl}" width="100%" height="500px" style="border:none;"></iframe>`;
-        } else {
-            previewContent = `<div class="text-center py-10"><i class="fas fa-file-alt text-6xl text-gray-400 mb-3"></i><p>Preview not available</p><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary mt-3">Download File</button></div>`;
-        }
-        document.getElementById('documentPreviewContent').innerHTML = previewContent;
-        document.getElementById('documentPreviewButtons').innerHTML = `
-            <button onclick="exportDocumentToExcel(${doc.id})" class="btn-success">Excel</button>
-            <button onclick="exportDocumentToPDF(${doc.id})" class="btn-danger">PDF</button>
-        `;
-        openModal('documentPreviewModal');
-    }
-}
-
-function exportDocumentToExcel(docId) {
-    const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
-        let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']];
-        ws.push([doc.title, doc.description||'-', doc.file_name, doc.uploaded_by, doc.created_at]);
-        let wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Document');
-        XLSX.writeFile(wb, `document_${doc.id}.xlsx`);
-        showToast('Exported');
-    }
-}
-
-function exportDocumentToPDF(docId) {
-    const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
-        let win = window.open('', '_blank');
-        if (!win) { showToast('Please allow popups', true); return; }
-        win.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(doc.title)} - Document</title><style>body{font-family:Arial;padding:20px;border:2px solid #4338ca;}h1{color:#4338ca;text-align:center;}</style></head><body><h1>${escapeHtml(doc.title)}</h1><p><strong>Description:</strong> ${escapeHtml(doc.description||'-')}</p><p><strong>File:</strong> ${doc.file_name}</p><p><strong>Uploaded:</strong> ${doc.uploaded_by} on ${new Date(doc.created_at).toLocaleString()}</p><hr/><iframe src="${fileUrl}" width="100%" height="600px"></iframe><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
-        win.document.close();
-        showToast("PDF preview opened - Click Print to save");
-    }
-}
-
-function exportAllProjectDocsToExcel() { 
-    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
-    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At']]; 
-    projectDocuments.forEach(d => ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Documents'); 
-    XLSX.writeFile(wb, `all_documents.xlsx`); 
-    showToast('Exported'); 
-}
-
-function exportAllProjectDocsToPDF() { 
-    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
-    let rows = projectDocuments.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><hr/></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Documents</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Documents</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
 }
 
 // ==================== SETTINGS ====================
@@ -1834,7 +2709,7 @@ function clearLogs(){
     } 
 }
 
-// ==================== SEARCH & NAVIGATION ====================
+// ==================== GLOBAL SEARCH ====================
 function performGlobalSearch() {
     const term = document.getElementById('globalSearchInput')?.value.toLowerCase().trim() || '';
     const dropdown = document.getElementById('searchResultsDropdown');
@@ -1845,11 +2720,13 @@ function performGlobalSearch() {
         let requestResults = requestsData.filter(r => r.source?.toLowerCase().includes(term) || (r.description || '').toLowerCase().includes(term));
         let reportResults = reportsList.filter(r => r.title?.toLowerCase().includes(term));
         let docResults = projectDocuments.filter(d => d.title?.toLowerCase().includes(term));
+        let uploadedResults = uploadedReportsData.filter(d => d.title?.toLowerCase().includes(term));
         let html = "";
         if (projResults.length) html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📋 PROJECTS</div>' + projResults.slice(0,3).map(p=>`<div class="search-result-item" onclick="searchAndHighlight('projects',${p.id},'proj-card-${p.id}')"><div class="font-medium">${escapeHtml(p.name)}</div><div class="text-xs text-gray-500">${formatMoney(p.amount)}</div></div>`).join('');
         if (requestResults.length) html += '<div class="p-2 bg-gray-100 text-xs font-semibold">💰 REQUESTS</div>' + requestResults.slice(0,3).map(r=>`<div class="search-result-item" onclick="searchAndHighlight('requests',${r.id},'req-row-${r.id}')"><div class="font-medium">${escapeHtml(r.source)}</div><div class="text-xs text-gray-500">${formatMoney(r.amount)}</div></div>`).join('');
         if (reportResults.length) html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📊 REPORTS</div>' + reportResults.slice(0,3).map(r=>`<div class="search-result-item" onclick="searchAndHighlight('reports',${r.id},'report-card-${r.id}')"><div class="font-medium">${escapeHtml(r.title)}</div><div class="text-xs text-gray-500">${r.period}</div></div>`).join('');
         if (docResults.length) html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📁 UPLOADED DOCUMENTS</div>' + docResults.slice(0,3).map(d=>`<div class="search-result-item" onclick="searchAndHighlight('projects',${d.id},'doc-card-${d.id}')"><div class="font-medium">${escapeHtml(d.title)}</div><div class="text-xs text-gray-500">${d.file_name}</div></div>`).join('');
+        if (uploadedResults.length) html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📁 UPLOADED REPORTS</div>' + uploadedResults.slice(0,3).map(d=>`<div class="search-result-item" onclick="searchAndHighlight('reports',${d.id},'uploaded-report-card-${d.id}')"><div class="font-medium">${escapeHtml(d.title)}</div><div class="text-xs text-gray-500">${d.file_name}</div></div>`).join('');
         if (!html) html = '<div class="p-4 text-center text-gray-400 text-xs">No results found</div>';
         if (dropdown) { dropdown.innerHTML = html; dropdown.classList.add('active'); }
     }, 300);
@@ -1880,6 +2757,7 @@ document.addEventListener("click", (e)=>{
     }
 });
 
+// ==================== NAVIGATION ====================
 function showSection(sectionId, highlightId = null) {
     let sections = ["dashboardSection","projectsSection","requestsSection","reportsSection","settingsSection"];
     sections.forEach(s=>{ let el = document.getElementById(s); if(el) el.classList.add("hidden"); });
@@ -1904,6 +2782,35 @@ function renderCurrentSection() {
         showSection(section);
     } else {
         showSection('dashboard');
+    }
+}
+
+function initDarkMode() {
+    const darkMode = localStorage.getItem('townplanning_dark_mode') === 'true';
+    if (darkMode) document.body.classList.add('dark-mode');
+    const icon = document.getElementById('darkModeIcon');
+    if (icon && darkMode) {
+        icon.classList.remove('fa-moon');
+        icon.classList.add('fa-sun');
+    }
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    if (darkModeToggle) {
+        darkModeToggle.addEventListener('click', function() {
+            document.body.classList.toggle('dark-mode');
+            const isDark = document.body.classList.contains('dark-mode');
+            localStorage.setItem('townplanning_dark_mode', isDark);
+            const iconEl = document.getElementById('darkModeIcon');
+            if (iconEl) {
+                if (isDark) {
+                    iconEl.classList.remove('fa-moon');
+                    iconEl.classList.add('fa-sun');
+                } else {
+                    iconEl.classList.remove('fa-sun');
+                    iconEl.classList.add('fa-moon');
+                }
+            }
+            showToast(isDark ? 'Dark mode enabled' : 'Light mode enabled');
+        });
     }
 }
 
@@ -1941,16 +2848,7 @@ function initScrollTop() {
     window.addEventListener('scroll', () => btn.classList.toggle('visible', window.scrollY > 300));
 }
 
-function initDarkMode() {
-    const darkMode = localStorage.getItem('townplanning_dark_mode') === 'true';
-    if (darkMode) document.body.classList.add('dark-mode');
-    const icon = document.getElementById('darkModeIcon');
-    if (icon && darkMode) {
-        icon.classList.remove('fa-moon');
-        icon.classList.add('fa-sun');
-    }
-}
-
+// ==================== INITIALIZATION ====================
 async function init() {
     await loadRecycleBinFromDB();
     
@@ -1961,16 +2859,20 @@ async function init() {
     
     initDarkMode();
     
-    document.querySelectorAll(".nav-item").forEach(nav=>nav.addEventListener("click",(e)=>{ e.preventDefault(); showSection(nav.getAttribute("data-section")); }));
+    document.querySelectorAll(".nav-item").forEach(nav => {
+        nav.addEventListener("click", (e) => { 
+            e.preventDefault(); 
+            showSection(nav.getAttribute("data-section")); 
+        });
+    });
     
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
     const logoutBtn = document.getElementById('logoutBtn');
     const profileBtn = document.getElementById('profileBtn');
-    const darkModeToggle = document.getElementById('darkModeToggle');
     const searchInput = document.getElementById('globalSearchInput');
     
     if (mobileMenuBtn) {
-        mobileMenuBtn.addEventListener("click",()=>{ 
+        mobileMenuBtn.addEventListener("click", () => { 
             const sidebar = document.getElementById('mainSidebar');
             const overlay = document.getElementById('mobileMenuOverlay');
             if (sidebar) sidebar.classList.add("mobile-open"); 
@@ -1979,26 +2881,14 @@ async function init() {
     }
     if (logoutBtn) logoutBtn.addEventListener("click", logout);
     if (profileBtn) {
-        profileBtn.addEventListener("click",()=>{
+        profileBtn.addEventListener("click", () => {
             const dropdown = document.getElementById('profileDropdown');
             if (dropdown) dropdown.classList.toggle("hidden");
         });
     }
-    if (darkModeToggle) {
-        darkModeToggle.addEventListener("click",()=>{ 
-            document.body.classList.toggle("dark-mode"); 
-            localStorage.setItem("townplanning_dark_mode",document.body.classList.contains("dark-mode")); 
-            let icon = document.getElementById("darkModeIcon"); 
-            if(document.body.classList.contains("dark-mode")){ 
-                if (icon) { icon.classList.remove("fa-moon"); icon.classList.add("fa-sun"); }
-            } else { 
-                if (icon) { icon.classList.remove("fa-sun"); icon.classList.add("fa-moon"); }
-            } 
-        });
-    }
     if (searchInput) searchInput.addEventListener("input", performGlobalSearch);
     
-    document.addEventListener("click",(e)=>{ 
+    document.addEventListener("click", (e) => { 
         const profileBtnEl = document.getElementById('profileBtn');
         const dropdown = document.getElementById('profileDropdown');
         if (profileBtnEl && dropdown && !profileBtnEl.contains(e.target) && dropdown.classList.contains('hidden') === false) {
@@ -2036,7 +2926,7 @@ window.deleteProject = deleteProject;
 window.viewProjectDetails = viewProjectDetails;
 window.openAddProjectModal = openAddProjectModal;
 window.exportSingleProjectExcel = exportSingleProjectExcel;
-window.exportProjectToPDF = exportProjectToPDF;
+window.exportProjectToPDFNewWindow = exportProjectToPDFNewWindow;
 window.exportAllProjectsToExcel = exportAllProjectsToExcel;
 window.exportAllProjectsToPDF = exportAllProjectsToPDF;
 window.sendProjectToDept = sendProjectToDept;
@@ -2044,8 +2934,6 @@ window.openUploadProjectDocModal = openUploadProjectDocModal;
 window.saveProjectDocument = saveProjectDocument;
 window.deleteProjectDocument = deleteProjectDocument;
 window.viewUploadedDocument = viewUploadedDocument;
-window.exportDocumentToExcel = exportDocumentToExcel;
-window.exportDocumentToPDF = exportDocumentToPDF;
 window.exportAllProjectDocsToExcel = exportAllProjectDocsToExcel;
 window.exportAllProjectDocsToPDF = exportAllProjectDocsToPDF;
 window.submitRequest = submitRequest;
@@ -2065,6 +2953,15 @@ window.exportSingleReportExcel = exportSingleReportExcel;
 window.exportSingleReportPDFWindow = exportSingleReportPDFWindow;
 window.exportAllReportsToExcel = exportAllReportsToExcel;
 window.exportAllReportsToPDF = exportAllReportsToPDF;
+window.sendReportToDept = sendReportToDept;
+window.openGenerateReportModal = openGenerateReportModal;
+window.generateAndSaveReport = generateAndSaveReport;
+window.openUploadReportModal = openUploadReportModal;
+window.saveUploadedReport = saveUploadedReport;
+window.viewUploadedReportDocument = viewUploadedReportDocument;
+window.deleteUploadedReport = deleteUploadedReport;
+window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel;
+window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF;
 window.saveDailyWork = saveDailyWork;
 window.viewDailyWork = viewDailyWork;
 window.editDailyWork = editDailyWork;
@@ -2083,6 +2980,9 @@ window.restoreFromRecycleBin = restoreFromRecycleBin;
 window.permanentlyDeleteItem = permanentlyDeleteItem;
 window.switchProjectTab = switchProjectTab;
 window.switchReportTab = switchReportTab;
+window.downloadDocumentFile = downloadDocumentFile;
+window.previewUploadedFile = previewUploadedFile;
+window.removeUploadedFile = removeUploadedFile;
 
 init();
 </script>

@@ -1,47 +1,45 @@
 <?php
-// backend/api/change_password.php
-require_once '../config/database.php';
+require_once 'config.php';
 
-$data = json_decode(file_get_contents("php://input"), true);
+$data = json_decode(file_get_contents('php://input'), true);
 
-if (!isset($data['current_password']) || !isset($data['new_password'])) {
-    sendResponse(false, null, "Current and new password required");
+if (!$data || empty($data['current_password']) || empty($data['new_password'])) {
+    sendResponse(false, 'Current and new password required');
 }
 
-if (strlen($data['new_password']) < 4) {
-    sendResponse(false, null, "New password must be at least 4 characters");
-}
-
-$database = new Database();
-$db = $database->getConnection();
-
-// Get current user (assuming admin id = 1 for now)
-$userId = $_SESSION['user_id'] ?? 1;
-
-$query = "SELECT password FROM users WHERE id = :id";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':id', $userId);
-$stmt->execute();
-
-if ($stmt->rowCount() > 0) {
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+try {
+    $departmentId = $data['department_id'] ?? null;
     
-    if (password_verify($data['current_password'], $user['password'])) {
-        $newPassword = password_hash($data['new_password'], PASSWORD_DEFAULT);
-        $updateQuery = "UPDATE users SET password = :password WHERE id = :id";
-        $updateStmt = $db->prepare($updateQuery);
-        $updateStmt->bindParam(':password', $newPassword);
-        $updateStmt->bindParam(':id', $userId);
-        
-        if ($updateStmt->execute()) {
-            sendResponse(true, null, "Password changed successfully");
-        } else {
-            sendResponse(false, null, "Failed to change password");
-        }
+    if ($departmentId) {
+        // Department user - find by department_id
+        $stmt = $pdo->prepare("SELECT * FROM employees WHERE department_id = :dept_id LIMIT 1");
+        $stmt->execute(['dept_id' => $departmentId]);
     } else {
-        sendResponse(false, null, "Current password is incorrect");
+        // Admin user
+        $stmt = $pdo->prepare("SELECT * FROM employees WHERE role = 'Super Administrator' LIMIT 1");
+        $stmt->execute();
     }
-} else {
-    sendResponse(false, null, "User not found");
+    
+    $user = $stmt->fetch();
+    
+    if (!$user) {
+        sendResponse(false, 'User not found');
+    }
+    
+    if (!password_verify($data['current_password'], $user['password'])) {
+        sendResponse(false, 'Current password is incorrect');
+    }
+    
+    $newHashedPassword = password_hash($data['new_password'], PASSWORD_BCRYPT);
+    
+    $stmt2 = $pdo->prepare("UPDATE employees SET password = :password WHERE id = :id");
+    $stmt2->execute([
+        'password' => $newHashedPassword,
+        'id' => $user['id']
+    ]);
+    
+    sendResponse(true, 'Password changed successfully');
+} catch(PDOException $e) {
+    sendResponse(false, 'Database error: ' . $e->getMessage());
 }
 ?>

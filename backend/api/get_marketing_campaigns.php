@@ -1,68 +1,29 @@
 <?php
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, DELETE');
-header('Access-Control-Allow-Headers: Content-Type');
+require_once 'config.php';
 
-require_once '../config/database.php';
+$departmentId = $_GET['department_id'] ?? null;
+$limit = $_GET['limit'] ?? 100;
+$page = $_GET['page'] ?? 1;
+$offset = ($page - 1) * $limit;
 
-$database = new Database();
-$db = $database->getConnection();
+$sql = "SELECT * FROM marketing_campaigns WHERE is_deleted = 0";
+$params = [];
 
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
-
-try {
-    // Get campaigns filtered by department_id (if provided)
-    if ($department_id > 0) {
-        $query = "SELECT id, campaign_name, campaign_type, budget, spent, start_date, end_date, 
-                         target_audience, description, status, department_id, created_by, created_at, updated_at
-                  FROM marketing_campaigns 
-                  WHERE department_id = :department_id 
-                    AND deleted_by_department = 0 
-                    AND deleted_by_admin = 0
-                  ORDER BY created_at DESC";
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':department_id', $department_id);
-    } else {
-        $query = "SELECT id, campaign_name, campaign_type, budget, spent, start_date, end_date, 
-                         target_audience, description, status, department_id, created_by, created_at, updated_at
-                  FROM marketing_campaigns 
-                  WHERE deleted_by_department = 0 
-                    AND deleted_by_admin = 0
-                  ORDER BY created_at DESC";
-        $stmt = $db->prepare($query);
-    }
-    
-    $stmt->execute();
-    $campaigns = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Get department names for each campaign
-    $dept_query = "SELECT id, name FROM departments";
-    $dept_stmt = $db->prepare($dept_query);
-    $dept_stmt->execute();
-    $departments = [];
-    while ($row = $dept_stmt->fetch(PDO::FETCH_ASSOC)) {
-        $departments[$row['id']] = $row['name'];
-    }
-    
-    foreach ($campaigns as &$campaign) {
-        $campaign['department_name'] = isset($departments[$campaign['department_id']]) ? $departments[$campaign['department_id']] : 'Unknown';
-        $campaign['remaining'] = floatval($campaign['budget']) - floatval($campaign['spent']);
-        $campaign['usage_percent'] = $campaign['budget'] > 0 ? round(($campaign['spent'] / $campaign['budget']) * 100, 2) : 0;
-    }
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $campaigns,
-        'count' => count($campaigns),
-        'message' => 'Campaigns retrieved successfully'
-    ]);
-    
-} catch (PDOException $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Database error: ' . $e->getMessage(),
-        'data' => []
-    ]);
+if ($departmentId) {
+    $sql .= " AND department_id = :dept_id";
+    $params['dept_id'] = $departmentId;
 }
+
+$sql .= " ORDER BY id DESC LIMIT :limit OFFSET :offset";
+$params['limit'] = intval($limit);
+$params['offset'] = intval($offset);
+
+$stmt = $pdo->prepare($sql);
+$stmt->bindParam(':limit', $params['limit'], PDO::PARAM_INT);
+$stmt->bindParam(':offset', $params['offset'], PDO::PARAM_INT);
+if (isset($params['dept_id'])) $stmt->bindParam(':dept_id', $params['dept_id']);
+$stmt->execute();
+$campaigns = $stmt->fetchAll();
+
+sendResponse(true, 'Marketing campaigns retrieved', $campaigns);
 ?>

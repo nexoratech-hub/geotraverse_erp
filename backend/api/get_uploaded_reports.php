@@ -1,25 +1,21 @@
 <?php
-error_reporting(0);
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET');
+require_once 'config.php';
 
-require_once 'db_connect.php';
+$departmentId = $_GET['department_id'] ?? null;
 
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 1;
+$sql = "SELECT * FROM uploaded_reports WHERE is_deleted = 0";
+$params = [];
 
-$query = "SELECT * FROM report_documents WHERE department_id = ? ORDER BY created_at DESC";
-$stmt = $conn->prepare($query);
-$stmt->bind_param("i", $department_id);
-$stmt->execute();
-$result = $stmt->get_result();
-
-$reports = [];
-while ($row = $result->fetch_assoc()) {
-    $reports[] = $row;
+if ($departmentId) {
+    $sql .= " AND department_id = :dept_id";
+    $params['dept_id'] = $departmentId;
 }
 
-echo json_encode(['success' => true, 'data' => $reports]);
-$stmt->close();
-$conn->close();
+$sql .= " ORDER BY id DESC";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$reports = $stmt->fetchAll();
+
+sendResponse(true, 'Uploaded reports retrieved', $reports);
 ?>

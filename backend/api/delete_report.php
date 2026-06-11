@@ -1,69 +1,27 @@
 <?php
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+require_once 'config.php';
 
-require_once '../config/database.php';
+$data = json_decode(file_get_contents('php://input'), true);
 
-$database = new Database();
-$db = $database->getConnection();
-
-$data = json_decode(file_get_contents("php://input"));
-
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'No data received']);
-    exit;
-}
-
-// Get parameters - support both naming conventions
-$report_id = isset($data->report_id) ? intval($data->report_id) : 0;
-$id = isset($data->id) ? intval($data->id) : 0;
-$department_id = isset($data->department_id) ? intval($data->department_id) : 0;
-$is_admin = isset($data->is_admin) ? intval($data->is_admin) : 0;
-
-// Use whichever ID is provided
-$final_report_id = $report_id > 0 ? $report_id : $id;
-
-if ($final_report_id == 0) {
-    echo json_encode(['success' => false, 'message' => 'Report ID required']);
-    exit;
+if (!$data || empty($data['report_id'])) {
+    sendResponse(false, 'Report ID required');
 }
 
 try {
-    // Check if report exists
-    $check_stmt = $db->prepare("SELECT id, department_id FROM reports WHERE id = ?");
-    $check_stmt->execute([$final_report_id]);
+    $stmt = $pdo->prepare("UPDATE reports SET is_deleted = 1, deleted_by_department = :dept_deleted, deleted_by_admin = :admin_deleted WHERE id = :id");
     
-    if ($check_stmt->rowCount() == 0) {
-        echo json_encode(['success' => false, 'message' => 'Report not found']);
-        exit;
-    }
+    $stmt->execute([
+        'dept_deleted' => $data['department_id'] ? 1 : 0,
+        'admin_deleted' => $data['is_admin'] ? 1 : 0,
+        'id' => $data['report_id']
+    ]);
     
-    $report = $check_stmt->fetch(PDO::FETCH_ASSOC);
+    // Add to recycle bin
+    $stmt2 = $pdo->prepare("INSERT INTO recycle_bin (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin) VALUES (?, 'report', (SELECT title FROM reports WHERE id = ?), ?, ?)");
+    $stmt2->execute([$data['report_id'], $data['report_id'], $data['department_id'] ?? null, $data['is_admin'] ?? 0]);
     
-    // Determine if this is a department delete or admin delete
-    if ($is_admin == 1) {
-        // Admin delete - set deleted_by_admin = 1
-        $update_stmt = $db->prepare("UPDATE reports SET deleted_by_admin = 1, deleted_at = NOW() WHERE id = ?");
-        $update_stmt->execute([$final_report_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'Report deleted by admin']);
-    } else if ($department_id > 0) {
-        // Department soft delete - set deleted_by_department = 1
-        $update_stmt = $db->prepare("UPDATE reports SET deleted_by_department = 1, deleted_at = NOW() WHERE id = ?");
-        $update_stmt->execute([$final_report_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'Report deleted from department view']);
-    } else {
-        // Default - soft delete by department
-        $update_stmt = $db->prepare("UPDATE reports SET deleted_by_department = 1, deleted_at = NOW() WHERE id = ?");
-        $update_stmt->execute([$final_report_id]);
-        
-        echo json_encode(['success' => true, 'message' => 'Report deleted successfully']);
-    }
-    
-} catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+    sendResponse(true, 'Report moved to recycle bin');
+} catch(PDOException $e) {
+    sendResponse(false, 'Database error: ' . $e->getMessage());
 }
 ?>

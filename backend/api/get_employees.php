@@ -1,22 +1,14 @@
 <?php
-// backend/api/get_employees.php
-require_once '../config/database.php';
+require_once 'config.php';
 
-$database = new Database();
-$db = $database->getConnection();
+$sql = "SELECT e.*, d.name as department_name FROM employees e 
+        LEFT JOIN departments d ON e.department_id = d.id 
+        WHERE e.is_deleted = 0 
+        ORDER BY e.id DESC";
 
-$query = "SELECT u.id, u.name, u.email, u.phone, u.department_id, u.role, u.salary, u.join_date, u.is_active, u.bio,
-          d.name as department_name
-          FROM users u
-          LEFT JOIN departments d ON u.department_id = d.id
-          ORDER BY u.id DESC";
-$stmt = $db->prepare($query);
+$stmt = $pdo->prepare($sql);
 $stmt->execute();
+$employees = $stmt->fetchAll();
 
-$employees = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $employees[] = $row;
-}
-
-sendResponse(true, $employees);
+sendResponse(true, 'Employees retrieved', $employees);
 ?>

@@ -1,34 +1,27 @@
 <?php
-error_reporting(0);
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST');
-header('Access-Control-Allow-Headers: Content-Type');
+require_once 'config.php';
 
-require_once 'db_connect.php';
+$data = json_decode(file_get_contents('php://input'), true);
 
-$response = ['success' => false, 'message' => 'Delete failed'];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $id = isset($input['id']) ? intval($input['id']) : 0;
-    
-    if ($id <= 0) {
-        echo json_encode(['success' => false, 'message' => 'Invalid ID']);
-        exit;
-    }
-    
-    $stmt = $conn->prepare("DELETE FROM report_documents WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    
-    if ($stmt->execute()) {
-        $response = ['success' => true, 'message' => 'Report deleted successfully'];
-    } else {
-        $response['message'] = 'Database error: ' . $stmt->error;
-    }
-    $stmt->close();
+if (!$data || empty($data['id'])) {
+    sendResponse(false, 'Report ID required');
 }
 
-echo json_encode($response);
-$conn->close();
+try {
+    // Get file path first
+    $stmt2 = $pdo->prepare("SELECT file_path FROM uploaded_reports WHERE id = :id");
+    $stmt2->execute(['id' => $data['id']]);
+    $report = $stmt2->fetch();
+    
+    $stmt = $pdo->prepare("UPDATE uploaded_reports SET is_deleted = 1, deleted_by = :deleted_by WHERE id = :id");
+    $stmt->execute(['deleted_by' => $data['deleted_by'] ?? 'System', 'id' => $data['id']]);
+    
+    // Add to recycle bin
+    $stmt3 = $pdo->prepare("INSERT INTO recycle_bin (item_id, item_type, item_name, deleted_by_department_id) VALUES (?, 'uploaded_report', (SELECT title FROM uploaded_reports WHERE id = ?), ?)");
+    $stmt3->execute([$data['id'], $data['id'], $data['department_id'] ?? null]);
+    
+    sendResponse(true, 'Uploaded report moved to recycle bin');
+} catch(PDOException $e) {
+    sendResponse(false, 'Database error: ' . $e->getMessage());
+}
 ?>

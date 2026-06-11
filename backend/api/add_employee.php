@@ -1,50 +1,31 @@
 <?php
-// backend/api/add_employee.php
-require_once '../config/database.php';
+require_once 'config.php';
 
-$data = json_decode(file_get_contents("php://input"), true);
+$data = json_decode(file_get_contents('php://input'), true);
 
-if (!isset($data['name']) || !isset($data['email'])) {
-    sendResponse(false, null, "Name and email required");
+if (!$data || empty($data['name']) || empty($data['email'])) {
+    sendResponse(false, 'Name and email required');
 }
 
-$database = new Database();
-$db = $database->getConnection();
+// Hash password
+$hashedPassword = password_hash($data['password'] ?? '1234', PASSWORD_BCRYPT);
 
-// Check if email exists
-$check = "SELECT id FROM users WHERE email = :email";
-$stmt = $db->prepare($check);
-$stmt->bindParam(':email', $data['email']);
-$stmt->execute();
-
-if ($stmt->rowCount() > 0) {
-    sendResponse(false, null, "Email already exists");
-}
-
-$password = isset($data['password']) && !empty($data['password']) ? password_hash($data['password'], PASSWORD_DEFAULT) : password_hash("123456", PASSWORD_DEFAULT);
-$name = $data['name'];
-$email = $data['email'];
-$phone = $data['phone'] ?? null;
-$department_id = $data['department_id'] ?? 1;
-$role = $data['role'] ?? 'Staff';
-$salary = $data['salary'] ?? 0;
-$join_date = $data['join_date'] ?? date('Y-m-d');
-
-$query = "INSERT INTO users (name, email, password, phone, department_id, role, salary, join_date) 
-          VALUES (:name, :email, :password, :phone, :department_id, :role, :salary, :join_date)";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':name', $name);
-$stmt->bindParam(':email', $email);
-$stmt->bindParam(':password', $password);
-$stmt->bindParam(':phone', $phone);
-$stmt->bindParam(':department_id', $department_id);
-$stmt->bindParam(':role', $role);
-$stmt->bindParam(':salary', $salary);
-$stmt->bindParam(':join_date', $join_date);
-
-if ($stmt->execute()) {
-    sendResponse(true, ['id' => $db->lastInsertId()], "Employee added successfully");
-} else {
-    sendResponse(false, null, "Failed to add employee");
+try {
+    $stmt = $pdo->prepare("INSERT INTO employees (name, email, phone, department_id, role, salary, password, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    
+    $stmt->execute([
+        $data['name'],
+        $data['email'],
+        $data['phone'] ?? null,
+        $data['department_id'] ?? null,
+        $data['role'] ?? 'Staff',
+        $data['salary'] ?? 0,
+        $hashedPassword,
+        $data['created_by'] ?? 'System'
+    ]);
+    
+    sendResponse(true, 'Employee added successfully', ['id' => $pdo->lastInsertId()]);
+} catch(PDOException $e) {
+    sendResponse(false, 'Database error: ' . $e->getMessage());
 }
 ?>
