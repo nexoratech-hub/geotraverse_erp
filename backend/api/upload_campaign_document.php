@@ -1,27 +1,26 @@
 <?php
 require_once 'config.php';
 
-$uploadDir = '../uploads/reports/';
+$uploadDir = '../uploads/campaign_documents/';
 if (!file_exists($uploadDir)) {
     mkdir($uploadDir, 0777, true);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = $_POST['title'] ?? '';
-    $period = $_POST['period'] ?? 'monthly';
+    $description = $_POST['description'] ?? '';
     $departmentId = $_POST['department_id'] ?? 1;
     $uploadedBy = $_POST['uploaded_by'] ?? 'System';
-    $description = $_POST['description'] ?? '';
     
     if (empty($title)) {
-        sendResponse(false, 'Report title required');
+        sendResponse(false, 'Document title required');
     }
     
-    if (!isset($_FILES['report_file']) || $_FILES['report_file']['error'] !== UPLOAD_ERR_OK) {
+    if (!isset($_FILES['document_file']) || $_FILES['document_file']['error'] !== UPLOAD_ERR_OK) {
         sendResponse(false, 'File upload failed');
     }
     
-    $file = $_FILES['report_file'];
+    $file = $_FILES['document_file'];
     $fileName = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '', $file['name']);
     $filePath = $uploadDir . $fileName;
     $fileSize = $file['size'];
@@ -29,22 +28,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (move_uploaded_file($file['tmp_name'], $filePath)) {
         try {
-            $stmt = $pdo->prepare("INSERT INTO uploaded_reports (title, period, file_name, file_path, file_size, file_type, department_id, uploaded_by, created_by, description, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
+            $stmt = $pdo->prepare("INSERT INTO project_documents (title, description, file_name, file_path, file_size, file_type, doc_type, department_id, uploaded_by, created_by) VALUES (?, ?, ?, ?, ?, ?, 'campaign', ?, ?, ?)");
             
             $stmt->execute([
                 $title,
-                $period,
+                $description,
                 $fileName,
                 $filePath,
                 $fileSize,
                 $fileType,
                 $departmentId,
                 $uploadedBy,
-                $uploadedBy,
-                $description
+                $uploadedBy
             ]);
             
-            sendResponse(true, 'Report uploaded successfully', ['id' => $pdo->lastInsertId()]);
+            sendResponse(true, 'Campaign document uploaded successfully', ['id' => $pdo->lastInsertId()]);
         } catch(PDOException $e) {
             unlink($filePath);
             sendResponse(false, 'Database error: ' . $e->getMessage());

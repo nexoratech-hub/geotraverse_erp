@@ -21,7 +21,6 @@ $department_id = isset($data['department_id']) ? intval($data['department_id']) 
 $is_admin = isset($data['is_admin']) ? intval($data['is_admin']) : 0;
 
 try {
-    // Soft delete - mark as deleted
     $query = "UPDATE fund_requests SET is_deleted = 1, deleted_at = NOW() WHERE id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $request_id);

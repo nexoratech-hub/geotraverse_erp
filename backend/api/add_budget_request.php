@@ -24,18 +24,25 @@ $description = isset($data['description']) ? $data['description'] : '';
 $department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
 $requested_by = isset($data['requested_by']) ? $data['requested_by'] : '';
 
-if (empty($title) || $amount <= 0) {
-    echo json_encode(['success' => false, 'message' => 'Title and amount are required']);
+if (empty($title) && empty($source)) {
+    echo json_encode(['success' => false, 'message' => 'Title is required']);
+    exit;
+}
+
+if ($amount <= 0) {
+    echo json_encode(['success' => false, 'message' => 'Amount must be greater than 0']);
     exit;
 }
 
 try {
-    $query = "INSERT INTO fund_requests (title, type, source, amount, description, department_id, requested_by, request_date, created_at) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+    $finalTitle = !empty($title) ? $title : $source;
+    $request_date = date('Y-m-d');
+    
+    $query = "INSERT INTO fund_requests (title, source, type, amount, description, department_id, requested_by, request_date, created_at, status) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'pending')";
     
     $stmt = $conn->prepare($query);
-    $request_date = date('Y-m-d');
-    $stmt->bind_param('sssdsis', $title, $type, $source, $amount, $description, $department_id, $requested_by);
+    $stmt->bind_param('sssdsiss', $finalTitle, $source, $type, $amount, $description, $department_id, $requested_by, $request_date);
     $stmt->execute();
     
     $new_id = $conn->insert_id;
