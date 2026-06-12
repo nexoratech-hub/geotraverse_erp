@@ -574,7 +574,14 @@ function formatDate(dateStr) {
 
 function formatDateTime(d) { 
     if (!d) return 'N/A'; 
-    return new Date(d).toLocaleString(); 
+    try {
+        let date = new Date(d);
+        if (isNaN(date.getTime())) return String(d);
+        // Return plain text, no HTML
+        return date.toLocaleString();
+    } catch(e) {
+        return String(d);
+    }
 }
 
 function escapeHtml(text) { 
@@ -1139,69 +1146,245 @@ function exportDailyWorkToExcel() {
     XLSX.writeFile(wb, `dailywork_${project.name.replace(/[^a-z0-9]/gi, '_')}.xlsx`);
     showToast('Exported to Excel');
 }
-
-// Export daily work to PDF
+// ==================== EXPORT DAILY WORK TO PDF ====================
 function exportDailyWorkToPDF() {
     const project = projectsData.find(p => p.id === currentProjectId);
-    if (!project) return;
-    const work = dailyworkData.filter(w => w.project_id == currentProjectId);
-    if (work.length === 0) { showToast('No records', true); return; }
+    if (!project) {
+        showToast('Project not found', true);
+        return;
+    }
     
+    const work = dailyworkData.filter(w => w.project_id == currentProjectId);
+    if (work.length === 0) {
+        showToast('No daily work records to export', true);
+        return;
+    }
+    
+    // Debug: Log data to console
+    console.log('Exporting daily work for project:', project.name);
+    console.log('Daily work records:', work);
+    
+    // Calculate totals
+    let totalBudget = 0, totalAmount = 0;
+    work.forEach(w => {
+        totalBudget += parseFloat(w.budget) || 0;
+        totalAmount += parseFloat(w.amount) || 0;
+    });
+    
+    // Build table rows - CLEAN HTML without extra spaces or line breaks
     let rows = '';
     for (let w of work) {
         let budget = parseFloat(w.budget) || 0;
         let amount = parseFloat(w.amount) || 0;
-        let variance = amount - budget;
-        rows += `<tr style="border-bottom:1px solid #0d9488;">
-            <td style="border:1px solid #0d9488; padding:8px;">${new Date(w.date).toLocaleString()}</td
-            <td style="border:1px solid #0d9488; padding:8px;">${escapeHtml(w.work_description || '-')}</td
-            <td style="border:1px solid #0d9488; padding:8px; text-align:right;">${formatNumberWithCommas(budget)}</td
-            <td style="border:1px solid #0d9488; padding:8px; text-align:right;">${formatNumberWithCommas(amount)}</td
-            <td style="border:1px solid #0d9488; padding:8px; text-align:right;">${formatNumberWithCommas(variance)}</td
-            <td style="border:1px solid #0d9488; padding:8px;">${w.status || 'pending'}</td
-            <td style="border:1px solid #0d9488; padding:8px;">${escapeHtml(w.created_by || 'System')}</td
-        </tr>`;
+        let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
+        let statusBg = w.status === 'completed' ? '#d1fae5' : w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+        let statusColor = w.status === 'completed' ? '#059669' : w.status === 'partial' ? '#d97706' : '#dc2626';
+        let dateStr = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+        let descriptionText = (w.work_description && w.work_description.trim() !== '') ? w.work_description : '-';
+        // Remove any HTML tags that might break the table
+        descriptionText = descriptionText.replace(/<[^>]*>/g, '');
+        
+        // Build row as a single string without line breaks inside
+        rows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+            '<td style="border: 1px solid #cbd5e1; padding: 10px 8px; white-space: nowrap;">' + escapeHtml(dateStr) + '</td>' +
+            '<td style="border: 1px solid #cbd5e1; padding: 10px 8px; word-break: break-word; white-space: normal;">' + escapeHtml(descriptionText) + '</td>' +
+            '<td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: right; white-space: nowrap; font-family: monospace;">' + formatNumberWithCommas(budget) + '</td>' +
+            '<td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: right; white-space: nowrap; font-family: monospace;">' + formatNumberWithCommas(amount) + '</td>' +
+            '<td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span></td>' +
+            '</tr>';
     }
     
-    let w = window.open('', '_blank');
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Daily Work Report - ${escapeHtml(project.name)}</title>
-        <style>
-            body{font-family:'Inter',Arial;padding:20px;}
-            table{border-collapse:collapse;width:100%;}
-            th,td{border:1px solid #0d9488;padding:8px;}
-            th{background:#0d9488;color:white;}
-            .text-right{text-align:right;}
-            .print-btn{text-align:center;margin-top:20px;}
-            .print-btn button{background:#0d9488;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;}
-            @media print{.print-btn{display:none;}}
-        </style>
-    </head>
-    <body>
-        <h1>Daily Work Report - ${escapeHtml(project.name)}</h1>
-        <p>Generated: ${new Date().toLocaleString()}</p>
-        <table>
-            <thead>
-                <tr>
-                    <th>Date/Time</th>
-                    <th>Description</th>
-                    <th class="text-right">Budget (TZS)</th>
-                    <th class="text-right">Amount (TZS)</th>
-                    <th class="text-right">Variance (TZS)</th>
-                    <th>Status</th>
-                    <th>Created By</th>
-                </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>
-        <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("PDF preview opened - Click Print to save");
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups", true);
+        return;
+    }
+    
+    printWindow.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>Daily Work Report - ' + escapeHtml(project.name) + '</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { \n' +
+                'font-family: "Inter", "Segoe UI", Arial, sans-serif; \n' +
+                'background: #f1f5f9; \n' +
+                'padding: 40px 20px; \n' +
+            '}\n' +
+            '.report-container { \n' +
+                'max-width: 1100px; \n' +
+                'margin: 0 auto; \n' +
+                'background: white; \n' +
+                'border-radius: 20px; \n' +
+                'overflow: hidden; \n' +
+                'box-shadow: 0 20px 40px rgba(0,0,0,0.15); \n' +
+                'border: 2px solid #0d9488; \n' +
+            '}\n' +
+            '.report-header { \n' +
+                'background: linear-gradient(135deg, #0d9488, #0f766e); \n' +
+                'color: white; \n' +
+                'padding: 25px 30px; \n' +
+                'text-align: center; \n' +
+            '}\n' +
+            '.report-header h1 { font-size: 22px; margin: 0 0 5px 0; }\n' +
+            '.report-header p { font-size: 12px; opacity: 0.85; }\n' +
+            '.report-info-bar { \n' +
+                'background: #f8fafc; \n' +
+                'padding: 12px 25px; \n' +
+                'display: flex; \n' +
+                'justify-content: space-between; \n' +
+                'font-size: 12px; \n' +
+                'border-bottom: 1px solid #e2e8f0; \n' +
+                'flex-wrap: wrap;\n' +
+            '}\n' +
+            '.section-title {\n' +
+                'background: #0d9488;\n' +
+                'color: white;\n' +
+                'padding: 12px 25px;\n' +
+                'font-size: 14px;\n' +
+                'font-weight: 700;\n' +
+            '}\n' +
+            '.daily-table-container {\n' +
+                'padding: 20px 25px;\n' +
+                'overflow-x: auto;\n' +
+            '}\n' +
+            '.daily-table {\n' +
+                'width: 100%;\n' +
+                'border-collapse: collapse;\n' +
+                'font-size: 12px;\n' +
+                'table-layout: fixed;\n' +
+            '}\n' +
+            '.daily-table th {\n' +
+                'background: #0d9488;\n' +
+                'color: white;\n' +
+                'padding: 12px 10px;\n' +
+                'border: 1px solid #0f766e;\n' +
+                'font-weight: 700;\n' +
+            '}\n' +
+            '.daily-table td {\n' +
+                'padding: 10px 8px;\n' +
+                'border: 1px solid #cbd5e1;\n' +
+                'vertical-align: top;\n' +
+            '}\n' +
+            /* FIXED COLUMN WIDTHS - 5 COLUMNS */
+            '.daily-table th:nth-child(1), .daily-table td:nth-child(1) { width: 16%; text-align: left; white-space: nowrap; }\n' +
+            '.daily-table th:nth-child(2), .daily-table td:nth-child(2) { width: 34%; text-align: left; word-break: break-word; white-space: normal; }\n' +
+            '.daily-table th:nth-child(3), .daily-table td:nth-child(3) { width: 15%; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; }\n' +
+            '.daily-table th:nth-child(4), .daily-table td:nth-child(4) { width: 15%; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; }\n' +
+            '.daily-table th:nth-child(5), .daily-table td:nth-child(5) { width: 20%; text-align: center; }\n' +
+            '.summary-cards {\n' +
+                'display: flex;\n' +
+                'gap: 15px;\n' +
+                'padding: 15px 25px;\n' +
+                'background: #f0fdf4;\n' +
+                'border-bottom: 1px solid #e2e8f0;\n' +
+            '}\n' +
+            '.summary-card {\n' +
+                'flex: 1;\n' +
+                'background: white;\n' +
+                'border-radius: 10px;\n' +
+                'padding: 12px;\n' +
+                'text-align: center;\n' +
+                'border: 1px solid #e2e8f0;\n' +
+            '}\n' +
+            '.summary-card .label {\n' +
+                'font-size: 10px;\n' +
+                'font-weight: 600;\n' +
+                'color: #64748b;\n' +
+                'margin-bottom: 6px;\n' +
+                'text-transform: uppercase;\n' +
+            '}\n' +
+            '.summary-card .value {\n' +
+                'font-size: 14px;\n' +
+                'font-weight: 800;\n' +
+                'color: #0d9488;\n' +
+                'font-family: monospace;\n' +
+            '}\n' +
+            '.footer { \n' +
+                'text-align: center; \n' +
+                'font-size: 10px; \n' +
+                'color: #6b7280; \n' +
+                'padding: 15px; \n' +
+                'border-top: 1px solid #e2e8f0; \n' +
+            '}\n' +
+            '.print-btn { \n' +
+                'text-align: center; \n' +
+                'padding: 15px; \n' +
+                'border-top: 1px solid #e2e8f0; \n' +
+            '}\n' +
+            '.print-btn button { \n' +
+                'background: #0d9488; \n' +
+                'color: white; \n' +
+                'border: none; \n' +
+                'padding: 10px 28px; \n' +
+                'border-radius: 8px; \n' +
+                'cursor: pointer; \n' +
+                'font-size: 13px; \n' +
+                'font-weight: 600; \n' +
+            '}\n' +
+            '@media print { \n' +
+                '.print-btn { display: none; } \n' +
+                'body { background: white; padding: 0; } \n' +
+            '}\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="report-container">\n' +
+            '<div class="report-header">\n' +
+                '<h1>Daily Work Report</h1>\n' +
+                '<p>' + escapeHtml(project.name) + '</p>\n' +
+            '</div>\n' +
+            '<div class="report-info-bar">\n' +
+                '<span><strong>Project ID:</strong> #' + project.id + '</span>\n' +
+                '<span><strong>Department:</strong> Survey</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated On:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+                '<span><strong>Total Records:</strong> ' + work.length + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card"><div class="label">Total Records</div><div class="value">' + work.length + '</div></div>\n' +
+                '<div class="summary-card"><div class="label">Total Budget</div><div class="value">' + formatNumberWithCommas(totalBudget) + ' TZS</div></div>\n' +
+                '<div class="summary-card"><div class="label">Total Amount Spent</div><div class="value">' + formatNumberWithCommas(totalAmount) + ' TZS</div></div>\n' +
+            '</div>\n' +
+            '<div class="section-title"><i class="fas fa-calendar-day"></i> DAILY WORK RECORDS</div>\n' +
+            '<div class="daily-table-container">\n' +
+                '<table class="daily-table">\n' +
+                    '<thead>\n' +
+                         '<tr>\n' +
+                            '<th>Date/Time</th>\n' +
+                            '<th>Work Description</th>\n' +
+                            '<th>Budget (TZS)</th>\n' +
+                            '<th>Amount Spent (TZS)</th>\n' +
+                            '<th>Status</th>\n' +
+                        '</tr>\n' +
+                    '</thead>\n' +
+                    '<tbody>\n' +
+                        rows +
+                    '</tbody>\n' +
+                '</table>\n' +
+                '<div style="margin-top: 15px; padding: 12px; background: #f8fafc; border-radius: 8px; text-align: center; font-size: 12px;">\n' +
+                    '<strong>📊 Summary:</strong> Total Records: ' + work.length + ' | \n' +
+                    'Total Budget: ' + formatNumberWithCommas(totalBudget) + ' TZS | \n' +
+                    'Total Amount Spent: ' + formatNumberWithCommas(totalAmount) + ' TZS\n' +
+                '</div>\n' +
+            '</div>\n' +
+            '<div class="footer">\n' +
+                'GeoTraverse ERP System - Survey Department | Daily Work Report<br>\n' +
+                'This document is system generated and requires no signature\n' +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(() => window.close(), 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button onclick="window.close();" style="margin-left: 10px; background: #64748b;">Close</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+    
+    printWindow.document.close();
+    showToast("📄 Daily Work PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 // ==================== IMAGE FUNCTIONS ====================
@@ -1550,7 +1733,7 @@ async function deleteProject(id) {
     } 
 }
 
-// ==================== PDF EXPORT FOR PROJECT (VERTICAL TABLE - KUSHUKA CHINI) ====================
+// ==================== EXPORT PROJECT TO PDF (VERTICAL TABLE - KUSHUKA CHINI) ====================
 async function exportProjectToPDF(projectId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { 
@@ -1563,6 +1746,7 @@ async function exportProjectToPDF(projectId) {
     let statusClass = getProjectStatusClass(p.status);
     let statusText = getProjectStatusText(p.status);
     
+    // Get daily work records
     const projectWork = dailyworkData.filter(w => w.project_id == projectId);
     let totalBudget = 0, totalAmount = 0;
     projectWork.forEach(w => {
@@ -1570,139 +1754,361 @@ async function exportProjectToPDF(projectId) {
         totalAmount += parseFloat(w.amount) || 0;
     });
     
-    let dailyWorkHtml = '';
+    // Build daily work table rows
+    let dailyWorkRows = '';
     if (projectWork.length > 0) {
-        dailyWorkHtml = `
-            <div style="margin-top: 30px;">
-                <h3 style="background: #0d9488; color: white; padding: 12px 15px; margin: 0 -25px 15px -25px; font-size: 14px;">
-                    📅 Daily Work Records
-                </h3>
-                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-                    <thead>
-                        <tr style="background: #f0fdf4;">
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Date/Time</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Description</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Budget (TZS)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Amount (TZS)</th>
-                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-        `;
         for (let w of projectWork) {
-            dailyWorkHtml += `
-                <tr style="border-bottom: 1px solid #ddd;">
-                    <td style="border: 1px solid #ddd; padding: 8px;">${new Date(w.date).toLocaleString()}</td>
-                    <td style="border: 1px solid #ddd; padding: 8px;">${escapeHtml(w.work_description || '-')}</td>
-                    <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${formatNumberWithCommas(w.budget || 0)}</td
-                    <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">${formatNumberWithCommas(w.amount || 0)}</td
-                    <td style="border: 1px solid #ddd; padding: 8px;">${w.status || 'pending'}</td
+            let budget = parseFloat(w.budget) || 0;
+            let amount = parseFloat(w.amount) || 0;
+            
+            dailyWorkRows += `
+                <tr>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px 8px;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px 8px;">${escapeHtml(w.work_description || '-')}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: right;">${formatNumberWithCommas(budget)}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: right;">${formatNumberWithCommas(amount)}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px 8px; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; background: ${w.status === 'completed' ? '#d1fae5' : w.status === 'partial' ? '#fef3c7' : '#fee2e2'}; color: ${w.status === 'completed' ? '#059669' : w.status === 'partial' ? '#d97706' : '#dc2626'};">${w.status || 'pending'}</span></td>
                 </tr>
             `;
         }
-        dailyWorkHtml += `
-                    </tbody>
-                    <tfoot>
-                        <tr style="background: #f0fdf4; font-weight: bold;">
-                            <td colspan="2" style="border: 1px solid #ddd; padding: 8px; text-align: right;"><strong>TOTAL:</strong></td>
-                            <td style="border: 1px solid #ddd; padding: 8px; text-align: right;"><strong>${formatNumberWithCommas(totalBudget)}</strong></td
-                            <td style="border: 1px solid #ddd; padding: 8px; text-align: right;"><strong>${formatNumberWithCommas(totalAmount)}</strong></td
-                            <td style="border: 1px solid #ddd; padding: 8px;"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        `;
+    } else {
+        dailyWorkRows = '<tr><td colspan="5" style="text-align: center; padding: 40px;">No daily work records found</td></tr>';
     }
     
-    let w = window.open('', '_blank');
-    if (!w) { 
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) { 
         showToast("Please allow popups", true); 
         return; 
     }
     
-    w.document.write(`<!DOCTYPE html>
+    printWindow.document.write(`<!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
         <title>${escapeHtml(p.name)} - Project Report</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
-            .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }
-            .header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }
-            .header h1 { font-size: 24px; margin: 0; }
-            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
-            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
-            .image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-            .image-section img { max-width: 300px; max-height: 200px; border-radius: 12px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; }
-            .no-image { padding: 40px; text-align: center; color: #9ca3af; }
-            .no-image i { font-size: 48px; margin-bottom: 10px; }
-            .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }
-            .details-section { padding: 25px; }
-            .details-table { width: 100%; border-collapse: collapse; }
-            .details-row { border-bottom: 1px solid #e5e7eb; }
-            .details-label { padding: 12px 16px; width: 35%; font-weight: 600; color: #374151; vertical-align: top; background: #fafafa; border-right: 1px solid #e5e7eb; }
-            .details-value { padding: 12px 16px; width: 65%; color: #1f2937; vertical-align: top; }
-            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
-            .print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } .details-label { background: #fafafa !important; } }
-            .money-amount { font-family: monospace; font-weight: 700; }
+            body { 
+                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
+                background: #f1f5f9; 
+                padding: 40px 20px; 
+            }
+            .report-container { 
+                max-width: 1100px; 
+                margin: 0 auto; 
+                background: white; 
+                border-radius: 20px; 
+                overflow: hidden; 
+                box-shadow: 0 20px 40px rgba(0,0,0,0.15); 
+                border: 2px solid #0d9488; 
+            }
+            .report-header { 
+                background: linear-gradient(135deg, #0d9488, #0f766e); 
+                color: white; 
+                padding: 30px; 
+                text-align: center; 
+            }
+            .report-header h1 { 
+                font-size: 24px; 
+                margin: 0 0 5px 0; 
+            }
+            .report-header p { 
+                font-size: 12px; 
+                opacity: 0.85; 
+            }
+            .report-info-bar { 
+                background: #f8fafc; 
+                padding: 12px 25px; 
+                display: flex; 
+                justify-content: space-between; 
+                font-size: 12px; 
+                border-bottom: 1px solid #e2e8f0; 
+                flex-wrap: wrap;
+            }
+            .image-section { 
+                text-align: center; 
+                padding: 20px; 
+                background: #fafcff; 
+                border-bottom: 1px solid #e2e8f0; 
+            }
+            .image-section img { 
+                max-width: 200px; 
+                max-height: 150px; 
+                border-radius: 8px; 
+                object-fit: cover; 
+            }
+            .no-image { 
+                color: #94a3b8; 
+                padding: 20px; 
+            }
+            
+            /* VERTICAL TABLE - KILA ROW INA DATA MOJA (KUSHUKA CHINI) */
+            .details-table { 
+                width: 100%; 
+                border-collapse: collapse; 
+            }
+            .details-table tr { 
+                border-bottom: 1px solid #e2e8f0; 
+            }
+            .details-table td:first-child { 
+                width: 180px; 
+                background: #f8fafc; 
+                padding: 14px 20px; 
+                font-weight: 700; 
+                color: #0d9488; 
+                border-right: 1px solid #e2e8f0;
+            }
+            .details-table td:last-child { 
+                padding: 14px 20px; 
+                color: #1e293b; 
+            }
+            
+            .status-badge { 
+                display: inline-block; 
+                padding: 4px 14px; 
+                border-radius: 20px; 
+                font-size: 12px; 
+            }
+            .status-pending { background: #fef3c7; color: #d97706; }
+            .status-progress { background: #dbeafe; color: #2563eb; }
+            .status-completed { background: #d1fae5; color: #059669; }
+            
+            .progress-bar-container {
+                width: 200px;
+                background: #e2e8f0;
+                border-radius: 10px;
+                height: 8px;
+                margin-top: 8px;
+            }
+            .progress-bar {
+                width: ${p.progress || 0}%;
+                background: #0d9488;
+                border-radius: 10px;
+                height: 8px;
+            }
+            .money-amount {
+                color: #059669;
+                font-weight: 700;
+                font-size: 16px;
+            }
+            
+            .section-title {
+                background: #0d9488;
+                color: white;
+                padding: 12px 25px;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            
+            .daily-table-container {
+                padding: 20px 25px;
+                overflow-x: auto;
+            }
+            .daily-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 12px;
+            }
+            .daily-table th {
+                background: #0d9488;
+                color: white;
+                padding: 10px 8px;
+                border: 1px solid #0f766e;
+            }
+            .daily-table td {
+                padding: 8px;
+                border: 1px solid #e2e8f0;
+            }
+            .daily-table th:nth-child(1) { width: 18%; }
+            .daily-table th:nth-child(2) { width: 32%; }
+            .daily-table th:nth-child(3) { width: 15%; }
+            .daily-table th:nth-child(4) { width: 15%; }
+            .daily-table th:nth-child(5) { width: 20%; }
+            .daily-table td:nth-child(3),
+            .daily-table td:nth-child(4) { text-align: right; }
+            .daily-table td:nth-child(5) { text-align: center; }
+            
+            .summary-cards {
+                display: flex;
+                gap: 15px;
+                padding: 15px 25px;
+                background: #f0fdf4;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            .summary-card {
+                flex: 1;
+                background: white;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #e2e8f0;
+            }
+            .summary-card .label {
+                font-size: 10px;
+                font-weight: 600;
+                color: #64748b;
+                margin-bottom: 6px;
+            }
+            .summary-card .value {
+                font-size: 14px;
+                font-weight: 800;
+                color: #0d9488;
+            }
+            .footer { 
+                text-align: center; 
+                font-size: 10px; 
+                color: #6b7280; 
+                padding: 15px; 
+                border-top: 1px solid #e2e8f0; 
+            }
+            .print-btn { 
+                text-align: center; 
+                padding: 15px; 
+                border-top: 1px solid #e2e8f0; 
+            }
+            .print-btn button { 
+                background: #0d9488; 
+                color: white; 
+                border: none; 
+                padding: 10px 28px; 
+                border-radius: 8px; 
+                cursor: pointer; 
+                font-size: 13px; 
+                font-weight: 600; 
+            }
+            @media print { 
+                .print-btn { display: none; } 
+                body { background: white; padding: 0; } 
+            }
         </style>
     </head>
     <body>
-    <div class="container">
-        <div class="header">
-            <h1>${escapeHtml(p.name)}</h1>
-            <p>Project Report - Generated: ${new Date().toLocaleString()}</p>
-        </div>
-        <div class="info-bar">
-            <span><strong>Project ID:</strong> #${p.id}</span>
-            <span><strong>Department:</strong> Survey</span>
-            <span><strong>Report Type:</strong> Full Project Report</span>
-        </div>
-        <div class="image-section">
-            ${imageUrl && isImage ? 
-                `<img src="${imageUrl}?t=${Date.now()}" alt="Project Image" onerror="this.parentElement.innerHTML='<div class=\'no-image\'><i class=\'fas fa-image\'></i><p>No Image Available</p></div>'">` : 
-                '<div class="no-image"><i class="fas fa-image"></i><p>No Image Available</p></div>'
-            }
-        </div>
-        
-        <div class="details-section">
-            <h2 style="color: #0d9488; margin-bottom: 15px; font-size: 18px;">📋 PROJECT DETAILS</h2>
+        <div class="report-container">
+            <div class="report-header">
+                <h1>${escapeHtml(p.name)}</h1>
+                <p>Project Report - Generated on ${new Date().toLocaleString()}</p>
+            </div>
+            <div class="report-info-bar">
+                <span><strong>Project ID:</strong> #${p.id}</span>
+                <span><strong>Department:</strong> Survey</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+            </div>
+            
+            <div class="image-section">
+                ${imageUrl && isImage ? `<img src="${imageUrl}?t=${Date.now()}" onerror="this.parentElement.innerHTML='<div class=\'no-image\'>No Image Available</div>'">` : '<div class="no-image">No Image Available</div>'}
+            </div>
+            
+            <!-- PROJECT DETAILS - VERTICAL TABLE (KILA DETAIL IKO KWENYE ROW YAKE) -->
+            <div class="section-title"><i class="fas fa-info-circle"></i> PROJECT DETAILS</div>
             <table class="details-table">
-                <tr class="details-row"><td class="details-label">Project Name:</td><td class="details-value"><strong>${escapeHtml(p.name)}</strong></td</tr
-                <tr class="details-row"><td class="details-label">Client Name:</td<td class="details-value">${escapeHtml(p.client_name || 'N/A')}</td</tr
-                <tr class="details-row"><td class="details-label">Amount:</td<td class="details-value"><span class="money-amount" style="color:#059669; font-weight:bold;">${formatNumberWithCommas(p.amount)} TZS</span></td</tr
-                <tr class="details-row"><td class="details-label">Status:</td<td class="details-value"><span class="status-badge ${statusClass}">${statusText}</span></td</tr
-                <tr class="details-row"><td class="details-label">Progress:</td<td class="details-value">${p.progress || 0}%<div style="width:100%; background:#e5e7eb; border-radius:4px; margin-top:5px;"><div style="width:${p.progress || 0}%; background:#0d9488; height:6px; border-radius:4px;"></div></div></td</tr
-                <tr class="details-row"><td class="details-label">Location:</td<td class="details-value">${escapeHtml(p.location || 'N/A')}</td</tr
-                <tr class="details-row"><td class="details-label">Start Date:</td<td class="details-value">${p.start_date || 'Not specified'}</td</tr
-                <tr class="details-row"><td class="details-label">End Date:</td<td class="details-value">${p.end_date || 'Not specified'}</td</tr
-                <tr class="details-row"><td class="details-label">Description:</td<td class="details-value">${escapeHtml(p.description || 'No description')}</td</tr
-                <tr class="details-row"><td class="details-label">Created By:</td<td class="details-value">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td</tr
-                ${p.updated_by ? `<tr class="details-row"><td class="details-label">Updated By:</td<td class="details-value">${escapeHtml(p.updated_by)} on ${formatDateTime(p.updated_at)}</td</tr` : ''}
-            <table>
-            ${dailyWorkHtml}
+                <tr>
+                    <td><i class="fas fa-tag"></i> Project Name:</td>
+                    <td><strong>${escapeHtml(p.name)}</strong></td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-user"></i> Client Name:</td>
+                    <td>${escapeHtml(p.client_name || 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-money-bill-wave"></i> Amount:</td>
+                    <td class="money-amount">${formatNumberWithCommas(p.amount)} TZS</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-chart-simple"></i> Status:</td>
+                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-chart-line"></i> Progress:</td>
+                    <td>${p.progress || 0}%<div class="progress-bar-container"><div class="progress-bar"></div></div></td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-location-dot"></i> Location:</td>
+                    <td>${escapeHtml(p.location || 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-calendar-alt"></i> Start Date:</td>
+                    <td>${p.start_date || 'Not specified'}</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-calendar-check"></i> End Date:</td>
+                    <td>${p.end_date && p.end_date !== '0000-00-00' ? p.end_date : 'Not specified'}</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-align-left"></i> Description:</td>
+                    <td>${escapeHtml(p.description || 'No description')}</td>
+                </tr>
+                <tr>
+                    <td><i class="fas fa-user-plus"></i> Created By:</td>
+                    <td>${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td>
+                </tr>
+                ${p.updated_by ? `
+                <tr>
+                    <td><i class="fas fa-edit"></i> Updated By:</td>
+                    <td>${escapeHtml(p.updated_by)} on ${formatDateTime(p.updated_at)}</td>
+                </tr>
+                ` : ''}
+            </table>
+            
+            <!-- DAILY WORK SECTION -->
+            <div class="section-title"><i class="fas fa-calendar-day"></i> DAILY WORK RECORDS</div>
+            
+            ${projectWork.length > 0 ? `
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="label">Total Budget</div>
+                    <div class="value">${formatNumberWithCommas(totalBudget)} TZS</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Total Amount Spent</div>
+                    <div class="value">${formatNumberWithCommas(totalAmount)} TZS</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Total Records</div>
+                    <div class="value">${projectWork.length}</div>
+                </div>
+            </div>
+            ` : ''}
+            
+            <div class="daily-table-container">
+                <table class="daily-table">
+                    <thead>
+                        <tr>
+                            <th>Date/Time</th>
+                            <th>Work Description</th>
+                            <th>Budget (TZS)</th>
+                            <th>Amount Spent (TZS)</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${dailyWorkRows}
+                    </tbody>
+                </table>
+                ${projectWork.length > 0 ? `
+                <div style="margin-top: 15px; padding: 10px; background: #f8fafc; border-radius: 8px; text-align: center; font-size: 12px;">
+                    <strong>Summary:</strong> Total Records: ${projectWork.length} | 
+                    Total Budget: ${formatNumberWithCommas(totalBudget)} TZS | 
+                    Total Amount Spent: ${formatNumberWithCommas(totalAmount)} TZS
+                </div>
+                ` : ''}
+            </div>
+            
+            <div class="footer">
+                GeoTraverse ERP System - Survey Department | Official Project Document
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
+                    🖨️ Save as PDF / Print
+                </button>
+                <button onclick="window.close();" style="margin-left: 10px; background: #64748b;">Close</button>
+            </div>
         </div>
-        
-        <div class="footer">
-            GeoTraverse ERP System - Survey Department | Official Project Document
-        </div>
-        <div class="print-btn">
-            <button onclick="window.print(); setTimeout(() => window.close(), 1000);">
-                🖨️ Save as PDF / Print
-            </button>
-        </div>
-    </div>
     </body>
     </html>`);
     
-    w.document.close();
-    showToast("📄 PDF preview opened - Click Print/Save to download");
+    printWindow.document.close();
+    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
-
 function exportSingleProjectExcel(id) { 
     const p = projectsData.find(p=>p.id===id); 
     if(p) { 
@@ -1726,7 +2132,8 @@ function exportSingleProjectExcel(id) {
     } 
 }
 
-// ==================== VIEW PROJECT FUNCTION ====================
+// ==================== VIEW PROJECT FUNCTION - VERTICAL TABLE (KUSHUKA CHINI) ====================
+// ==================== VIEW PROJECT FUNCTION - VERTICAL TABLE (KUSHUKA CHINI) ====================
 async function viewProject(id) {
     const p = projectsData.find(p => p.id === id);
     if(p) {
@@ -1741,125 +2148,144 @@ async function viewProject(id) {
         
         let imageHtml = '';
         if (imageUrl && isImage) {
-            imageHtml = `<div class="relative w-full h-64 mb-4 bg-gray-100 rounded-lg overflow-hidden">
-                            <img src="${imageUrl}?t=${Date.now()}" class="w-full h-full object-contain cursor-pointer" onclick="showFullImage('${imageUrl}')" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\'w-full h-full flex items-center justify-center\'><i class=\'fas fa-image text-5xl text-gray-400\'></i><p class=\'text-sm text-gray-500 ml-2\'>Image failed to load</p></div>'">
-                        </div>`;
+            imageHtml = '<div class="relative w-full h-64 mb-4 bg-gray-100 rounded-lg overflow-hidden">' +
+                            '<img src="' + imageUrl + '?t=' + Date.now() + '" class="w-full h-full object-contain cursor-pointer" onclick="showFullImage(\'' + imageUrl + '\')" onerror="this.onerror=null; this.parentElement.innerHTML=\'<div class=\"w-full h-full flex items-center justify-center\"><i class=\"fas fa-image text-5xl text-gray-400\"></i><p class=\"text-sm text-gray-500 ml-2\">Image failed to load</p></div>\'">' +
+                        '</div>';
         } else if (imageUrl && !isImage) {
-            imageHtml = `<div class="w-full h-48 mb-4 flex items-center justify-center bg-gray-100 rounded-lg cursor-pointer" onclick="window.open('${imageUrl}', '_blank')">
-                            <i class="fas fa-file-alt text-5xl text-gray-500"></i>
-                            <p class="text-sm text-gray-600 ml-3">Click to view file</p>
-                        </div>`;
+            imageHtml = '<div class="w-full h-48 mb-4 flex items-center justify-center bg-gray-100 rounded-lg cursor-pointer" onclick="window.open(\'' + imageUrl + '\', \'_blank\')">' +
+                            '<i class="fas fa-file-alt text-5xl text-gray-500"></i>' +
+                            '<p class="text-sm text-gray-600 ml-3">Click to view file</p>' +
+                        '</div>';
         } else {
-            imageHtml = `<div class="w-full h-48 mb-4 flex items-center justify-center bg-gray-100 rounded-lg">
-                            <i class="fas fa-image text-5xl text-gray-400"></i>
-                            <p class="text-sm text-gray-500 ml-2">No Image Available</p>
-                        </div>`;
+            imageHtml = '<div class="w-full h-48 mb-4 flex items-center justify-center bg-gray-100 rounded-lg">' +
+                            '<i class="fas fa-image text-5xl text-gray-400"></i>' +
+                            '<p class="text-sm text-gray-500 ml-2">No Image Available</p>' +
+                        '</div>';
         }
         
         // VERTICAL TABLE - KILA DETAIL INA ROW YAKE (KUSHUKA CHINI)
-        let detailsHtml = `
-            <div class="space-y-3 text-sm">
-                <table style="width:100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-tag text-teal-500 mr-2"></i> Project Name:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            <strong>${escapeHtml(p.name)}</strong>
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-user text-teal-500 mr-2"></i> Client Name:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${escapeHtml(p.client_name || 'N/A')}
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-money-bill-wave text-teal-500 mr-2"></i> Amount:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            <span class="text-green-600 font-bold text-lg">${formatCurrency(p.amount)}</span>
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-chart-simple text-teal-500 mr-2"></i> Status:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            <span class="status-badge ${getProjectStatusClass(p.status)}" style="padding: 6px 14px; font-size: 12px;">${getProjectStatusText(p.status)}</span>
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-chart-line text-teal-500 mr-2"></i> Progress:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            <div class="flex items-center gap-3">
-                                <span class="font-semibold">${p.progress || 0}%</span>
-                                <div class="flex-1 bg-gray-200 rounded-full h-2.5 max-w-[200px]">
-                                    <div class="bg-teal-600 h-2.5 rounded-full" style="width:${p.progress || 0}%"></div>
-                                </div>
-                            </div>
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-location-dot text-teal-500 mr-2"></i> Location:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${escapeHtml(p.location || 'N/A')}
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-calendar-alt text-teal-500 mr-2"></i> Start Date:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${p.start_date || 'N/A'}
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-calendar-check text-teal-500 mr-2"></i> End Date:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${p.end_date || 'N/A'}
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-align-left text-teal-500 mr-2"></i> Description:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${escapeHtml(p.description || 'N/A')}
-                        </td
-                      </tr
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-user-plus text-teal-500 mr-2"></i> Created By:
-                        </td>
-                        <td style="padding: 14px 16px;">
-                            ${escapeHtml(p.created_by || 'System')} 
-                            <span class="text-gray-400 text-xs ml-2">on ${formatDateTime(p.created_at)}</span>
-                        </td
-                      </tr
-                    ${p.updated_by ? `
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">
-                            <i class="fas fa-edit text-teal-500 mr-2"></i> Updated By:
-                        </table>
-                        <td style="padding: 14px 16px;">
-                            ${escapeHtml(p.updated_by)} 
-                            <span class="text-gray-400 text-xs ml-2">on ${formatDateTime(p.updated_at)}</span>
-                        </td
-                      </tr
-                    ` : ''}
-                </table>
-            </div>
-        `;
+        let detailsHtml = '<div class="space-y-3 text-sm">';
+        detailsHtml += '<table style="width:100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">';
+        
+        // Row 1: Project Name
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-tag text-teal-500 mr-2"></i> Project Name:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += '<strong>' + escapeHtml(p.name) + '</strong>';
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 2: Client Name
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-user text-teal-500 mr-2"></i> Client Name:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += escapeHtml(p.client_name || 'N/A');
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 3: Amount
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-money-bill-wave text-teal-500 mr-2"></i> Amount:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += '<span class="text-green-600 font-bold text-lg">' + formatCurrency(p.amount) + '</span>';
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 4: Status
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-chart-simple text-teal-500 mr-2"></i> Status:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += '<span class="status-badge ' + getProjectStatusClass(p.status) + '" style="padding: 6px 14px; font-size: 12px;">' + getProjectStatusText(p.status) + '</span>';
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 5: Progress
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-chart-line text-teal-500 mr-2"></i> Progress:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += (p.progress || 0) + '%';
+        detailsHtml += '<div class="w-full bg-gray-200 rounded-full h-1.5 mt-1">';
+        detailsHtml += '<div class="bg-teal-600 h-1.5 rounded-full" style="width:' + (p.progress || 0) + '%"></div>';
+        detailsHtml += '</div>';
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 6: Location
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-location-dot text-teal-500 mr-2"></i> Location:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += escapeHtml(p.location || 'N/A');
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 7: Start Date
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-calendar-alt text-teal-500 mr-2"></i> Start Date:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += (p.start_date || 'N/A');
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 8: End Date
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-calendar-check text-teal-500 mr-2"></i> End Date:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += (p.end_date || 'N/A');
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 9: Description
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-align-left text-teal-500 mr-2"></i> Description:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += escapeHtml(p.description || 'N/A');
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 10: Created By
+        detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+        detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+        detailsHtml += '<i class="fas fa-user-plus text-teal-500 mr-2"></i> Created By:';
+        detailsHtml += '</td>';
+        detailsHtml += '<td style="padding: 14px 16px;">';
+        detailsHtml += escapeHtml(p.created_by || 'System') + ' ';
+        detailsHtml += '<span class="text-gray-400 text-xs ml-2">on ' + formatDateTime(p.created_at) + '</span>';
+        detailsHtml += '</td>';
+        detailsHtml += '</tr>';
+        
+        // Row 11: Updated By (if exists)
+        if (p.updated_by) {
+            detailsHtml += '<tr style="border-bottom: 1px solid #e5e7eb;">';
+            detailsHtml += '<td style="padding: 14px 16px; font-weight: 600; width: 35%; background: #f8fafc; border-right: 1px solid #e5e7eb;">';
+            detailsHtml += '<i class="fas fa-edit text-teal-500 mr-2"></i> Updated By:';
+            detailsHtml += '</td>';
+            detailsHtml += '<td style="padding: 14px 16px;">';
+            detailsHtml += escapeHtml(p.updated_by) + ' ';
+            detailsHtml += '<span class="text-gray-400 text-xs ml-2">on ' + formatDateTime(p.updated_at) + '</span>';
+            detailsHtml += '</td>';
+            detailsHtml += '</tr>';
+        }
+        
+        detailsHtml += '</table>';
+        detailsHtml += '</div>';
         
         document.getElementById('viewProjectContent').innerHTML = imageHtml + detailsHtml;
         
@@ -1872,26 +2298,20 @@ async function viewProject(id) {
         for (let w of projectWork) {
             let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending';
             let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
-            dailyWorkHtml += `<tr id="daily-row-${w.id}">
-                <td class="p-2 text-xs date-cell">${new Date(w.date).toLocaleString()}</td>
-                <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
-                <td class="p-2 text-xs text-right">${formatCurrency(w.budget || 0)}</td
-                <td class="p-2 text-xs text-right">${formatCurrency(w.amount || 0)}</td
-                <td class="p-2 text-center"><span class="status-badge ${statusClass}">${statusText}</span></td
-                <td class="p-2 text-center">
-                    <div class="flex gap-1 justify-center">
-                        <button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
-                        <button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
-                    </div>
-                </td
-            </tr>`;
+            dailyWorkHtml += '<tr id="daily-row-' + w.id + '">';
+            dailyWorkHtml += '<td class="p-2 text-xs date-cell">' + new Date(w.date).toLocaleString() + '</td>';
+            dailyWorkHtml += '<td class="p-2 text-xs">' + escapeHtml(w.work_description || '-') + '</td>';
+            dailyWorkHtml += '<td class="p-2 text-xs text-right">' + formatCurrency(w.budget || 0) + '</td>';
+            dailyWorkHtml += '<td class="p-2 text-xs text-right">' + formatCurrency(w.amount || 0) + '</td>';
+            dailyWorkHtml += '<td class="p-2 text-center"><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>';
+            dailyWorkHtml += '<td class="p-2 text-center"><div class="daily-work-actions"><button onclick="viewDailyWork(' + w.id + ')" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(' + w.id + ')" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(' + w.id + ')" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>';
+            dailyWorkHtml += '</tr>';
         }
         
         const dailyWorkBody = document.getElementById('dailyWorkTableBody');
         if (dailyWorkBody) {
             if (projectWork.length === 0) {
-                dailyWorkBody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td</tr';
+                dailyWorkBody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>';
             } else {
                 dailyWorkBody.innerHTML = dailyWorkHtml;
             }
@@ -1902,7 +2322,7 @@ async function viewProject(id) {
         const remainingSpan = document.getElementById('remainingAmount');
         if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatCurrency(totalBudget);
         if (totalAmountSpan) totalAmountSpan.innerHTML = formatCurrency(totalAmount);
-        if (remainingSpan) remainingSpan.innerHTML = formatCurrency((parseFloat(p.amount)||0) - totalAmount);
+        if (remainingSpan) remainingSpan.innerHTML = formatCurrency(totalBudget - totalAmount);
         
         // Hide daily work containers initially
         const dailyWorkContainer = document.getElementById('dailyWorkListContainer');
@@ -1914,7 +2334,7 @@ async function viewProject(id) {
         let deptOptions = ''; 
         allDepartmentsForSend.forEach(d => { 
             if (d.id !== DEPARTMENT_ID) {
-                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+                deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
             }
         });
         
@@ -1929,7 +2349,6 @@ async function viewProject(id) {
         loadProjects();
     }
 }
-
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p=>p.id===projectId); 
     if(!p) return; 
@@ -2060,6 +2479,7 @@ function exportAllUploadedReportsToExcel() {
 }
 
 // ==================== LOAD PROJECTS SECTION ====================
+// ==================== LOAD PROJECTS SECTION ====================
 async function loadProjects() {
     await fetchProjects();
     await fetchProjectDocuments();
@@ -2094,7 +2514,7 @@ async function loadProjects() {
         document.getElementById('projectsSection').innerHTML = html;
         
         if (projectsData.length === 0) {
-            document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No projects found. Click "Add Project" to create one.</div>';
+            document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white dark:bg-gray-800 rounded-xl">No projects found. Click "Add Project" to create one.</div>';
             return;
         }
         
@@ -2102,24 +2522,34 @@ async function loadProjects() {
         for (let p of projectsData) {
             let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedProjectIds.includes(p.id);
             let imageUrl = getFullImageUrl(p.image);
+            let statusClass = getProjectStatusClass(p.status);
+            let statusText = getProjectStatusText(p.status);
             
             projectsHtml += `
-                <div class="project-card" id="proj-card-${p.id}">
+                <div class="project-card" id="proj-card-${p.id}" onclick="viewProject(${p.id})">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     <div class="card-header">
                         <h4>${escapeHtml(p.name)}</h4>
                         <p>ID: #${p.id}</p>
                     </div>
-                    <div class="relative w-full h-48 bg-gray-100 cursor-pointer" onclick="viewProject(${p.id})">
+                    <div class="project-image-wrapper" style="position:relative; width:100%; height:180px; background:#f3f4f6; overflow:hidden;">
                         ${imageUrl ? 
-                            `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-48 object-cover" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\'w-full h-48 flex flex-col items-center justify-center\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-xs text-gray-500 mt-2\'>Image not found</p></div>'">` : 
-                            `<div class="w-full h-48 flex flex-col items-center justify-center bg-gray-100"><i class="fas fa-image text-3xl text-gray-400"></i><p class="text-xs text-gray-500 mt-2">No Image</p></div>`
+                            `<img src="${imageUrl}?t=${Date.now()}" 
+                                class="project-image" 
+                                style="width:100%; height:100%; object-fit:cover; cursor:pointer;" 
+                                onclick="event.stopPropagation(); viewProject(${p.id})" 
+                                onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` 
+                            : ''
                         }
+                        <div class="no-image" ${imageUrl ? 'style="display:none;"' : 'style="display:flex; width:100%; height:100%; flex-direction:column; align-items:center; justify-content:center;"'}>
+                            <i class="fas fa-image text-4xl text-gray-400"></i>
+                            <p class="text-xs text-gray-500 mt-2">No Image</p>
+                        </div>
                     </div>
                     <div class="p-3">
                         <div class="flex justify-between items-start">
                             <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
-                            <span class="status-badge ${getProjectStatusClass(p.status)} text-[9px] px-2 py-0.5">${getProjectStatusText(p.status)}</span>
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
                         </div>
                         <p class="text-sm font-semibold text-teal-600 mt-1">${formatCurrency(p.amount)}</p>
                         <div class="mt-2">
@@ -2127,9 +2557,9 @@ async function loadProjects() {
                             <div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-teal-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div>
                         </div>
                         <div class="flex gap-2 mt-3 pt-2 border-t">
-                            <button onclick="viewProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                            <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            <button onclick="event.stopPropagation(); viewProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                            <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
                         </div>
                         <div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
                     </div>
@@ -2155,7 +2585,7 @@ async function loadProjects() {
         document.getElementById('projectsSection').innerHTML = html;
         
         if (projectDocuments.length === 0) {
-            document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents. Click "Upload Document" to add one.</div>';
+            document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white dark:bg-gray-800 rounded-xl">No uploaded documents. Click "Upload Document" to add one.</div>';
             return;
         }
         
@@ -2190,7 +2620,7 @@ function switchProjectTab(tab) {
     loadProjects(); 
 }
 
-// ==================== REQUESTS SECTION ====================
+// ==================== REQUESTS SECTION - FIXED TABLE WITH CORRECT COLUMNS ====================
 async function loadRequests(highlightId = null) {
     await fetchRequests();
     
@@ -2204,7 +2634,7 @@ async function loadRequests(highlightId = null) {
             </div>
         </div>
         <div class="data-table-container" style="overflow-x: auto; border-radius: 12px; border: 1px solid #e5e7eb; background: white;">
-            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 800px; table-layout: fixed;">
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; table-layout: fixed;">
                 <thead>
                     <tr style="background: #0d9488; color: white;">
                         <th style="width: 12%; padding: 14px 10px; text-align: left;">Date</th>
@@ -2220,15 +2650,17 @@ async function loadRequests(highlightId = null) {
             </table>
         </div>
     `;
+    
     document.getElementById('requestsSection').innerHTML = html;
     
     if (requestsData.length === 0) {
-        document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.二维</tr>';
+        document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.</td></tr>';
         return;
     }
     
     let tableHtml = '';
     for (let r of requestsData) {
+        // Determine status class and text
         let statusClass = '';
         let statusText = '';
         if (r.status === 'approved') {
@@ -2242,33 +2674,39 @@ async function loadRequests(highlightId = null) {
             statusText = 'Pending';
         }
         
+        // Determine type class and text
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
         let typeText = r.type === 'income' ? 'Income' : 'Expense';
+        
+        // Check if this is a new request (unviewed)
         let isNew = !viewedRequestIds.includes(r.id);
         let isHighlighted = highlightId && r.id === highlightId;
         let amount = parseFloat(r.amount) || 0;
+        
+        // Shorten description if too long
         let descriptionText = r.description ? (r.description.length > 60 ? r.description.substring(0, 60) + '...' : r.description) : '-';
         
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td
+                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td>
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${typeText}</span>
-                </tr>
-                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td
-                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatCurrency(amount)}</td
-                <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml(descriptionText)}</td
+                </td>
+                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td>
+                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatCurrency(amount)}</td>
+                <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml(descriptionText)}</td>
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span>
                 </td>
                 <td style="padding: 12px 10px; text-align: center;">
                     <div class="flex gap-1 justify-center">
-                        <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
-                        <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-eye"></i></button>
+                        <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
-            </tr>`;
+            </tr>
+        `;
     }
     document.getElementById('requestsTableBody').innerHTML = tableHtml;
     
@@ -2281,7 +2719,6 @@ async function loadRequests(highlightId = null) {
     }
     updateRequestBadge();
 }
-
 function openAddRequestModal() {
     document.getElementById('reqId').value = '';
     document.getElementById('reqDate').value = new Date().toISOString().split('T')[0];
