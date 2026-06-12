@@ -531,31 +531,20 @@ async function emptyRecycleBin() {
 }
 
 // ==================== DAILY WORK FUNCTIONS ====================
-// ==================== DAILY WORK FUNCTIONS ====================
-
-// Fetch daily work from server
 async function fetchDailyWork() { 
     const res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}`); 
     dailyworkData = (res.success && res.data) ? res.data.filter(w => (!w.is_deleted || w.is_deleted != 1)) : []; 
-    console.log('Daily work fetched:', dailyworkData.length); // Debug
 }
 
-// Load daily work for specific project
 async function loadDailyWorkForProject(projectId) {
-    console.log('Loading daily work for project:', projectId); // Debug
     await fetchDailyWork();
     const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
     const tbody = document.getElementById('dailyWorkTableBody');
-    if (!tbody) {
-        console.log('Table body not found'); // Debug
-        return;
-    }
-    
+    if (!tbody) return;
     if (projectDailyWork.length === 0) { 
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td</tr'; 
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>'; 
         return; 
     }
-    
     let html = '';
     for (let w of projectDailyWork) {
         let budget = parseFloat(w.budget) || 0;
@@ -563,23 +552,16 @@ async function loadDailyWorkForProject(projectId) {
         html += `<tr id="daily-row-${w.id}">
             <td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td>
             <td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td>
-            <td class="p-2 text-xs text-right">${formatCurrency(budget)}</td
-            <td class="p-2 text-xs text-right">${formatCurrency(amount)}</td
+            <td class="p-2 text-xs text-right">${formatCurrency(budget)}</td>
+            <td class="p-2 text-xs text-right">${formatCurrency(amount)}</td>
             <td class="p-2 text-center"><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status}</span></td>
-            <td class="p-2 text-center">
-                <div class="flex gap-1 justify-center">
-                    <button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
-                    <button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
-                    <button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
-                </div>
-            </td>
-        </table>`;
+            <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>
+        </tr>`;
     }
     tbody.innerHTML = html;
-    console.log('Daily work table updated'); // Debug
+    updateDailyWorkSummary();
 }
 
-// Update daily work summary cards
 function updateDailyWorkSummary() {
     const project = projectsData.find(p => p.id === currentProjectId);
     if (!project) return;
@@ -589,19 +571,11 @@ function updateDailyWorkSummary() {
         totalBudget += parseFloat(w.budget) || 0;
         totalAmount += parseFloat(w.amount) || 0;
     });
-    
-    const totalBudgetSpan = document.getElementById('totalBudget');
-    const totalAmountSpan = document.getElementById('totalAmount');
-    const remainingSpan = document.getElementById('remainingAmount');
-    
-    if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatCurrency(totalBudget);
-    if (totalAmountSpan) totalAmountSpan.innerHTML = formatCurrency(totalAmount);
-    if (remainingSpan) remainingSpan.innerHTML = formatCurrency((parseFloat(project.amount) || 0) - totalAmount);
-    
-    console.log('Summary updated - Budget:', totalBudget, 'Amount:', totalAmount); // Debug
+    document.getElementById('totalBudget').innerHTML = formatCurrency(totalBudget);
+    document.getElementById('totalAmount').innerHTML = formatCurrency(totalAmount);
+    document.getElementById('remainingAmount').innerHTML = formatCurrency((parseFloat(project.amount) || 0) - totalAmount);
 }
 
-// Toggle daily work table visibility
 function toggleDailyWorkTable() {
     const c = document.getElementById('dailyWorkListContainer');
     const s = document.getElementById('dailyWorkSummary');
@@ -609,66 +583,39 @@ function toggleDailyWorkTable() {
     const e = document.getElementById('exportDailyWorkExcelBtn');
     const p = document.getElementById('exportDailyWorkPDFBtn');
     const t = document.getElementById('toggleDailyWorkBtn');
-    
-    console.log('Toggle daily work table - current display:', c ? c.style.display : 'null'); // Debug
-    
     if (c.style.display === 'none' || c.style.display === '') {
         c.style.display = 'block';
-        if (s) s.style.display = 'grid';
+        s.style.display = 'grid';
         if (a) a.style.display = 'inline-flex';
         if (e) e.style.display = 'inline-flex';
         if (p) p.style.display = 'inline-flex';
         if (t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Hide Daily Work';
-        console.log('Daily work table shown'); // Debug
     } else {
         c.style.display = 'none';
-        if (s) s.style.display = 'none';
+        s.style.display = 'none';
         if (a) a.style.display = 'none';
         if (e) e.style.display = 'none';
         if (p) p.style.display = 'none';
         if (t) t.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
-        console.log('Daily work table hidden'); // Debug
     }
 }
 
-// 🔥 FIXED: Open daily work modal - HII NDIO FUNCTION MUHIMU ZAIDI 🔥
 function openDailyWorkModalForProject(projectId) {
-    console.log('openDailyWorkModalForProject called with projectId:', projectId); // Debug
-    
-    if (!projectId) {
-        console.log('No project ID provided');
-        showToast('Please select a project first', true);
-        return;
-    }
-    
     const p = projectsData.find(p => p.id === projectId);
-    if (!p) {
-        console.log('Project not found for ID:', projectId);
-        showToast('Project not found', true);
-        return;
+    if (p) {
+        document.getElementById('dailyworkId').value = '';
+        document.getElementById('dailyworkProjectId').value = projectId;
+        document.getElementById('dailyworkProjectName').value = p.name;
+        document.getElementById('dailyworkDateTime').value = new Date().toISOString().slice(0, 16);
+        document.getElementById('dailyworkDesc').value = '';
+        document.getElementById('dailyworkBudget').value = '';
+        document.getElementById('dailyworkAmount').value = '';
+        document.getElementById('dailyworkStatus').value = 'pending';
+        openModal('dailyworkModal');
     }
-    
-    console.log('Opening modal for project:', p.name);
-    
-    // Reset form fields
-    document.getElementById('dailyworkId').value = '';
-    document.getElementById('dailyworkProjectId').value = projectId;
-    document.getElementById('dailyworkProjectName').value = p.name;
-    document.getElementById('dailyworkDateTime').value = new Date().toISOString().slice(0, 16);
-    document.getElementById('dailyworkDesc').value = '';
-    document.getElementById('dailyworkBudget').value = '';
-    document.getElementById('dailyworkAmount').value = '';
-    document.getElementById('dailyworkStatus').value = 'pending';
-    
-    // Open modal
-    openModal('dailyworkModal');
-    console.log('Modal opened'); // Debug
 }
 
-// Save daily work (Add/Edit)
 async function saveDailyWork() {
-    console.log('saveDailyWork called'); // Debug
-    
     let id = document.getElementById('dailyworkId').value;
     let datetime = document.getElementById('dailyworkDateTime').value;
     let projectId = document.getElementById('dailyworkProjectId').value;
@@ -678,15 +625,10 @@ async function saveDailyWork() {
     let description = document.getElementById('dailyworkDesc').value;
     let status = document.getElementById('dailyworkStatus').value;
     
-    if (!datetime) { 
-        showToast('Date & Time required', true); 
-        return; 
-    }
-    if (!projectId) { 
-        showToast('Project ID missing', true); 
-        return; 
-    }
+    if (!datetime) { showToast('Date & Time required', true); return; }
+    if (!projectId) { showToast('Project ID missing', true); return; }
     
+    // Prepare data for API
     let data = { 
         date: datetime, 
         project_id: parseInt(projectId), 
@@ -733,8 +675,6 @@ async function saveDailyWork() {
         sendBtn.disabled = false;
     }
 }
-
-// View daily work details
 async function viewDailyWork(id) {
     const w = dailyworkData.find(w => w.id === id);
     if (w) {
@@ -751,12 +691,10 @@ async function viewDailyWork(id) {
     }
 }
 
-// Edit daily work
 function editDailyWork(id) {
     const w = dailyworkData.find(w => w.id === id);
     if (w) {
         document.getElementById('dailyworkId').value = w.id;
-        document.getElementById('dailyworkProjectId').value = w.project_id;
         document.getElementById('dailyworkProjectName').value = w.project_name;
         document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0, 16) : new Date().toISOString().slice(0, 16);
         document.getElementById('dailyworkDesc').value = w.work_description || '';
@@ -767,7 +705,6 @@ function editDailyWork(id) {
     }
 }
 
-// Delete daily work
 async function deleteDailyWork(id) {
     if (confirm('Delete this daily work record?')) {
         let res = await apiCall('delete_dailywork.php', 'POST', { id: parseInt(id), is_deleted: 1 });
@@ -782,7 +719,6 @@ async function deleteDailyWork(id) {
     }
 }
 
-// Export daily work to Excel
 function exportDailyWorkToExcel() {
     const project = projectsData.find(p => p.id === currentProjectId);
     if (!project) return;
@@ -793,10 +729,9 @@ function exportDailyWorkToExcel() {
     let wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork');
     XLSX.writeFile(wb, `dailywork_${project.name.replace(/[^a-z0-9]/gi, '_')}.xlsx`);
-    showToast('Exported to Excel');
+    showToast('Exported');
 }
 
-// Export daily work to PDF
 function exportDailyWorkToPDF() {
     const project = projectsData.find(p => p.id === currentProjectId);
     if (!project) return;
@@ -811,7 +746,7 @@ function exportDailyWorkToPDF() {
         <td style="padding:6px;">${escapeHtml(w.created_by || 'System')}</td
     </tr>`).join('');
     let w = window.open('', '_blank');
-    w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report - ${escapeHtml(project.name)}</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #0d9488;padding:8px;}th{background:#0d9488;color:white;}.text-right{text-align:right;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody></table><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
+    w.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report - ${escapeHtml(project.name)}</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #0d9488;padding:8px;}th{background:#0d9488;color:white;}.text-right{text-align:right;}</style></head><body><h1>Daily Work Report - ${escapeHtml(project.name)}</h1><p>Generated: ${new Date().toLocaleString()}</p><table class="dailywork-table"><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody></table><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
