@@ -1381,30 +1381,171 @@ function exportAllProjectsToPDF() {
 async function exportProjectToPDF(projectId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { showToast('Project not found', true); return; }
+    
+    // Get daily work for this project
+    const projectWork = dailyworkData.filter(w => w.project_id == p.id);
+    
+    let totalBudget = 0, totalExpenses = 0;
+    for (let w of projectWork) {
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+    }
+    let totalRemaining = totalBudget - totalExpenses;
+    let remainingColor = totalRemaining >= 0 ? '#059669' : '#dc2626';
+    
     let fileUrl = (p.image && !p.image.startsWith('data:')) ? getFullImageUrl(p.image) : null;
     let isImage = fileUrl && isImageFile(fileUrl);
     let statusBadgeClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
     let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
     
+    // Build daily work table rows - FIXED COLUMN ALIGNMENT
+    let dailyRows = '';
+    if (projectWork.length > 0) {
+        for (let w of projectWork) {
+            let budget = parseFloat(w.budget) || 0;
+            let expenses = parseFloat(w.amount) || 0;
+            let statusBg = w.status === 'completed' ? '#d1fae5' : w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+            let statusColor = w.status === 'completed' ? '#059669' : w.status === 'partial' ? '#d97706' : '#dc2626';
+            let statusTextDW = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
+            let description = w.work_description || '-';
+            let formattedDescription = description.replace(/\n/g, '<br>');
+            let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+            
+            dailyRows += `
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 10px 8px; border: 1px solid #be123c; width: 18%; white-space: nowrap;">${recordDate}</td>
+                    <td style="padding: 10px 8px; border: 1px solid #be123c; width: 34%; word-break: break-word;">${escapeHtml(formattedDescription)}</td
+                    <td style="padding: 10px 8px; border: 1px solid #be123c; width: 16%; text-align: right;">${formatMoney(budget)}</td
+                    <td style="padding: 10px 8px; border: 1px solid #be123c; width: 16%; text-align: right;">${formatMoney(expenses)}</td
+                    <td style="padding: 10px 8px; border: 1px solid #be123c; width: 16%; text-align: center;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px;">${statusTextDW}</span></td
+                </tr>`;
+        }
+    }
+    
+    // Add total row
+    if (projectWork.length > 0) {
+        dailyRows += `
+            <tr style="background: #fef3c7; font-weight: bold; border-top: 2px solid #be123c;">
+                <td colspan="2" style="padding: 10px 8px; border: 1px solid #be123c; text-align: right;">TOTAL:</td
+                <td style="padding: 10px 8px; border: 1px solid #be123c; text-align: right;">${formatMoney(totalBudget)}</td
+                <td style="padding: 10px 8px; border: 1px solid #be123c; text-align: right;">${formatMoney(totalExpenses)}</td
+                <td style="padding: 10px 8px; border: 1px solid #be123c;">&nbsp;</td
+            </table>`;
+    }
+    
     let w = window.open('', '_blank');
     if (!w) { showToast("Please allow popups", true); return; }
     
-    w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(p.name)} - Project Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;border-radius:10px;}h1{color:#be123c;text-align:center;}.details-table{width:100%;border-collapse:collapse;margin:15px 0;}.details-table tr{border-bottom:1px solid #be123c;}.details-table td{padding:10px;}.details-table td:first-child{font-weight:bold;width:30%;}.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;}.footer{text-align:center;font-size:10px;margin-top:20px;}.print-btn{text-align:center;margin-top:20px;}@media print{.print-btn{display:none;}}</style></head><body><h1>${escapeHtml(p.name)}</h1><p>Generated: ${new Date().toLocaleString()} | Department: Architectural</p>${fileUrl && isImage ? `<div style="text-align:center;margin:15px 0;"><img src="${fileUrl}" style="max-width:300px;max-height:200px;object-fit:cover;border-radius:8px;border:1px solid #be123c;"></div>` : ''}<table class="details-table"><tr><td>Name:</td><td><strong>${escapeHtml(p.name)}</strong></td</tr
-    <tr><td>Client:</td<td>${escapeHtml(p.client_name||'N/A')}</td</tr
-    <tr><td>Amount:</td<td>${formatMoney(p.amount)}</td</tr
-    <tr><td>Status:</td<td><span class="status-badge ${statusBadgeClass}">${statusText}</span></td</tr
-    <tr><td>Progress:</td<td>${p.progress}%</td</tr
-    <tr><td>Location:</td<td>${escapeHtml(p.location||'N/A')}</td</tr
-    <tr><td>Start Date:</td<td>${p.start_date || 'N/A'}</td</tr
-    <tr><td>End Date:</td<td>${p.end_date || 'N/A'}</td</tr
-    <tr><td>Description:</td<td>${escapeHtml(p.description||'No description')}</td</tr
-    <tr><td>Created By:</td<td>${escapeHtml(p.created_by||'System')} on ${formatDateTime(p.created_at)}</td</tr
-    </table><div class="footer">GeoTraverse ERP System - Architectural Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
+    w.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${escapeHtml(p.name)} - Project Report</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .report-container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #be123c; }
+            .report-header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 25px; text-align: center; }
+            .report-header h1 { font-size: 24px; margin: 0; }
+            .report-header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #fdf2f8; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
+            .image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .image-section img { max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; }
+            .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+            .status-pending { background: #fef3c7; color: #d97706; }
+            .status-progress { background: #dbeafe; color: #2563eb; }
+            .status-completed { background: #d1fae5; color: #059669; }
+            .status-approved { background: #e9d5ff; color: #7e22ce; }
+            .section-title { background: #be123c; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin-top: 20px; }
+            .details-vertical { margin: 20px 25px; }
+            .details-row { display: flex; border-bottom: 1px solid #e5e7eb; padding: 10px 0; }
+            .details-label { width: 35%; font-weight: 600; color: #374151; }
+            .details-value { width: 65%; color: #1f2937; }
+            .summary-cards { display: flex; gap: 15px; margin: 15px 25px; justify-content: center; }
+            .summary-card { flex: 1; background: #f0fdf4; border-radius: 10px; text-align: center; padding: 12px; border: 1px solid #d1fae5; }
+            .summary-card h4 { font-size: 11px; color: #166534; margin-bottom: 4px; }
+            .summary-card p { font-size: 14px; font-weight: bold; }
+            .summary-card:first-child p { color: #059669; }
+            .summary-card:nth-child(2) p { color: #ea580c; }
+            .summary-card:last-child p { color: ${remainingColor}; }
+            .daily-table-wrapper { margin: 15px 25px 25px 25px; overflow-x: auto; }
+            .daily-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            .daily-table th { background: #be123c; color: white; padding: 12px 10px; text-align: center; font-weight: 600; border: 1px solid #9d174d; }
+            .daily-table td { padding: 10px 10px; border: 1px solid #be123c; vertical-align: middle; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; margin-top: 20px; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #be123c; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .report-header { background: #be123c !important; -webkit-print-color-adjust: exact; } .daily-table th { background: #be123c !important; -webkit-print-color-adjust: exact; } .section-title { background: #be123c !important; -webkit-print-color-adjust: exact; } }
+        </style>
+    </head>
+    <body>
+        <div class="report-container">
+            <div class="report-header">
+                <h1>${escapeHtml(p.name)}</h1>
+                <p>Project Full Report - Generated: ${new Date().toLocaleString()}</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Project ID:</strong> #${p.id}</span>
+                <span><strong>Department:</strong> Architectural</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Total Daily Records:</strong> ${projectWork.length}</span>
+            </div>
+            <div class="image-section">
+                ${fileUrl && isImage ? `<img src="${fileUrl}?t=${Date.now()}" onerror="this.parentElement.innerHTML='<div style=\'color:#999; padding:20px;\'>Image failed to load</div>'">` : '<div style="color:#999; padding:20px;">No Image Available</div>'}
+            </div>
+            
+            <div class="section-title"><i class="fas fa-info-circle"></i> Project Details</div>
+            <div class="details-vertical">
+                <div class="details-row"><div class="details-label">Name:</div><div class="details-value"><strong>${escapeHtml(p.name)}</strong></div></div>
+                <div class="details-row"><div class="details-label">Client:</div><div class="details-value">${escapeHtml(p.client_name || 'N/A')}</div></div>
+                <div class="details-row"><div class="details-label">Amount:</div><div class="details-value"><span style="color:#059669; font-weight:bold;">${formatMoney(p.amount)}</span></div></div>
+                <div class="details-row"><div class="details-label">Status:</div><div class="details-value"><span class="status-badge ${statusBadgeClass}">${statusText}</span></div></div>
+                <div class="details-row"><div class="details-label">Progress:</div><div class="details-value">${p.progress || 0}%</div></div>
+                <div class="details-row"><div class="details-label">Location:</div><div class="details-value">${escapeHtml(p.location || 'N/A')}</div></div>
+                <div class="details-row"><div class="details-label">Start Date:</div><div class="details-value">${p.start_date || 'Not specified'}</div></div>
+                <div class="details-row"><div class="details-label">End Date:</div><div class="details-value">${p.end_date || 'Not specified'}</div></div>
+                <div class="details-row"><div class="details-label">Description:</div><div class="details-value">${escapeHtml(p.description || 'No description')}</div></div>
+                <div class="details-row"><div class="details-label">Created By:</div><div class="details-value">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div></div>
+            </div>
+            
+            <div class="section-title"><i class="fas fa-calendar-day"></i> Daily Work Records</div>
+            ${projectWork.length > 0 ? `
+            <div class="summary-cards">
+                <div class="summary-card"><h4>💰 Total Budget</h4><p>${formatMoney(totalBudget)}</p></div>
+                <div class="summary-card"><h4>💸 Total Expenses</h4><p>${formatMoney(totalExpenses)}</p></div>
+                <div class="summary-card"><h4>📊 Remaining</h4><p>${formatMoney(totalRemaining)}</p></div>
+            </div>
+            <div class="daily-table-wrapper">
+                <table class="daily-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="width: 18%; text-align: center;">Date/Time</th>
+                            <th style="width: 34%; text-align: center;">Description</th>
+                            <th style="width: 16%; text-align: center;">Budget (TZS)</th>
+                            <th style="width: 16%; text-align: center;">Expenses (TZS)</th>
+                            <th style="width: 16%; text-align: center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${dailyRows}
+                    </tbody>
+                </table>
+            </div>
+            ` : '<div style="text-align:center; padding: 40px; margin: 20px 25px; background: #f9fafb; border-radius: 8px; color: #999;">No daily work records found for this project.</div>'}
+            
+            <div class="footer">GeoTraverse ERP System - Architectural Department | Official Project Full Report</div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">🖨️ Save as PDF / Print</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+    
     w.document.close();
-    showToast("PDF preview opened - Click Print to save");
-}
-
-function exportAllProjectDocsToExcel() { 
+    showToast("📄 Full Project Report PDF preview opened - Click Print/Save to download", false);
+}function exportAllProjectDocsToExcel() { 
     if(projectDocuments.length===0) { showToast('No documents', true); return; } 
     let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
     projectDocuments.forEach(d => { let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at, fileSize]); }); 
