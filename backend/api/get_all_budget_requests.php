@@ -42,7 +42,26 @@ if ($limit !== 'all' && $limit != 'all') {
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
-$requests = $stmt->fetchAll();
+$requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Ensure each request has all required fields
+foreach ($requests as &$request) {
+    // Ensure numeric fields are proper numbers
+    $request['amount'] = floatval($request['amount']);
+    $request['id'] = intval($request['id']);
+    $request['department_id'] = intval($request['department_id']);
+    
+    // Set default values if null
+    $request['title'] = $request['title'] ?? $request['source'] ?? 'Budget Request';
+    $request['source'] = $request['source'] ?? $request['title'] ?? 'Unknown';
+    $request['description'] = $request['description'] ?? '';
+    $request['request_date'] = $request['request_date'] ?? $request['created_at'] ?? date('Y-m-d');
+    $request['is_viewed_by_finance'] = $request['is_viewed_by_finance'] ?? 0;
+    $request['is_viewed_by_admin'] = $request['is_viewed_by_admin'] ?? 0;
+    $request['is_deleted'] = $request['is_deleted'] ?? 0;
+    $request['type'] = $request['type'] ?? 'expense';
+    $request['status'] = $request['status'] ?? 'pending';
+}
 
 // Pata idadi ya requests ambazo hazijaangaliwa (unviewed)
 $unviewedCount = 0;
@@ -50,17 +69,18 @@ if ($departmentId == 1 || $departmentId == 2) {
     // Kwa Finance na Super Admin, hesabu requests zote pending ambazo hazijaangaliwa
     $stmt2 = $pdo->prepare("SELECT COUNT(*) as count FROM budget_requests WHERE is_deleted = 0 AND is_viewed_by_finance = 0 AND status = 'pending'");
     $stmt2->execute();
-    $unviewedCount = $stmt2->fetch()['count'];
+    $unviewedCount = intval($stmt2->fetch(PDO::FETCH_ASSOC)['count']);
 } else {
     // Kwa departments nyingine, hesabu requests zao tu
     $stmt2 = $pdo->prepare("SELECT COUNT(*) as count FROM budget_requests WHERE department_id = :dept_id AND is_deleted = 0 AND is_viewed_by_finance = 0 AND status = 'pending'");
     $stmt2->execute(['dept_id' => $departmentId]);
-    $unviewedCount = $stmt2->fetch()['count'];
+    $unviewedCount = intval($stmt2->fetch(PDO::FETCH_ASSOC)['count']);
 }
 
-sendResponse(true, 'Budget requests retrieved', [
+// Ensure we return proper JSON structure that JavaScript expects
+sendResponse(true, 'Budget requests retrieved successfully', [
     'requests' => $requests,
     'unviewed_count' => $unviewedCount,
     'total_count' => count($requests)
 ]);
-?>
+?> 
