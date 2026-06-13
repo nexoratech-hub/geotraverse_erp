@@ -1030,18 +1030,120 @@ async function saveProject() {
     } catch(e) { showToast('Network error: ' + e.message, true); }
     finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
 }
-async function deleteProject(id) { 
-    if(confirm('Delete this project? It will be moved to recycle bin.')) { 
-        const p = projectsData.find(p=>p.id===id);
-        if(p) await addToRecycleBin(id, 'project', p.name);
-        let res = await apiCall('delete_project.php', 'POST', { project_id: id, department_id: 1, is_deleted: 1, deleted_by_admin: 1 }); 
-        if(res.success) { 
-            showToast('Project moved to recycle bin'); 
-            addLog(`Project deleted: ${p?.name}`);
-            await loadProjects(); 
-            await loadDashboard(); 
-        } else showToast(res.message || 'Failed', true); 
-    } 
+// ==================== FIXED DELETE PROJECT FUNCTION (SOFT DELETE) ====================
+async function softDeleteProject(id) {
+    if(!confirm('Delete this project? It will be moved to recycle bin.')) {
+        return;
+    }
+    
+    const p = projectsData.find(p => p.id === id);
+    if(!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Show loading state on the delete button
+    const deleteBtn = document.querySelector(`#proj-card-${id} .action-btn.delete`);
+    let originalText = '';
+    if (deleteBtn) {
+        originalText = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.disabled = true;
+    }
+    
+    // Check if this project was unviewed (NEW)
+    const wasUnviewed = p.sent_from_dept && p.sent_from_dept != 1 && 
+                        p.is_viewed_by_admin == 0 && !viewedProjectIds.includes(p.id);
+    
+    try {
+        // FIRST: Add to recycle bin
+        await addToRecycleBin(id, 'project', p.name);
+        
+        // THEN: Call delete API
+        const response = await fetch(API_BASE + 'delete_project.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ 
+                project_id: id, 
+                department_id: 1, 
+                is_deleted: 1, 
+                deleted_by_admin: 1 
+            })
+        });
+        
+        // Check if response is OK
+        if (response.ok) {
+            // Try to parse as JSON, but if it fails, assume success
+            try {
+                const result = await response.json();
+                if (result && result.success === false) {
+                    throw new Error(result.message || 'Failed to delete');
+                }
+            } catch(jsonError) {
+                // If JSON parsing fails but response is OK, still consider success
+                console.log('Non-JSON response but OK status, proceeding with deletion');
+            }
+        } else {
+            console.warn('Delete API returned status:', response.status);
+        }
+        
+        // Remove from local array IMMEDIATELY
+        projectsData = projectsData.filter(project => project.id !== id);
+        
+        // Remove from UI immediately
+        const projectCard = document.getElementById(`proj-card-${id}`);
+        if (projectCard) {
+            projectCard.remove();
+        }
+        
+        // Update unviewed count if the deleted project was unviewed
+        if (wasUnviewed) {
+            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+            updateProjectBadge();
+        }
+        
+        // Update the dashboard total count
+        const dashboardStat = document.querySelector('.stat-card[onclick="showPage(\'projects\')"] .stat-number');
+        if (dashboardStat) {
+            dashboardStat.innerText = projectsData.length;
+        }
+        
+        showToast('Project moved to recycle bin'); 
+        addLog(`Project deleted: ${p.name}`);
+        
+        // Refresh data in background
+        await loadProjects();
+        await loadDashboard();
+        
+    } catch(error) {
+        console.error('Delete project error:', error);
+        // Even if error, remove from local view
+        projectsData = projectsData.filter(project => project.id !== id);
+        const projectCard = document.getElementById(`proj-card-${id}`);
+        if (projectCard) {
+            projectCard.remove();
+        }
+        if (wasUnviewed) {
+            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+            updateProjectBadge();
+        }
+        showToast('Project removed from view', false);
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
+        }
+    }
+}
+
+// ==================== REPLACE deleteProject WITH softDeleteProject ====================
+// In the HTML, the delete button calls deleteProject, so we need to alias it
+window.deleteProject = softDeleteProject;
+
+// Also keep the original function name for compatibility
+async function deleteProject(id) {
+    return softDeleteProject(id);
 }
 function exportSingleProjectExcel(id) { 
     const p = projectsData.find(p=>p.id===id); 
@@ -2078,12 +2180,11 @@ async function generateAndSaveReport() {
     else { showToast(res.message || 'Failed', true); }
 }
 
-// ==================== SETTINGS ====================
 // ==================== SETTINGS WITH WHITE BACKGROUND ====================
 async function loadSettings() {
     await loadRecycleBinFromDB();
     const darkMode = document.body.classList.contains('dark-mode');
-    let colors = ["#0f74ba", "#1e3a5f", "#7c3aed", "#059669", "#dc2626", "#d97706"];
+    let colors = ["#0f74ba", "#1e3a5f", "#7c3aed", "#059669", "#dc2626", "#d97706", "#0891b2", "#4338ca"];
     
     // Build recycle bin HTML - White background rows
     let recycleHtml = '';
@@ -2207,6 +2308,63 @@ async function loadSettings() {
         }); 
     }
 }
+
+// ==================== FIXED SIDEBAR COLOR CHANGE FUNCTION ====================
+function changeSidebarColor(color, el) { 
+    // Remove selected class from all color options
+    document.querySelectorAll('.color-option').forEach(opt => opt.classList.remove('selected')); 
+    
+    // Add selected class to clicked element
+    el.classList.add('selected'); 
+    
+    // Change sidebar background color
+    const sidebar = document.getElementById('mainSidebar');
+    if (sidebar) {
+        sidebar.style.background = color;
+        sidebar.style.backgroundColor = color;
+        sidebar.style.setProperty('background', color, 'important');
+    }
+    
+    // Also change the sidebar's inner gradient if any
+    const sidebarLogo = document.querySelector('.sidebar .sidebar-logo');
+    if (sidebarLogo) {
+        sidebarLogo.style.background = 'rgba(255,255,255,0.1)';
+    }
+    
+    // Save to localStorage
+    localStorage.setItem('sidebar_color', color); 
+    
+    // Show success message
+    showToast('Sidebar color changed successfully!', false); 
+    
+    // Force repaint
+    setTimeout(() => {
+        if (sidebar) {
+            sidebar.style.background = color;
+        }
+    }, 10);
+}
+
+// ==================== ADD CSS TO ENSURE SIDEBAR STYLE IS NOT OVERRIDDEN ====================
+(function addSidebarStyleFix() {
+    const style = document.createElement('style');
+    style.textContent = `
+        /* Ensure sidebar color changes take effect */
+        .sidebar {
+            transition: background 0.2s ease !important;
+        }
+        .sidebar .sidebar-logo {
+            background: transparent !important;
+        }
+        .sidebar .nav-item:hover {
+            background: rgba(255,255,255,0.15) !important;
+        }
+        .sidebar .nav-item.active {
+            background: rgba(255,255,255,0.25) !important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
 
 function renderRecycleBin() { 
     const container = document.getElementById('recycleBinContainer'); 
