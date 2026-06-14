@@ -786,94 +786,35 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
 }
 
-// ==================== FIXED BRICKS DAILY WORK FETCH ====================
+// ==================== DAILY WORK API FUNCTIONS ====================
 async function fetchBricksDailyWork() { 
     try {
-        // Tumia department_id=6 na work_type=bricks
-        const url = `${API_BASE}get_dailywork.php?department_id=${DEPARTMENT_ID}&work_type=bricks`;
-        console.log('Fetching bricks from:', url);
-        
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
-        });
-        
-        const res = await response.json();
-        console.log('Bricks API response:', res);
-        
+        const res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&work_type=bricks`); 
         if (res.success && res.data) { 
-            // FIXED: Map data from API to expected fields
-            bricksDailyWork = res.data
-                .filter(w => w.work_type === 'bricks' && (!w.is_deleted || w.is_deleted != 1))
-                .map(w => ({
-                    ...w,
-                    // Ensure these fields exist for the table
-                    total_amount: w.total_amount || w.amount || 0,
-                    expenses: w.expenses || 0,
-                    income: w.income || w.partial_amount || 0,
-                    partial_amount: w.partial_amount || 0,
-                    quantity_produced: w.quantity_produced || 0,
-                    quantity_sold: w.quantity_sold || 0,
-                    price_per_unit: w.price_per_unit || 0,
-                    payment_status: w.payment_status || 'pending',
-                    category: 'Bricks'
-                }));
-            console.log('Bricks daily work count:', bricksDailyWork.length);
+            bricksDailyWork = res.data.filter(w => w.work_type === 'bricks' && (!w.is_deleted || w.is_deleted != 1)).sort((a,b) => new Date(b.date) - new Date(a.date));
         } else { 
             bricksDailyWork = []; 
-            console.log('No bricks data:', res.message);
         }
     } catch(e) { 
-        console.error('Error fetching bricks:', e);
         bricksDailyWork = []; 
     }
     return bricksDailyWork;
 }
 
-// ==================== FIXED TIMBER DAILY WORK FETCH ====================
 async function fetchTimberDailyWork() { 
     try {
-        const url = `${API_BASE}get_dailywork.php?department_id=${DEPARTMENT_ID}&work_type=timber`;
-        console.log('Fetching timber from:', url);
-        
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
-        });
-        
-        const res = await response.json();
-        console.log('Timber API response:', res);
-        
+        const res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&work_type=timber`); 
         if (res.success && res.data) { 
-            // FIXED: Map data from API to expected fields
-            timberDailyWork = res.data
-                .filter(w => w.work_type === 'timber' && (!w.is_deleted || w.is_deleted != 1))
-                .map(w => ({
-                    ...w,
-                    // Ensure these fields exist for the table
-                    total_amount: w.total_amount || w.amount || 0,
-                    expenses: w.expenses || 0,
-                    income: w.income || w.partial_amount || 0,
-                    partial_amount: w.partial_amount || 0,
-                    quantity_produced: w.quantity_produced || 0,
-                    quantity_sold: w.quantity_sold || 0,
-                    price_per_unit: w.price_per_unit || 0,
-                    payment_status: w.payment_status || 'pending',
-                    category: 'Timber'
-                }));
-            console.log('Timber daily work count:', timberDailyWork.length);
+            timberDailyWork = res.data.filter(w => w.work_type === 'timber' && (!w.is_deleted || w.is_deleted != 1)).sort((a,b) => new Date(b.date) - new Date(a.date));
         } else { 
             timberDailyWork = []; 
-            console.log('No timber data:', res.message);
         }
     } catch(e) { 
-        console.error('Error fetching timber:', e);
         timberDailyWork = []; 
     }
     return timberDailyWork;
 }
+
 async function addDailyWorkAPI(data) { 
     data.department_id = DEPARTMENT_ID; 
     try {
@@ -1452,7 +1393,7 @@ function updateTotalsForModal() {
 }
 
 async function saveDailyWork() { 
-    let id = document.getElementById('dailyworkId').value; 
+    let id = document.getElementById('dailyworkId').value;
     let type = document.getElementById('dailyworkType').value;
     let projectName = document.getElementById('dailyworkProjectName').value.trim();
     let datetime = document.getElementById('dailyworkDateTime').value; 
@@ -1463,7 +1404,7 @@ async function saveDailyWork() {
     let expenses = parseMoneyValue(document.getElementById('dailyworkExpenses').value);
     let paymentStatus = document.getElementById('dailyworkPaymentStatus').value;
     let partialAmount = paymentStatus === 'partial' ? parseMoneyValue(document.getElementById('dailyworkPartialAmount').value) : (paymentStatus === 'completed' ? totalAmount : 0);
-    let income = partialAmount; // Profit is calculated based on paid amount (income)
+    let income = partialAmount;
     
     if(!projectName) { showToast('Project/Category name required', true); return; }
     if(!datetime) { showToast('Date & Time required', true); return; }
@@ -1485,9 +1426,14 @@ async function saveDailyWork() {
         partial_amount: partialAmount,
         status: paymentStatus === 'completed' ? 'completed' : (paymentStatus === 'partial' ? 'partial' : 'pending'),
         department_id: DEPARTMENT_ID, 
-        created_by: CURRENT_USER, 
-        updated_by: id ? CURRENT_USER : null 
-    }; 
+        created_by: CURRENT_USER
+    };
+    
+    // CRITICAL FIX: Add id separately for update
+    if (id && id !== '') {
+        data.id = parseInt(id);
+        data.updated_by = CURRENT_USER;
+    }
     
     const sendBtn = document.querySelector('#dailyworkModal .btn-primary');
     const originalText = sendBtn.innerHTML;
@@ -1495,6 +1441,7 @@ async function saveDailyWork() {
     sendBtn.disabled = true;
     
     try {
+        // Determine endpoint based on whether we have an id
         let url = API_BASE + (id ? 'update_dailywork.php' : 'add_dailywork.php');
         console.log('Sending to:', url, data);
         
@@ -1528,7 +1475,6 @@ async function saveDailyWork() {
         sendBtn.disabled = false; 
     }
 }
-
 async function viewDailyWorkRecord(id) { 
     let allWork = [...bricksDailyWork, ...timberDailyWork];
     const w = allWork.find(w=>w.id==id); 
@@ -1646,7 +1592,7 @@ function exportBricksDailyWorkToPDF() {
     let totalProfit = totalIncome - totalExpenses;
     let remainingTotal = totalIncome - totalPaid;
     
-    // Build table rows with MULTI-LINE DESCRIPTION
+    // Build table rows
     let rows = '';
     for (let w of bricksDailyWork) {
         let totalAmount = parseFloat(w.amount || w.total_amount || 0);
@@ -1669,42 +1615,44 @@ function exportBricksDailyWorkToPDF() {
         let quantitySold = parseInt(w.quantity_sold) || 0;
         let pricePerUnit = (quantitySold > 0 && totalAmount > 0) ? totalAmount / quantitySold : 0;
         
-        // BUILD MULTI-LINE DESCRIPTION (VERTICAL FORMAT)
-        let descriptionLines = [];
+        // BUILD DESCRIPTION WITH MULTI-LINE FORMAT
+        let descriptionHtml = '';
         
-        // Add work description if exists
+        // Work description
         if (w.work_description && w.work_description.trim() !== '') {
-            descriptionLines.push(`📝 ${escapeHtml(w.work_description)}`);
+            descriptionHtml += `📝 ${escapeHtml(w.work_description)}<br>`;
         }
         
-        // Add production details
+        // Production details - each on its own line
         if (quantityProduced > 0) {
-            descriptionLines.push(`📦 Produced: ${quantityProduced.toLocaleString()} units`);
+            descriptionHtml += `📦 Produced: ${quantityProduced.toLocaleString()} units<br>`;
         }
         if (quantitySold > 0) {
-            descriptionLines.push(`💰 Sold: ${quantitySold.toLocaleString()} units`);
+            descriptionHtml += `💰 Sold: ${quantitySold.toLocaleString()} units<br>`;
         }
         if (pricePerUnit > 0) {
-            descriptionLines.push(`💵 Unit Price: ${formatMoney(pricePerUnit)}`);
+            descriptionHtml += `💵 Unit Price: ${formatMoney(pricePerUnit)}<br>`;
         }
         
-        // If no description at all
-        if (descriptionLines.length === 0) {
-            descriptionLines.push('-');
+        // Remove last <br> if exists
+        if (descriptionHtml.endsWith('<br>')) {
+            descriptionHtml = descriptionHtml.slice(0, -4);
         }
         
-        // Join lines with <br> for HTML display
-        let descriptionHtml = descriptionLines.join('<br>');
+        // If empty, show dash
+        if (descriptionHtml === '') {
+            descriptionHtml = '-';
+        }
         
         rows += `
             <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309;"><span style="background: #fef3c7; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">Bricks</span></td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: normal; word-break: break-word; line-height: 1.5;">${descriptionHtml}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; font-weight: 600;">${formatMoney(totalAmount)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right;">${formatMoney(expensesVal)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; ${profit >= 0 ? 'color: #059669;' : 'color: #dc2626;'} font-weight: 600;">${formatMoney(profit)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: center;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span></td
+                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309;"><span style="background: #fef3c7; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">Bricks</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: normal; word-break: break-word; line-height: 1.6;">${descriptionHtml}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; font-weight: 600;">${formatMoney(totalAmount)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right;">${formatMoney(expensesVal)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; ${profit >= 0 ? 'color: #059669;' : 'color: #dc2626;'} font-weight: 600;">${formatMoney(profit)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: center;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span></td>
             </tr>`;
     }
     
@@ -1718,7 +1666,7 @@ function exportBricksDailyWorkToPDF() {
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Bricks Daily Work Report - Bricks & Timber Department</title>
+        <title>Bricks Daily Work Report</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -1743,13 +1691,12 @@ function exportBricksDailyWorkToPDF() {
             }
             .header h1 { 
                 font-size: 24px; 
-                margin: 0 0 5px 0; 
-                font-weight: 700; 
+                margin: 0; 
             }
             .header p { 
                 font-size: 12px; 
                 opacity: 0.85; 
-                margin: 0; 
+                margin-top: 5px; 
             }
             .info-bar { 
                 background: #f8fafc; 
@@ -1762,27 +1709,27 @@ function exportBricksDailyWorkToPDF() {
                 gap: 10px;
             }
             .summary-cards {
-                display: grid;
-                grid-template-columns: repeat(5, 1fr);
+                display: flex;
                 gap: 15px;
                 padding: 20px 25px;
                 background: #f9fafb;
                 border-bottom: 1px solid #e5e7eb;
+                flex-wrap: wrap;
             }
             .summary-card {
+                flex: 1;
                 background: white;
                 border-radius: 12px;
                 padding: 15px;
                 text-align: center;
                 border: 1px solid #e5e7eb;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                min-width: 150px;
             }
             .summary-card .label {
                 font-size: 11px;
                 font-weight: 600;
                 color: #6b7280;
                 text-transform: uppercase;
-                letter-spacing: 0.5px;
             }
             .summary-card .value {
                 font-size: 18px;
@@ -1790,11 +1737,6 @@ function exportBricksDailyWorkToPDF() {
                 margin-top: 8px;
                 font-family: monospace;
             }
-            .summary-card.income .value { color: #10b981; }
-            .summary-card.expenses .value { color: #ef4444; }
-            .summary-card.profit .value { color: #3b82f6; }
-            .summary-card.paid .value { color: #8b5cf6; }
-            .summary-card.remaining .value { color: #f59e0b; }
             .table-container {
                 overflow-x: auto;
                 padding: 20px 25px;
@@ -1822,14 +1764,10 @@ function exportBricksDailyWorkToPDF() {
             .data-table td:nth-child(3) {
                 white-space: normal;
                 word-break: break-word;
-                line-height: 1.5;
+                line-height: 1.6;
             }
-            .data-table .text-right {
-                text-align: right;
-            }
-            .data-table .text-center {
-                text-align: center;
-            }
+            .data-table .text-right { text-align: right; }
+            .data-table .text-center { text-align: center; }
             .footer {
                 text-align: center;
                 font-size: 9px;
@@ -1854,9 +1792,6 @@ function exportBricksDailyWorkToPDF() {
                 font-size: 13px;
                 font-weight: 600;
             }
-            .print-btn button:hover {
-                background: #92400e;
-            }
             @media print {
                 body { background: white; padding: 0; }
                 .print-btn { display: none; }
@@ -1870,36 +1805,20 @@ function exportBricksDailyWorkToPDF() {
         <div class="container">
             <div class="header">
                 <h1>🧱 Bricks Daily Work Report</h1>
-                <p>Bricks Production & Sales Report | Generated: ${new Date().toLocaleString()}</p>
+                <p>Generated: ${new Date().toLocaleString()} | Department: Bricks & Timber</p>
             </div>
             <div class="info-bar">
-                <span><strong>Department:</strong> Bricks & Timber</span>
                 <span><strong>Total Records:</strong> ${bricksDailyWork.length}</span>
                 <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
                 <span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span>
             </div>
             
             <div class="summary-cards">
-                <div class="summary-card income">
-                    <div class="label">💰 Total Income</div>
-                    <div class="value">${formatMoney(totalIncome)}</div>
-                </div>
-                <div class="summary-card expenses">
-                    <div class="label">💸 Total Expenses</div>
-                    <div class="value">${formatMoney(totalExpenses)}</div>
-                </div>
-                <div class="summary-card profit">
-                    <div class="label">📈 Total Profit</div>
-                    <div class="value" style="color: ${totalProfit >= 0 ? '#10b981' : '#ef4444'};">${formatMoney(totalProfit)}</div>
-                </div>
-                <div class="summary-card paid">
-                    <div class="label">✅ Total Paid</div>
-                    <div class="value">${formatMoney(totalPaid)}</div>
-                </div>
-                <div class="summary-card remaining">
-                    <div class="label">⏳ Remaining Balance</div>
-                    <div class="value">${formatMoney(remainingTotal)}</div>
-                </div>
+                <div class="summary-card"><div class="label">💰 Total Income</div><div class="value">${formatMoney(totalIncome)}</div></div>
+                <div class="summary-card"><div class="label">💸 Total Expenses</div><div class="value">${formatMoney(totalExpenses)}</div></div>
+                <div class="summary-card"><div class="label">📈 Total Profit</div><div class="value" style="color: ${totalProfit >= 0 ? '#10b981' : '#ef4444'};">${formatMoney(totalProfit)}</div></div>
+                <div class="summary-card"><div class="label">✅ Total Paid</div><div class="value">${formatMoney(totalPaid)}</div></div>
+                <div class="summary-card"><div class="label">⏳ Remaining Balance</div><div class="value">${formatMoney(remainingTotal)}</div></div>
             </div>
             
             <div class="table-container">
@@ -1921,18 +1840,8 @@ function exportBricksDailyWorkToPDF() {
                 </table>
             </div>
             
-            <div class="footer">
-                GeoTraverse ERP System - Bricks & Timber Department | Official Bricks Daily Work Report<br>
-                This report includes all bricks production and sales records.
-            </div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
-                    🖨️ Save as PDF / Print
-                </button>
-                <button onclick="window.close();">
-                    ❌ Close
-                </button>
-            </div>
+            <div class="footer">GeoTraverse ERP System - Bricks & Timber Department | Official Report</div>
+            <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1500);">🖨️ Save as PDF / Print</button></div>
         </div>
     </body>
     </html>`);
@@ -1940,6 +1849,7 @@ function exportBricksDailyWorkToPDF() {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 function exportTimberDailyWorkToExcel() {
     if (timberDailyWork.length === 0) { showToast('No records to export', true); return; }
     let ws = [['Date/Time','Category','Description','Quantity Produced','Quantity Sold','Price/Unit','Total Amount','Paid Amount','Remaining','Payment Status','Expenses','Profit','Created By']];
@@ -1977,7 +1887,7 @@ function exportTimberDailyWorkToPDF() {
     let totalProfit = totalIncome - totalExpenses;
     let remainingTotal = totalIncome - totalPaid;
     
-    // Build table rows with MULTI-LINE DESCRIPTION
+    // Build table rows
     let rows = '';
     for (let w of timberDailyWork) {
         let totalAmount = parseFloat(w.amount || w.total_amount || 0);
@@ -2000,43 +1910,45 @@ function exportTimberDailyWorkToPDF() {
         let quantitySold = parseInt(w.quantity_sold) || 0;
         let pricePerUnit = (quantitySold > 0 && totalAmount > 0) ? totalAmount / quantitySold : 0;
         
-        // BUILD MULTI-LINE DESCRIPTION (VERTICAL FORMAT)
-        let descriptionLines = [];
+        // BUILD DESCRIPTION WITH MULTI-LINE FORMAT
+        let descriptionHtml = '';
         
-        // Add work description if exists
+        // Work description
         if (w.work_description && w.work_description.trim() !== '') {
-            descriptionLines.push(`📝 ${escapeHtml(w.work_description)}`);
+            descriptionHtml += `📝 ${escapeHtml(w.work_description)}<br>`;
         }
         
-        // Add production details
+        // Production details - each on its own line
         if (quantityProduced > 0) {
-            descriptionLines.push(`📦 Produced: ${quantityProduced.toLocaleString()} units`);
+            descriptionHtml += `📦 Produced: ${quantityProduced.toLocaleString()} units<br>`;
         }
         if (quantitySold > 0) {
-            descriptionLines.push(`💰 Sold: ${quantitySold.toLocaleString()} units`);
+            descriptionHtml += `💰 Sold: ${quantitySold.toLocaleString()} units<br>`;
         }
         if (pricePerUnit > 0) {
-            descriptionLines.push(`💵 Unit Price: ${formatMoney(pricePerUnit)}`);
+            descriptionHtml += `💵 Unit Price: ${formatMoney(pricePerUnit)}<br>`;
         }
         
-        // If no description at all
-        if (descriptionLines.length === 0) {
-            descriptionLines.push('-');
+        // Remove last <br> if exists
+        if (descriptionHtml.endsWith('<br>')) {
+            descriptionHtml = descriptionHtml.slice(0, -4);
         }
         
-        // Join lines with <br> for HTML display
-        let descriptionHtml = descriptionLines.join('<br>');
+        // If empty, show dash
+        if (descriptionHtml === '') {
+            descriptionHtml = '-';
+        }
         
         rows += `
             <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309;"><span style="background: #d1fae5; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">Timber</span></td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: normal; word-break: break-word; line-height: 1.5;">${descriptionHtml}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; font-weight: 600;">${formatMoney(totalAmount)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right;">${formatMoney(expensesVal)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; ${profit >= 0 ? 'color: #059669;' : 'color: #dc2626;'} font-weight: 600;">${formatMoney(profit)}</td
-                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: center;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span></td
-            <tr>`;
+                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309;"><span style="background: #d1fae5; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">Timber</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; white-space: normal; word-break: break-word; line-height: 1.6;">${descriptionHtml}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; font-weight: 600;">${formatMoney(totalAmount)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right;">${formatMoney(expensesVal)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: right; ${profit >= 0 ? 'color: #059669;' : 'color: #dc2626;'} font-weight: 600;">${formatMoney(profit)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #b45309; text-align: center;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span></td>
+            </tr>`;
     }
     
     let printWindow = window.open('', '_blank');
@@ -2049,7 +1961,7 @@ function exportTimberDailyWorkToPDF() {
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Timber Daily Work Report - Bricks & Timber Department</title>
+        <title>Timber Daily Work Report</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -2074,13 +1986,12 @@ function exportTimberDailyWorkToPDF() {
             }
             .header h1 { 
                 font-size: 24px; 
-                margin: 0 0 5px 0; 
-                font-weight: 700; 
+                margin: 0; 
             }
             .header p { 
                 font-size: 12px; 
                 opacity: 0.85; 
-                margin: 0; 
+                margin-top: 5px; 
             }
             .info-bar { 
                 background: #f8fafc; 
@@ -2093,27 +2004,27 @@ function exportTimberDailyWorkToPDF() {
                 gap: 10px;
             }
             .summary-cards {
-                display: grid;
-                grid-template-columns: repeat(5, 1fr);
+                display: flex;
                 gap: 15px;
                 padding: 20px 25px;
                 background: #f9fafb;
                 border-bottom: 1px solid #e5e7eb;
+                flex-wrap: wrap;
             }
             .summary-card {
+                flex: 1;
                 background: white;
                 border-radius: 12px;
                 padding: 15px;
                 text-align: center;
                 border: 1px solid #e5e7eb;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                min-width: 150px;
             }
             .summary-card .label {
                 font-size: 11px;
                 font-weight: 600;
                 color: #6b7280;
                 text-transform: uppercase;
-                letter-spacing: 0.5px;
             }
             .summary-card .value {
                 font-size: 18px;
@@ -2121,11 +2032,6 @@ function exportTimberDailyWorkToPDF() {
                 margin-top: 8px;
                 font-family: monospace;
             }
-            .summary-card.income .value { color: #10b981; }
-            .summary-card.expenses .value { color: #ef4444; }
-            .summary-card.profit .value { color: #3b82f6; }
-            .summary-card.paid .value { color: #8b5cf6; }
-            .summary-card.remaining .value { color: #f59e0b; }
             .table-container {
                 overflow-x: auto;
                 padding: 20px 25px;
@@ -2153,14 +2059,10 @@ function exportTimberDailyWorkToPDF() {
             .data-table td:nth-child(3) {
                 white-space: normal;
                 word-break: break-word;
-                line-height: 1.5;
+                line-height: 1.6;
             }
-            .data-table .text-right {
-                text-align: right;
-            }
-            .data-table .text-center {
-                text-align: center;
-            }
+            .data-table .text-right { text-align: right; }
+            .data-table .text-center { text-align: center; }
             .footer {
                 text-align: center;
                 font-size: 9px;
@@ -2185,9 +2087,6 @@ function exportTimberDailyWorkToPDF() {
                 font-size: 13px;
                 font-weight: 600;
             }
-            .print-btn button:hover {
-                background: #92400e;
-            }
             @media print {
                 body { background: white; padding: 0; }
                 .print-btn { display: none; }
@@ -2201,36 +2100,20 @@ function exportTimberDailyWorkToPDF() {
         <div class="container">
             <div class="header">
                 <h1>🌲 Timber Daily Work Report</h1>
-                <p>Timber Production & Sales Report | Generated: ${new Date().toLocaleString()}</p>
+                <p>Generated: ${new Date().toLocaleString()} | Department: Bricks & Timber</p>
             </div>
             <div class="info-bar">
-                <span><strong>Department:</strong> Bricks & Timber</span>
                 <span><strong>Total Records:</strong> ${timberDailyWork.length}</span>
                 <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
                 <span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span>
             </div>
             
             <div class="summary-cards">
-                <div class="summary-card income">
-                    <div class="label">💰 Total Income</div>
-                    <div class="value">${formatMoney(totalIncome)}</div>
-                </div>
-                <div class="summary-card expenses">
-                    <div class="label">💸 Total Expenses</div>
-                    <div class="value">${formatMoney(totalExpenses)}</div>
-                </div>
-                <div class="summary-card profit">
-                    <div class="label">📈 Total Profit</div>
-                    <div class="value" style="color: ${totalProfit >= 0 ? '#10b981' : '#ef4444'};">${formatMoney(totalProfit)}</div>
-                </div>
-                <div class="summary-card paid">
-                    <div class="label">✅ Total Paid</div>
-                    <div class="value">${formatMoney(totalPaid)}</div>
-                </div>
-                <div class="summary-card remaining">
-                    <div class="label">⏳ Remaining Balance</div>
-                    <div class="value">${formatMoney(remainingTotal)}</div>
-                </div>
+                <div class="summary-card"><div class="label">💰 Total Income</div><div class="value">${formatMoney(totalIncome)}</div></div>
+                <div class="summary-card"><div class="label">💸 Total Expenses</div><div class="value">${formatMoney(totalExpenses)}</div></div>
+                <div class="summary-card"><div class="label">📈 Total Profit</div><div class="value" style="color: ${totalProfit >= 0 ? '#10b981' : '#ef4444'};">${formatMoney(totalProfit)}</div></div>
+                <div class="summary-card"><div class="label">✅ Total Paid</div><div class="value">${formatMoney(totalPaid)}</div></div>
+                <div class="summary-card"><div class="label">⏳ Remaining Balance</div><div class="value">${formatMoney(remainingTotal)}</div></div>
             </div>
             
             <div class="table-container">
@@ -2252,18 +2135,8 @@ function exportTimberDailyWorkToPDF() {
                 </table>
             </div>
             
-            <div class="footer">
-                GeoTraverse ERP System - Bricks & Timber Department | Official Timber Daily Work Report<br>
-                This report includes all timber production and sales records.
-            </div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
-                    🖨️ Save as PDF / Print
-                </button>
-                <button onclick="window.close();">
-                    ❌ Close
-                </button>
-            </div>
+            <div class="footer">GeoTraverse ERP System - Bricks & Timber Department | Official Report</div>
+            <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1500);">🖨️ Save as PDF / Print</button></div>
         </div>
     </body>
     </html>`);
@@ -2271,6 +2144,7 @@ function exportTimberDailyWorkToPDF() {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 // ==================== REQUESTS SECTION ====================
 async function loadRequests(highlightId = null) {
     console.log('Loading Requests...');
