@@ -1009,16 +1009,29 @@ function exportAllCampaignDocumentsToPDF() {
     win.document.close(); showToast("PDF preview opened");
 }
 
-// ==================== DAILY WORK FUNCTIONS ====================
+// ==================== DAILY WORK FUNCTIONS - FIXED ====================
 async function loadDailyWorkForCampaign(campaignId) {
     const campaign = campaigns.find(c => c.id === campaignId);
     if(!campaign) return;
+    
+    console.log('Loading daily work for campaign:', campaignId);
+    
     try {
         const res = await apiCall(`get_dailywork.php?campaign_id=${campaignId}&department_id=${DEPARTMENT_ID}`);
+        console.log('Daily work API response:', res);
+        
         if (res && res.success && res.data) {
             dailyworkData = res.data.filter(w => w.campaign_id == campaignId && (!w.is_deleted || w.is_deleted != 1));
-        } else { dailyworkData = []; }
-    } catch(e) { console.error('Error loading daily work:', e); dailyworkData = []; }
+            console.log('Daily work records found:', dailyworkData.length);
+        } else { 
+            dailyworkData = []; 
+            console.log('No daily work data');
+        }
+    } catch(e) { 
+        console.error('Error loading daily work:', e); 
+        dailyworkData = []; 
+    }
+    
     updateDailyWorkSummary();
     renderDailyWorkTable();
 }
@@ -1027,39 +1040,62 @@ function updateDailyWorkSummary() {
     let totalBudget = 0, totalAmount = 0;
     dailyworkData.forEach(w => { totalBudget += parseFloat(w.budget) || 0; totalAmount += parseFloat(w.amount) || 0; });
     const remainingBudget = totalBudget - totalAmount;
+    
     const totalBudgetSpan = document.getElementById('totalBudget');
     const totalAmountSpan = document.getElementById('totalAmount');
     const remainingSpan = document.getElementById('remainingBudget');
+    const varianceSpan = document.getElementById('totalVariance');
+    
     if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatMoney(totalBudget);
     if (totalAmountSpan) totalAmountSpan.innerHTML = formatMoney(totalAmount);
     if (remainingSpan) {
         remainingSpan.innerHTML = formatMoney(remainingBudget);
         remainingSpan.style.color = remainingBudget < 0 ? '#ef4444' : (remainingBudget === 0 ? '#f59e0b' : '#10b981');
     }
-    const varianceSpan = document.getElementById('totalVariance');
-    if (varianceSpan) { varianceSpan.innerHTML = formatMoney(totalAmount - totalBudget); varianceSpan.style.color = (totalAmount - totalBudget) <= 0 ? '#10b981' : '#ef4444'; }
+    if (varianceSpan) { 
+        varianceSpan.innerHTML = formatMoney(totalAmount - totalBudget); 
+        varianceSpan.style.color = (totalAmount - totalBudget) <= 0 ? '#10b981' : '#ef4444'; 
+    }
 }
 
 function renderDailyWorkTable() {
     const tbody = document.getElementById('dailyWorkTableBody');
-    if(!tbody) return;
-    if(dailyworkData.length === 0) { tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-400">No daily work records for this campaign</td</tr`; return; }
+    if(!tbody) {
+        console.log('Table body not found');
+        return;
+    }
+    
+    console.log('Rendering daily work table, records:', dailyworkData.length);
+    
+    if(dailyworkData.length === 0) { 
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-400">No daily work records for this campaign</td></tr>`; 
+        return; 
+    }
+    
     let html = '';
     for(let w of dailyworkData) {
         let budgetVal = parseFloat(w.budget) || 0;
         let amountVal = parseFloat(w.amount) || 0;
         let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending';
         let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
-        html += `<tr id="daily-row-${w.id}">
-            <td class="p-2 text-xs" style="white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
-            <td class="p-2 text-xs" style="word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
-            <td class="p-2 text-xs text-right" style="white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(budgetVal)}</td
-            <td class="p-2 text-xs text-right" style="white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(amountVal)}</td
-            <td class="p-2 text-center"><span class="status-badge ${statusClass}" style="padding: 3px 10px; border-radius: 20px; font-size: 10px;">${statusText}</span></td
-            <td class="p-2 text-center"><div class="flex gap-1 justify-center"><button type="button" onclick="viewDailyWorkRecord(${w.id})" class="action-btn view" title="View" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-eye"></i></button><button type="button" onclick="editDailyWorkRecord(${w.id})" class="action-btn edit" title="Edit" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-edit"></i></button><button type="button" onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-trash"></i></button></div></td
+        
+        html += `<tr id="daily-row-${w.id}" style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
+            <td style="padding: 10px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
+            <td style="padding: 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(budgetVal)}</td>
+            <td style="padding: 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(amountVal)}</td>
+            <td style="padding: 10px; text-align: center;"><span class="status-badge ${statusClass}" style="padding: 3px 10px; border-radius: 20px; font-size: 10px;">${statusText}</span></td>
+            <td style="padding: 10px; text-align: center;">
+                <div class="flex gap-1 justify-center">
+                    <button type="button" onclick="viewDailyWorkRecord(${w.id})" class="action-btn view" title="View" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-eye"></i></button>
+                    <button type="button" onclick="editDailyWorkRecord(${w.id})" class="action-btn edit" title="Edit" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-edit"></i></button>
+                    <button type="button" onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-trash"></i></button>
+                </div>
+            </td>
         </tr>`;
     }
     tbody.innerHTML = html;
+    console.log('Table rendered with', dailyworkData.length, 'rows');
 }
 
 function toggleDailyWorkTable() {
@@ -1069,8 +1105,10 @@ function toggleDailyWorkTable() {
     const excelBtn = document.getElementById('exportDailyWorkExcelBtn');
     const pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
     const toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    
     if (!tableContainer) return;
     const isHidden = tableContainer.style.display === 'none' || tableContainer.style.display === '';
+    
     if (isHidden) {
         tableContainer.style.display = 'block';
         if (summaryDiv) summaryDiv.style.display = 'flex';
@@ -1112,25 +1150,76 @@ async function saveDailyWork() {
     let amount = parseMoneyValue(document.getElementById('dailyworkAmount').value);
     let description = document.getElementById('dailyworkDesc').value;
     let status = document.getElementById('dailyworkStatus').value;
+    
     if(!datetime) { showToast('Date & Time required', true); return; }
     if(!campaignId) { showToast('Campaign ID missing', true); return; }
-    const data = { date: datetime, campaign_id: parseInt(campaignId), campaign_name: campaignName, work_description: description, budget: budget, amount: amount, status: status, department_id: DEPARTMENT_ID, created_by: CURRENT_USER, updated_by: id ? CURRENT_USER : null, work_type: 'general' };
+    
+    let data = { 
+        date: datetime, 
+        campaign_id: parseInt(campaignId), 
+        campaign_name: campaignName, 
+        work_description: description, 
+        budget: budget, 
+        amount: amount, 
+        status: status, 
+        department_id: DEPARTMENT_ID, 
+        created_by: CURRENT_USER,
+        work_type: 'general'
+    };
+    
+    if (id && id !== '') {
+        data.id = parseInt(id);
+        data.updated_by = CURRENT_USER;
+    }
+    
     const sendBtn = document.querySelector('#dailyworkModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
     sendBtn.disabled = true;
+    
     try {
-        let res = id ? await apiCall('update_dailywork.php', 'POST', {...data, id: parseInt(id)}) : await apiCall('add_dailywork.php', 'POST', data);
-        if(res && res.success) {
+        let url = API_BASE + (id ? 'update_dailywork.php' : 'add_dailywork.php');
+        console.log('Sending to:', url, data);
+        
+        let response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        let result = await response.json();
+        console.log('Response:', result);
+        
+        if(result && result.success) {
             showToast(id ? 'Daily work updated' : 'Daily work added');
             addLog(id ? `Daily work updated for ${campaignName}` : `Daily work added for ${campaignName}`);
             closeModal('dailyworkModal');
+            
+            // IMPORTANT: Wait a moment before reloading
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             document.getElementById('dailyworkId').value = '';
-            if(currentDailyWorkCampaignId) { await loadDailyWorkForCampaign(currentDailyWorkCampaignId); }
+            
+            if(currentDailyWorkCampaignId) {
+                // Reload fresh data from API
+                await loadDailyWorkForCampaign(currentDailyWorkCampaignId);
+                // Re-render the table
+                renderDailyWorkTable();
+                // Update summary cards
+                updateDailyWorkSummary();
+            }
+            
             await loadDashboard();
-        } else { showToast(res?.message || 'Failed to save daily work', true); }
-    } catch(e) { console.error('Save daily work error:', e); showToast('Network error: ' + e.message, true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+        } else { 
+            showToast(result?.message || 'Failed to save daily work', true); 
+        }
+    } catch(e) { 
+        console.error('Save daily work error:', e); 
+        showToast('Network error: ' + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
 }
 
 async function viewDailyWorkRecord(id) {
@@ -1141,13 +1230,15 @@ async function viewDailyWorkRecord(id) {
             let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending';
             let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial Payment' : 'Pending';
             contentDiv.innerHTML = `<div class="space-y-3"><div class="bg-orange-100 dark:bg-orange-900 p-3 rounded-lg"><strong class="text-orange-800 dark:text-orange-200">Campaign:</strong><span class="ml-2">${escapeHtml(w.campaign_name)}</span></div>
-                <div class="grid grid-cols-2 gap-3 text-sm"><div><strong>Date/Time:</strong></div><div>${new Date(w.date).toLocaleString()}</div>
-                <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(w.work_description || '-')}</div>
-                <div><strong>Budget:</strong></div><div class="font-mono font-bold text-green-600">${formatMoney(w.budget)}</div>
-                <div><strong>Amount Spent:</strong></div><div class="font-mono font-bold text-orange-600">${formatMoney(w.amount)}</div>
-                <div><strong>Status:</strong></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
-                <div><strong>Created By:</strong></div><div>${escapeHtml(w.created_by || 'System')}</div>
-                <div><strong>Created At:</strong></div><div>${formatDateTime(w.created_at)}</div></div>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div><strong>Date/Time:</strong></div><div>${new Date(w.date).toLocaleString()}</div>
+                    <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(w.work_description || '-')}</div>
+                    <div><strong>Budget:</strong></div><div class="font-mono font-bold text-green-600">${formatMoney(w.budget)}</div>
+                    <div><strong>Amount Spent:</strong></div><div class="font-mono font-bold text-orange-600">${formatMoney(w.amount)}</div>
+                    <div><strong>Status:</strong></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
+                    <div><strong>Created By:</strong></div><div>${escapeHtml(w.created_by || 'System')}</div>
+                    <div><strong>Created At:</strong></div><div>${formatDateTime(w.created_at)}</div>
+                </div>
                 ${w.updated_by && w.updated_by !== w.created_by ? `<div class="text-xs text-gray-400 mt-2 pt-2 border-t">Updated by: ${escapeHtml(w.updated_by)} on ${formatDateTime(w.updated_at)}</div>` : ''}</div>`;
         }
         openModal('viewDailyworkModal');
@@ -1174,9 +1265,20 @@ async function deleteDailyWork(id) {
     if(confirm('Delete this daily work record?')) {
         try {
             let res = await apiCall('delete_dailywork.php', 'POST', { id: parseInt(id), is_deleted: 1 });
-            if(res && res.success) { showToast('Daily work deleted'); addLog('Daily work record deleted'); if(currentDailyWorkCampaignId) { await loadDailyWorkForCampaign(currentDailyWorkCampaignId); } await loadDashboard(); }
-            else { showToast(res?.message || 'Failed to delete', true); }
-        } catch(e) { console.error('Delete daily work error:', e); showToast('Network error: ' + e.message, true); }
+            if(res && res.success) { 
+                showToast('Daily work deleted'); 
+                addLog('Daily work record deleted'); 
+                if(currentDailyWorkCampaignId) { 
+                    await loadDailyWorkForCampaign(currentDailyWorkCampaignId); 
+                } 
+                await loadDashboard(); 
+            } else { 
+                showToast(res?.message || 'Failed to delete', true); 
+            }
+        } catch(e) { 
+            console.error('Delete daily work error:', e); 
+            showToast('Network error: ' + e.message, true); 
+        }
     }
 }
 
@@ -1184,18 +1286,54 @@ function exportDailyWorkToExcel() {
     if(dailyworkData.length === 0) { showToast('No records to export', true); return; }
     let ws = [['Date/Time', 'Description', 'Budget', 'Amount', 'Status', 'Created By', 'Created At']];
     dailyworkData.forEach(w => { ws.push([new Date(w.date).toLocaleString(), w.work_description || '-', w.budget || 0, w.amount || 0, w.status || 'pending', w.created_by || 'System', w.created_at || '']); });
-    let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); XLSX.writeFile(wb, `dailywork_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Exported to Excel');
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); 
+    XLSX.writeFile(wb, `dailywork_${new Date().toISOString().slice(0,10)}.xlsx`); 
+    showToast('Exported to Excel');
 }
 
 function exportDailyWorkToPDF() {
     if(dailyworkData.length === 0) { showToast('No records to export', true); return; }
-    let rows = dailyworkData.map(w => `<tr style="border-bottom:1px solid #ea580c;"><td class="border p-1">${new Date(w.date).toLocaleString()}</td><td class="border p-1">${escapeHtml(w.work_description || '-')}</td><td class="border p-1 text-right">${formatMoney(w.budget || 0)}</td<td class="border p-1 text-right">${formatMoney(w.amount || 0)}</td<td class="border p-1">${w.status || 'pending'}</td<td class="border p-1">${escapeHtml(w.created_by || 'System')}</td</tr`).join('');
+    let rows = dailyworkData.map(w => `<tr style="border-bottom:1px solid #ea580c;">
+        <td class="border p-1">${new Date(w.date).toLocaleString()}</td
+        <td class="border p-1">${escapeHtml(w.work_description || '-')}</td
+        <td class="border p-1 text-right">${formatMoney(w.budget || 0)}</td
+        <td class="border p-1 text-right">${formatMoney(w.amount || 0)}</td
+        <td class="border p-1">${w.status || 'pending'}</td
+        <td class="border p-1">${escapeHtml(w.created_by || 'System')}</td
+    </tr`).join('');
     let printWindow = window.open('', '_blank');
     if (!printWindow) { showToast("Please allow popups", true); return; }
-    printWindow.document.write(`<!DOCTYPE html><html><head><title>Daily Work Report</title><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ea580c;padding:8px;}th{background:#ea580c;color:white;}.text-right{text-align:right;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#ea580c;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>Daily Work Report</h1><p>Generated: ${new Date().toLocaleString()}</p><tr><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr></thead><tbody>${rows}</tbody></table><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
-    printWindow.document.close(); showToast("PDF preview opened - Click Print to save");
+    printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <title>Daily Work Report</title>
+        <style>
+            body{font-family:Arial;padding:20px;}
+            table{border-collapse:collapse;width:100%;}
+            th,td{border:1px solid #ea580c;padding:8px;}
+            th{background:#ea580c;color:white;}
+            .text-right{text-align:right;}
+            .print-btn{text-align:center;margin-top:20px;}
+            .print-btn button{background:#ea580c;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;}
+            @media print{.print-btn{display:none;}}
+        </style>
+    </head>
+    <body>
+        <h1>Daily Work Report</h1>
+        <p>Generated: ${new Date().toLocaleString()}</p>
+        <table>
+            <thead>
+                <tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget</th><th class="text-right">Amount</th><th>Status</th><th>Created By</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div>
+    </body>
+    </html>`);
+    printWindow.document.close(); 
+    showToast("PDF preview opened - Click Print to save");
 }
-
 // ==================== REQUESTS SECTION ====================
 function updateRequestBadge() { 
     const unviewedCount = requestsData.filter(r => !viewedRequestIds.includes(r.id)).length;
@@ -1241,7 +1379,7 @@ async function loadRequests(highlightId = null) {
     
     if (requestsData.length === 0) {
         const tableBody = document.getElementById('requestsTableBody');
-        if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.</td></tr>';
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.缓解</table>';
         return;
     }
     
@@ -1257,25 +1395,25 @@ async function loadRequests(highlightId = null) {
         
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isHighlighted ? 'search-highlight' : ''} ${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td>
+                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${r.type}</span>
-                </td>
-                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td>
-                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatMoney(amount)}</td>
+                </td
+                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td
+                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatMoney(amount)}</td
                 <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">
                     ${escapeHtml(descriptionText)}
-                </td>
+                </td
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${statusText}</span>
-                </td>
+                </td
                 <td style="padding: 12px 10px; text-align: center;">
                     <div class="flex gap-1 justify-center">
                         <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-eye"></i></button>
                         <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-edit"></i></button>
                         <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete" style="padding: 5px 8px; font-size: 10px;"><i class="fas fa-trash"></i></button>
                     </div>
-                </td>
+                </td
             </tr>
         `;
     }
@@ -1343,7 +1481,7 @@ function exportAllRequestsToPDF() {
     for (let r of requestsData) {
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
         let amount = parseFloat(r.amount) || 0;
-        tableRows += `<tr class="${r.type === 'income' ? 'income-row' : 'expense-row'}" style="border-bottom:1px solid #e5e7eb;"><td style="padding:10px 8px; border:1px solid #ddd;">${formatDate(r.transaction_date)}</td><td style="padding:10px 8px; border:1px solid #ddd; text-align:center;"><span style="background:${r.type === 'income' ? '#d1fae5' : '#fee2e2'}; color:${r.type === 'income' ? '#059669' : '#dc2626'}; padding:4px 10px; border-radius:20px; font-size:11px; display:inline-block;">${r.type}</span></td><td style="padding:10px 8px; border:1px solid #ddd; word-break:break-word;">${escapeHtml(r.source)}</td><td style="padding:10px 8px; border:1px solid #ddd; text-align:right; font-weight:bold; color:${r.type === 'income' ? '#059669' : '#dc2626'};">${formatMoney(amount)}</td><td style="padding:10px 8px; border:1px solid #ddd; word-break:break-word;">${escapeHtml(r.description || '-')}</td><td style="padding:10px 8px; border:1px solid #ddd; text-align:center;"><span style="background:${r.status === 'approved' ? '#d1fae5' : r.status === 'cancelled' ? '#fee2e2' : '#fef3c7'}; color:${r.status === 'approved' ? '#059669' : r.status === 'cancelled' ? '#dc2626' : '#d97706'}; padding:4px 10px; border-radius:20px; font-size:11px; display:inline-block;">${statusText}</span></td><td style="padding:10px 8px; border:1px solid #ddd;">${escapeHtml(r.created_by || 'System')}</td></tr>`;
+        tableRows += `<tr class="${r.type === 'income' ? 'income-row' : 'expense-row'}" style="border-bottom:1px solid #e5e7eb;"><td style="padding:10px 8px; border:1px solid #ddd;">${formatDate(r.transaction_date)}</td<td style="padding:10px 8px; border:1px solid #ddd; text-align:center;"><span style="background:${r.type === 'income' ? '#d1fae5' : '#fee2e2'}; color:${r.type === 'income' ? '#059669' : '#dc2626'}; padding:4px 10px; border-radius:20px; font-size:11px; display:inline-block;">${r.type}</span></td<td style="padding:10px 8px; border:1px solid #ddd; word-break:break-word;">${escapeHtml(r.source)}</td<td style="padding:10px 8px; border:1px solid #ddd; text-align:right; font-weight:bold; color:${r.type === 'income' ? '#059669' : '#dc2626'};">${formatMoney(amount)}</td<td style="padding:10px 8px; border:1px solid #ddd; word-break:break-word;">${escapeHtml(r.description || '-')}</td<td style="padding:10px 8px; border:1px solid #ddd; text-align:center;"><span style="background:${r.status === 'approved' ? '#d1fae5' : r.status === 'cancelled' ? '#fee2e2' : '#fef3c7'}; color:${r.status === 'approved' ? '#059669' : r.status === 'cancelled' ? '#dc2626' : '#d97706'}; padding:4px 10px; border-radius:20px; font-size:11px; display:inline-block;">${statusText}</span></td<td style="padding:10px 8px; border:1px solid #ddd;">${escapeHtml(r.created_by || 'System')}</td</tr`;
     }
     const printWindow = window.open('', '_blank');
     if (!printWindow) { showToast("Please allow popups to generate PDF", true); return; }
@@ -1356,7 +1494,7 @@ function exportAllRequestsToPDF() {
     <div class="summary-card profit"><div class="label">Net Profit</div><div class="value">${formatMoney(netProfit)}</div></div>
     <div class="summary-card pending"><div class="label">Pending Amount</div><div class="value">${formatMoney(totalPending)}</div></div>
     <div class="summary-card total"><div class="label">Total Value</div><div class="value">${formatMoney(totalIncome + totalExpense)}</div></div></div>
-    <div class="table-container"><table><thead><tr><th style="width:12%">Date</th><th style="width:8%">Type</th><th style="width:20%">Source</th><th style="width:15%">Amount</th><th style="width:20%">Description</th><th style="width:10%">Status</th><th style="width:15%">Created By</th></tr></thead><tbody>${tableRows}</tbody><tfoot><tr style="background:#f3f4f6;font-weight:bold;"><td colspan="3" style="padding:10px;text-align:right;">TOTAL:</td><td style="padding:10px;text-align:right;color:#059669;">${formatMoney(totalIncome + totalExpense)}</td><td colspan="3"></td></tr></tfoot></table></div>
+    <div class="table-container"><table><thead><tr><th style="width:12%">Date</th><th style="width:8%">Type</th><th style="width:20%">Source</th><th style="width:15%">Amount</th><th style="width:20%">Description</th><th style="width:10%">Status</th><th style="width:15%">Created By</th></tr></thead><tbody>${tableRows}</tbody><tfoot><tr style="background:#f3f4f6;font-weight:bold;"><td colspan="3" style="padding:10px;text-align:right;">TOTAL:</td><td style="padding:10px;text-align:right;color:#059669;">${formatMoney(totalIncome + totalExpense)}</td<td colspan="3"></td></tr></tfoot></table></div>
     <div class="footer">GeoTraverse ERP System - Sales & Marketing Department | Official Report</div>
     <div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);"><i class="fas fa-print"></i> Save as PDF / Print</button><button onclick="window.close();">Close</button></div></div></body></html>`);
     printWindow.document.close(); showToast("PDF preview opened - Click Print/Save to download");
@@ -1673,7 +1811,7 @@ async function viewCampaign(id) {
         const tbody = document.getElementById('dailyWorkTableBody');
         if(tbody) {
             if(dailyworkData.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records for this campaign</td</tr'; }
-            else { let html = ''; for(let w of dailyworkData) { let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'; let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending'; html += `<tr id="daily-row-${w.id}"><td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td><td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td><td class="p-2 text-xs text-right">${formatMoney(w.budget)}</td><td class="p-2 text-xs text-right">${formatMoney(w.amount)}</td><td class="p-2 text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWorkRecord(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWorkRecord(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td></tr>`; } tbody.innerHTML = html; }
+            else { let html = ''; for(let w of dailyworkData) { let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'; let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending'; html += `<tr id="daily-row-${w.id}"><td class="p-2 text-xs">${new Date(w.date).toLocaleString()}</td><td class="p-2 text-xs">${escapeHtml(w.work_description || '-')}</td><td class="p-2 text-xs text-right">${formatMoney(w.budget)}</td<td class="p-2 text-xs text-right">${formatMoney(w.amount)}</td<td class="p-2 text-center"><span class="status-badge ${statusClass}">${statusText}</span></td<td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWorkRecord(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWorkRecord(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td</tr`; } tbody.innerHTML = html; }
         }
         const buttonsDiv = document.getElementById('viewCampaignButtons');
         if (buttonsDiv) { buttonsDiv.innerHTML = `<button onclick="exportCampaignExcel(${c.id})" class="btn-success text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportCampaignPDFNewWindow(${c.id})" class="btn-danger text-white px-3 py-1 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>`; }
