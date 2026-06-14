@@ -1012,26 +1012,64 @@ function exportAllCampaignDocumentsToPDF() {
 // ==================== DAILY WORK FUNCTIONS - FIXED ====================
 async function loadDailyWorkForCampaign(campaignId) {
     const campaign = campaigns.find(c => c.id === campaignId);
-    if(!campaign) return;
+    if(!campaign) {
+        console.log('Campaign not found for ID:', campaignId);
+        return;
+    }
     
-    console.log('Loading daily work for campaign:', campaignId);
+    console.log('Loading daily work for campaign ID:', campaignId);
+    console.log('Campaign name:', campaign.campaign_name);
     
     try {
-        const res = await apiCall(`get_dailywork.php?campaign_id=${campaignId}&department_id=${DEPARTMENT_ID}`);
-        console.log('Daily work API response:', res);
+        // Option 1: Jaribu kutumia project_id
+        let res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${campaignId}`);
+        console.log('API response with project_id:', res);
         
-        if (res && res.success && res.data) {
-            dailyworkData = res.data.filter(w => w.campaign_id == campaignId && (!w.is_deleted || w.is_deleted != 1));
-            console.log('Daily work records found:', dailyworkData.length);
-        } else { 
-            dailyworkData = []; 
-            console.log('No daily work data');
+        // Option 2: Kama hakuna data, jaribu kutumia campaign_name kama project_name
+        if (!res || !res.success || !res.data || res.data.length === 0) {
+            console.log('No results with project_id, trying with project_name...');
+            res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(campaign.campaign_name)}`);
+            console.log('API response with project_name:', res);
         }
+        
+        // Option 3: Kama bado hakuna, fetch zote na uchuje manually
+        if (!res || !res.success || !res.data || res.data.length === 0) {
+            console.log('No results with filters, fetching all daily work...');
+            res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}`);
+            console.log('All daily work response:', res);
+            
+            if (res && res.success && res.data) {
+                dailyworkData = res.data.filter(w => {
+                    const matchesCampaignName = w.campaign_name === campaign.campaign_name || 
+                                                w.project_name === campaign.campaign_name;
+                    const matchesCampaignId = w.campaign_id == campaignId || w.project_id == campaignId;
+                    return (matchesCampaignName || matchesCampaignId) && (!w.is_deleted || w.is_deleted != 1);
+                });
+                console.log('Filtered daily work records:', dailyworkData.length);
+            } else {
+                dailyworkData = [];
+            }
+        } else if (res && res.success && res.data) {
+            dailyworkData = res.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+            console.log('Daily work records found:', dailyworkData.length);
+        } else {
+            dailyworkData = [];
+        }
+        
+        // PANGA DATA KWA UTARATIBU WA TAREHE (ZIPYA KWANZA)
+        dailyworkData.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        console.log('Sorted daily work records:', dailyworkData.length);
+        if (dailyworkData.length > 0) {
+            console.log('Sample daily work record:', dailyworkData[0]);
+        }
+        
     } catch(e) { 
         console.error('Error loading daily work:', e); 
         dailyworkData = []; 
     }
     
+    // SASISHA SUMMARY NA RENDER TABLE
     updateDailyWorkSummary();
     renderDailyWorkTable();
 }
@@ -1061,43 +1099,83 @@ function updateDailyWorkSummary() {
 function renderDailyWorkTable() {
     const tbody = document.getElementById('dailyWorkTableBody');
     if(!tbody) {
-        console.log('Table body not found');
+        console.log('Table body not found - check if viewCampaign modal is open');
         return;
     }
     
     console.log('Rendering daily work table, records:', dailyworkData.length);
     
     if(dailyworkData.length === 0) { 
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-400">No daily work records for this campaign</td></tr>`; 
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-400">No daily work records for this campaign. Click "Add Daily Work" to add one.缓解</td>`; 
         return; 
     }
     
     let html = '';
     for(let w of dailyworkData) {
+        // SAFETY: Ensure values are numbers
         let budgetVal = parseFloat(w.budget) || 0;
         let amountVal = parseFloat(w.amount) || 0;
-        let statusClass = w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending';
-        let statusText = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
         
+        // Determine status class and text
+        let statusClass = '';
+        let statusText = '';
+        if (w.status === 'completed') {
+            statusClass = 'status-completed';
+            statusText = 'Completed';
+        } else if (w.status === 'partial') {
+            statusClass = 'status-partial';
+            statusText = 'Partial';
+        } else {
+            statusClass = 'status-pending';
+            statusText = 'Pending';
+        }
+        
+        // Format date properly
+        let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+        
+        // Build table row with EXACT 6 COLUMNS
         html += `<tr id="daily-row-${w.id}" style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
-            <td style="padding: 10px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
-            <td style="padding: 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(budgetVal)}</td>
-            <td style="padding: 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600;">${formatMoney(amountVal)}</td>
-            <td style="padding: 10px; text-align: center;"><span class="status-badge ${statusClass}" style="padding: 3px 10px; border-radius: 20px; font-size: 10px;">${statusText}</span></td>
-            <td style="padding: 10px; text-align: center;">
-                <div class="flex gap-1 justify-center">
-                    <button type="button" onclick="viewDailyWorkRecord(${w.id})" class="action-btn view" title="View" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-eye"></i></button>
-                    <button type="button" onclick="editDailyWorkRecord(${w.id})" class="action-btn edit" title="Edit" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-edit"></i></button>
-                    <button type="button" onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete" style="padding: 4px 8px; font-size: 10px;"><i class="fas fa-trash"></i></button>
+            <!-- COLUMN 1: Date/Time -->
+            <td style="padding: 12px 10px; white-space: nowrap; vertical-align: middle;">
+                ${recordDate}
+            </td
+            <!-- COLUMN 2: Description -->
+            <td style="padding: 12px 10px; word-break: break-word; white-space: normal; vertical-align: middle; max-width: 250px;">
+                ${escapeHtml(w.work_description || '-')}
+            </td
+            <!-- COLUMN 3: Budget (TZS) -->
+            <td style="padding: 12px 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; color: #059669; vertical-align: middle;">
+                ${formatMoney(budgetVal)}
+            </td
+            <!-- COLUMN 4: Amount (TZS) -->
+            <td style="padding: 12px 10px; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; color: #ea580c; vertical-align: middle;">
+                ${formatMoney(amountVal)}
+            </td
+            <!-- COLUMN 5: Status -->
+            <td style="padding: 12px 10px; text-align: center; white-space: nowrap; vertical-align: middle;">
+                <span class="status-badge ${statusClass}" style="padding: 4px 12px; border-radius: 20px; font-size: 11px; display: inline-block;">
+                    ${statusText}
+                </span>
+            </td
+            <!-- COLUMN 6: Actions -->
+            <td style="padding: 12px 10px; text-align: center; white-space: nowrap; vertical-align: middle;">
+                <div class="flex gap-2 justify-center">
+                    <button type="button" onclick="viewDailyWorkRecord(${w.id})" class="action-btn view" title="View" style="padding: 5px 10px; font-size: 11px;">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    <button type="button" onclick="editDailyWorkRecord(${w.id})" class="action-btn edit" title="Edit" style="padding: 5px 10px; font-size: 11px;">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                    <button type="button" onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete" style="padding: 5px 10px; font-size: 11px;">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
                 </div>
-            </td>
+            </td
         </tr>`;
     }
     tbody.innerHTML = html;
     console.log('Table rendered with', dailyworkData.length, 'rows');
 }
-
 function toggleDailyWorkTable() {
     const tableContainer = document.getElementById('dailyWorkListContainer');
     const summaryDiv = document.getElementById('dailyWorkSummary');
