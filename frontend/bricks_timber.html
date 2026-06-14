@@ -1364,8 +1364,9 @@ function openAddDailyWorkModal(type) {
     document.getElementById('dailyworkProjectName').value = type === 'bricks' ? 'Bricks Production' : 'Timber Production';
     document.getElementById('dailyworkDateTime').value = new Date().toISOString().slice(0,16);
     document.getElementById('dailyworkDesc').value = '';
-    document.getElementById('dailyworkProduced').value = '0';
-    document.getElementById('dailyworkSold').value = '0';
+    // FIXED: Set to empty string instead of '0'
+    document.getElementById('dailyworkProduced').value = '';
+    document.getElementById('dailyworkSold').value = '';
     document.getElementById('dailyworkPricePerUnit').value = '';
     document.getElementById('dailyworkTotalAmount').value = '';
     document.getElementById('dailyworkExpenses').value = '';
@@ -1376,7 +1377,6 @@ function openAddDailyWorkModal(type) {
     document.getElementById('remainingAmountDisplay').innerHTML = formatMoney(0);
     openModal('dailyworkModal');
 }
-
 function updateTotalsForModal() {
     let pricePerUnit = parseMoneyValue(document.getElementById('dailyworkPricePerUnit').value);
     let quantitySold = parseInt(document.getElementById('dailyworkSold').value) || 0;
@@ -1393,10 +1393,11 @@ function updateTotalsForModal() {
 }
 
 async function saveDailyWork() { 
-    let id = document.getElementById('dailyworkId').value;
+    let id = document.getElementById('dailyworkId').value; 
     let type = document.getElementById('dailyworkType').value;
     let projectName = document.getElementById('dailyworkProjectName').value.trim();
     let datetime = document.getElementById('dailyworkDateTime').value; 
+    // FIXED: Parse properly, treat empty as 0
     let quantityProduced = parseInt(document.getElementById('dailyworkProduced').value) || 0;
     let quantitySold = parseInt(document.getElementById('dailyworkSold').value) || 0;
     let pricePerUnit = parseMoneyValue(document.getElementById('dailyworkPricePerUnit').value);
@@ -1429,7 +1430,6 @@ async function saveDailyWork() {
         created_by: CURRENT_USER
     };
     
-    // CRITICAL FIX: Add id separately for update
     if (id && id !== '') {
         data.id = parseInt(id);
         data.updated_by = CURRENT_USER;
@@ -1441,7 +1441,6 @@ async function saveDailyWork() {
     sendBtn.disabled = true;
     
     try {
-        // Determine endpoint based on whether we have an id
         let url = API_BASE + (id ? 'update_dailywork.php' : 'add_dailywork.php');
         console.log('Sending to:', url, data);
         
@@ -1475,6 +1474,7 @@ async function saveDailyWork() {
         sendBtn.disabled = false; 
     }
 }
+
 async function viewDailyWorkRecord(id) { 
     let allWork = [...bricksDailyWork, ...timberDailyWork];
     const w = allWork.find(w=>w.id==id); 
@@ -1515,6 +1515,7 @@ function editDailyWorkRecord(id) {
         document.getElementById('dailyworkProjectName').value = w.project_name; 
         document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0,16) : new Date().toISOString().slice(0,16); 
         document.getElementById('dailyworkDesc').value = w.work_description||''; 
+        // Show values (0 will show as 0, which is fine for editing existing records)
         document.getElementById('dailyworkProduced').value = w.quantity_produced || 0;
         document.getElementById('dailyworkSold').value = w.quantity_sold || 0;
         document.getElementById('dailyworkPricePerUnit').value = formatNumberWithCommas(pricePerUnit);
@@ -1541,7 +1542,6 @@ function editDailyWorkRecord(id) {
         openModal('dailyworkModal'); 
     } 
 }
-
 async function deleteDailyWorkRecord(id) { 
     if(confirm('Delete this daily work record?')) { 
         let res = await deleteDailyWorkAPI(id); 
