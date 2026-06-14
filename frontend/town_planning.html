@@ -1607,139 +1607,160 @@ function exportProjectToPDFNewWindow(projectId) {
     let totalBudget = 0, totalAmount = 0;
     const projectWork = dailyworkData.filter(w => w.project_id == p.id);
     projectWork.forEach(w => { totalBudget += parseFloat(w.budget)||0; totalAmount += parseFloat(w.amount)||0; });
-    let remaining = totalBudget - totalAmount;
-    let remainingColor = remaining >= 0 ? '#059669' : '#dc2626';
     
-    // Build daily work table rows - 5 COLUMNS (No Variance)
-    let dailyRows = '';
+    // Build daily work table rows as a complete string
+    let dailyTableHtml = '';
     if (projectWork.length > 0) {
-        dailyRows = '<table style="width:100%; border-collapse:collapse; margin-top:15px;"><thead><tr style="background:#4338ca; color:white;"><th style="padding:10px 8px; border:1px solid #4338ca;">Date/Time</th><th style="padding:10px 8px; border:1px solid #4338ca;">Description</th><th style="padding:10px 8px; border:1px solid #4338ca; text-align:right;">Budget (TZS)</th><th style="padding:10px 8px; border:1px solid #4338ca; text-align:right;">Amount (TZS)</th><th style="padding:10px 8px; border:1px solid #4338ca; text-align:center;">Status</th></tr></thead><tbody>';
+        dailyTableHtml = `
+            <div class="summary-cards">
+                <div class="summary-card"><h4>💰 Total Budget</h4><p>${formatMoney(totalBudget)}</p></div>
+                <div class="summary-card"><h4>💸 Total Amount</h4><p>${formatMoney(totalAmount)}</p></div>
+                <div class="summary-card"><h4>📊 Variance</h4><p>${formatMoney(totalAmount - totalBudget)}</p></div>
+            </div>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th style="width:18%">Date/Time</th>
+                        <th style="width:37%">Description</th>
+                        <th style="width:15%" class="text-right">Budget (TZS)</th>
+                        <th style="width:15%" class="text-right">Amount (TZS)</th>
+                        <th style="width:15%" class="text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+        
         for (let w of projectWork) {
             let statusText_dw = w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending';
             let statusColor_dw = w.status === 'completed' ? '#059669' : w.status === 'partial' ? '#d97706' : '#dc2626';
             let statusBg_dw = w.status === 'completed' ? '#d1fae5' : w.status === 'partial' ? '#fef3c7' : '#fee2e2';
             
-            dailyRows += '<tr style="border-bottom:1px solid #4338ca;">';
-            dailyRows += '<td style="padding:10px 8px; border:1px solid #4338ca; white-space:nowrap;">' + new Date(w.date).toLocaleString() + '</td>';
-            dailyRows += '<td style="padding:10px 8px; border:1px solid #4338ca; word-break:break-word;">' + escapeHtml(w.work_description||'-') + '</td>';
-            dailyRows += '<td style="padding:10px 8px; border:1px solid #4338ca; text-align:right; white-space:nowrap;">' + formatMoney(w.budget) + '</td>';
-            dailyRows += '<td style="padding:10px 8px; border:1px solid #4338ca; text-align:right; white-space:nowrap;">' + formatMoney(w.amount) + '</td>';
-            dailyRows += '<td style="padding:10px 8px; border:1px solid #4338ca; text-align:center;"><span style="display:inline-block; padding:4px 12px; border-radius:20px; font-size:11px; background:' + statusBg_dw + '; color:' + statusColor_dw + ';">' + statusText_dw + '</span></td>';
-            dailyRows += '</tr>';
+            dailyTableHtml += `
+                <tr style="border-bottom:1px solid #4338ca;">
+                    <td style="padding:10px 8px; border:1px solid #4338ca; white-space:nowrap;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="padding:10px 8px; border:1px solid #4338ca; word-break:break-word;">${escapeHtml(w.work_description||'-')}</td>
+                    <td style="padding:10px 8px; border:1px solid #4338ca; text-align:right; white-space:nowrap;">${formatMoney(w.budget)}</td>
+                    <td style="padding:10px 8px; border:1px solid #4338ca; text-align:right; white-space:nowrap;">${formatMoney(w.amount)}</td>
+                    <td style="padding:10px 8px; border:1px solid #4338ca; text-align:center;">
+                        <span style="display:inline-block; padding:4px 12px; border-radius:20px; font-size:11px; background:${statusBg_dw}; color:${statusColor_dw};">${statusText_dw}</span>
+                    </td>
+                </tr>`;
         }
-        dailyRows += '</tbody></table>';
-    }
-    
-    // Build project details rows - VERTICAL TABLE (each field on its own row)
-    let detailsRows = '';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📌 Project Name:</td><td style="padding:14px 20px;"><strong>' + escapeHtml(p.name) + '</strong></td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">👤 Client Name:</td><td style="padding:14px 20px;">' + escapeHtml(p.client_name || 'N/A') + '</td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">💰 Amount:</td><td style="padding:14px 20px;"><span style="color:#059669; font-weight:bold;">' + formatMoney(p.amount) + '</span></td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📊 Status:</td><td style="padding:14px 20px;"><span class="status-badge ' + statusBadgeClass + '">' + statusText + '</span></td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📈 Progress:</td><td style="padding:14px 20px;">' + (p.progress || 0) + '%<div style="width:100%; background:#e5e7eb; border-radius:4px; margin-top:5px;"><div style="width:' + (p.progress||0) + '%; background:#4338ca; height:6px; border-radius:4px;"></div></div></td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📍 Location:</td><td style="padding:14px 20px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📅 Start Date:</td><td style="padding:14px 20px;">' + (p.start_date || 'Not specified') + '</td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📅 End Date:</td><td style="padding:14px 20px;">' + (p.end_date || 'Not specified') + '</td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📝 Description:</td><td style="padding:14px 20px;">' + escapeHtml(p.description || 'No description') + '</td></tr>';
-    detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">👨‍💻 Created By:</td><td style="padding:14px 20px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>';
-    if (p.updated_by) {
-        detailsRows += '<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">✏️ Updated By:</td><td style="padding:14px 20px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>';
+        
+        dailyTableHtml += `
+                </tbody>
+            </table>`;
+    } else {
+        dailyTableHtml = '<div style="text-align:center; padding:20px; color:#999;">No daily work records found.</div>';
     }
     
     let w = window.open('', '_blank');
     if (!w) { showToast("Please allow popups", true); return; }
     
-    let htmlContent = '<!DOCTYPE html>';
-    htmlContent += '<html>';
-    htmlContent += '<head>';
-    htmlContent += '<meta charset="UTF-8">';
-    htmlContent += '<title>' + escapeHtml(p.name) + ' - Project Report</title>';
-    htmlContent += '<style>';
-    htmlContent += '* { margin: 0; padding: 0; box-sizing: border-box; }';
-    htmlContent += 'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }';
-    htmlContent += '.container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #4338ca; }';
-    htmlContent += '.header { background: linear-gradient(135deg, #4338ca, #3730a3); color: white; padding: 25px; text-align: center; }';
-    htmlContent += '.header h1 { font-size: 22px; margin: 0; }';
-    htmlContent += '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }';
-    htmlContent += '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }';
-    htmlContent += '.image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }';
-    htmlContent += '.image-section img { max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; }';
-    htmlContent += '.status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }';
-    htmlContent += '.status-pending { background: #fef3c7; color: #d97706; }';
-    htmlContent += '.status-progress { background: #dbeafe; color: #2563eb; }';
-    htmlContent += '.status-completed { background: #d1fae5; color: #059669; }';
-    htmlContent += '.status-approved { background: #e9d5ff; color: #7e22ce; }';
-    htmlContent += '.section-title { background: #4338ca; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin: 20px 0 10px 0; }';
-    htmlContent += '.details-vertical-table { width: 100%; border-collapse: collapse; margin: 20px 0; }';
-    htmlContent += '.details-vertical-table tr { border-bottom: 1px solid #e5e7eb; }';
-    htmlContent += '.details-vertical-table td:first-child { width: 35%; background: #f8fafc; padding: 14px 20px; font-weight: 700; color: #4338ca; border-right: 1px solid #e5e7eb; }';
-    htmlContent += '.details-vertical-table td:last-child { padding: 14px 20px; color: #1f2937; font-weight: 500; }';
-    htmlContent += '.summary-cards { display: flex; gap: 15px; margin: 15px 25px; justify-content: center; }';
-    htmlContent += '.summary-card { flex: 1; background: #f0fdf4; border-radius: 10px; text-align: center; padding: 12px; border: 1px solid #d1fae5; }';
-    htmlContent += '.summary-card h4 { font-size: 12px; color: #166534; margin-bottom: 4px; }';
-    htmlContent += '.summary-card p { font-size: 16px; font-weight: bold; }';
-    htmlContent += '.daily-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 12px; }';
-    htmlContent += '.daily-table th { background: #f1f5f9; padding: 10px; border: 1px solid #4338ca; text-align: left; font-weight: 700; }';
-    htmlContent += '.daily-table td { padding: 10px; border: 1px solid #4338ca; vertical-align: top; }';
-    htmlContent += '.daily-table .text-right { text-align: right; }';
-    htmlContent += '.daily-table .text-center { text-align: center; }';
-    htmlContent += '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; margin-top: 20px; background: #f9fafb; }';
-    htmlContent += '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }';
-    htmlContent += '.print-btn button { background: #4338ca; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }';
-    htmlContent += '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #4338ca !important; -webkit-print-color-adjust: exact; } }';
-    htmlContent += '</style>';
-    htmlContent += '</head>';
-    htmlContent += '<body>';
-    htmlContent += '<div class="container">';
-    htmlContent += '<div class="header">';
-    htmlContent += '<h1>' + escapeHtml(p.name) + '</h1>';
-    htmlContent += '<p>Project Report - Generated: ' + new Date().toLocaleString() + '</p>';
-    htmlContent += '</div>';
-    htmlContent += '<div class="info-bar">';
-    htmlContent += '<span><strong>Project ID:</strong> #' + p.id + '</span>';
-    htmlContent += '<span><strong>Department:</strong> Town Planning</span>';
-    htmlContent += '<span><strong>Generated By:</strong> ' + CURRENT_USER + '</span>';
-    htmlContent += '</div>';
-    htmlContent += '<div class="image-section">';
-    if (fileUrl && isImage) {
-        htmlContent += '<img src="' + fileUrl + '?t=' + Date.now() + '" alt="Project Image" onerror="this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:20px;\\\'>No Image Available</div>\'">';
-    } else {
-        htmlContent += '<div style="color:#999;padding:20px;">No Image Available</div>';
-    }
-    htmlContent += '</div>';
-    htmlContent += '<div class="section-title"><i class="fas fa-info-circle"></i> Project Details</div>';
-    htmlContent += '<table class="details-vertical-table">';
-    htmlContent += detailsRows;
-    htmlContent += '</table>';
-    htmlContent += '<div class="section-title"><i class="fas fa-calendar-day"></i> Daily Work Records</div>';
-    
-    if (projectWork.length > 0) {
-        htmlContent += '<div class="summary-cards">';
-        htmlContent += '<div class="summary-card"><h4>💰 Total Budget</h4><p>' + formatMoney(totalBudget) + '</p></div>';
-        htmlContent += '<div class="summary-card"><h4>💸 Total Amount</h4><p>' + formatMoney(totalAmount) + '</p></div>';
-        htmlContent += '<div class="summary-card"><h4>📊 Remaining Budget</h4><p style="color:' + remainingColor + ';">' + formatMoney(remaining) + '</p></div>';
-        htmlContent += '</div>';
-        htmlContent += '<div class="table-wrapper" style="margin: 0 25px 25px 25px; overflow-x: auto;">';
-        htmlContent += dailyRows;
-        htmlContent += '</div>';
-    } else {
-        htmlContent += '<div style="text-align:center; padding:20px; color:#999;">No daily work records found.</div>';
-    }
-    
-    htmlContent += '<div class="footer">GeoTraverse ERP System - Town Planning Department | Official Project Document</div>';
-    htmlContent += '<div class="print-btn">';
-    htmlContent += '<button onclick="window.print(); setTimeout(() => window.close(), 1000);">';
-    htmlContent += '🖨️ Save as PDF / Print';
-    htmlContent += '</button>';
-    htmlContent += '</div>';
-    htmlContent += '</div>';
-    htmlContent += '</body>';
-    htmlContent += '</html>';
-    
-    w.document.write(htmlContent);
+    w.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${escapeHtml(p.name)} - Project Report</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #4338ca; }
+            .header { background: linear-gradient(135deg, #4338ca, #3730a3); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 22px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
+            .image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .image-section img { max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; }
+            .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+            .status-pending { background: #fef3c7; color: #d97706; }
+            .status-progress { background: #dbeafe; color: #2563eb; }
+            .status-completed { background: #d1fae5; color: #059669; }
+            .status-approved { background: #e9d5ff; color: #7e22ce; }
+            .section-title { background: #4338ca; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin: 20px 0 10px 0; }
+            
+            /* VERTICAL TABLE - EACH FIELD ON ITS OWN ROW (KUSHUKA CHINI) */
+            .details-vertical-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            .details-vertical-table tr { border-bottom: 1px solid #e5e7eb; }
+            .details-vertical-table td:first-child { 
+                width: 35%; 
+                background: #f8fafc; 
+                padding: 14px 20px; 
+                font-weight: 700; 
+                color: #4338ca; 
+                border-right: 1px solid #e5e7eb;
+            }
+            .details-vertical-table td:last-child { 
+                padding: 14px 20px; 
+                color: #1f2937; 
+                font-weight: 500;
+            }
+            
+            .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 15px 25px; background: #f0fdf4; border-radius: 10px; text-align: center; }
+            .summary-card { padding: 12px; border-right: 1px solid #10b981; }
+            .summary-card:last-child { border-right: none; }
+            .summary-card h4 { font-size: 12px; color: #166534; margin-bottom: 4px; }
+            .summary-card p { font-size: 16px; font-weight: bold; color: #059669; }
+            
+            .daily-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 12px; }
+            .daily-table th { background: #f1f5f9; padding: 10px; border: 1px solid #4338ca; text-align: left; font-weight: 700; }
+            .daily-table td { padding: 10px; border: 1px solid #4338ca; vertical-align: top; }
+            .daily-table .text-right { text-align: right; }
+            .daily-table .text-center { text-align: center; }
+            
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; margin-top: 20px; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #4338ca; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #4338ca !important; -webkit-print-color-adjust: exact; } .details-vertical-table td:first-child { background: #f8fafc !important; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>${escapeHtml(p.name)}</h1>
+                <p>Project Report - Generated: ${new Date().toLocaleString()}</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Project ID:</strong> #${p.id}</span>
+                <span><strong>Department:</strong> Town Planning</span>
+                <span><strong>Generated By:</strong> ${CURRENT_USER}</span>
+            </div>
+            <div class="image-section">
+                ${fileUrl && isImage ? `<img src="${fileUrl}?t=${Date.now()}" alt="Project Image" onerror="this.parentElement.innerHTML='<div style=\'color:#999;padding:20px;\'>No Image Available</div>'">` : '<div style="color:#999;padding:20px;">No Image Available</div>'}
+            </div>
+            
+            <div class="section-title"><i class="fas fa-info-circle"></i> Project Details</div>
+            <table class="details-vertical-table">
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📌 Project Name:</td><td style="padding:14px 20px;"><strong>${escapeHtml(p.name)}</strong></td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">👤 Client Name:</td><td style="padding:14px 20px;">${escapeHtml(p.client_name || 'N/A')}</td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">💰 Amount:</td><td style="padding:14px 20px;"><span style="color:#059669; font-weight:bold;">${formatMoney(p.amount)}</span></td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📊 Status:</td><td style="padding:14px 20px;"><span class="status-badge ${statusBadgeClass}">${statusText}</span></td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📈 Progress:</td><td style="padding:14px 20px;">${p.progress || 0}%<div style="width:100%; background:#e5e7eb; border-radius:4px; margin-top:5px;"><div style="width:${p.progress||0}%; background:#4338ca; height:6px; border-radius:4px;"></div></div></td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📍 Location:</td><td style="padding:14px 20px;">${escapeHtml(p.location || 'N/A')}</td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📅 Start Date:</td><td style="padding:14px 20px;">${p.start_date || 'Not specified'}</td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📅 End Date:</td><td style="padding:14px 20px;">${p.end_date || 'Not specified'}</td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">📝 Description:</td><td style="padding:14px 20px;">${escapeHtml(p.description || 'No description')}</td></tr>
+                <tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">👨‍💻 Created By:</td><td style="padding:14px 20px;">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td></tr>
+                ${p.updated_by ? `<tr><td style="padding:14px 20px; width:35%; background:#f8fafc; font-weight:700; color:#4338ca; border-right:1px solid #e5e7eb;">✏️ Updated By:</td><td style="padding:14px 20px;">${escapeHtml(p.updated_by)} on ${formatDateTime(p.updated_at)}</td></tr>` : ''}
+            </table>
+            
+            <div class="section-title"><i class="fas fa-calendar-day"></i> Daily Work Records</div>
+            ${dailyTableHtml}
+            
+            <div class="footer">GeoTraverse ERP System - Town Planning Department | Official Project Document</div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(() => window.close(), 1000);">
+                    🖨️ Save as PDF / Print
+                </button>
+            </div>
+        </div>
+    </body>
+    </html>`);
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
+
 async function renderProjects(highlightId = null) {
     try {
         await Promise.all([fetchProjects(), fetchProjectDocuments()]);
