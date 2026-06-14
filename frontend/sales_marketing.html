@@ -753,24 +753,383 @@ function exportAllCampaignsToExcel() {
     showToast("All campaigns exported to Excel"); 
 }
 
+// ==================== EXPORT ALL CAMPAIGNS TO PDF (CARD FORMAT - EACH CAMPAIGN HAS ITS OWN SECTION) ====================
 function exportAllCampaignsPDF() {
-    let win = window.open('', '_blank');
-    if (!win) { showToast('Please allow popups', true); return; }
-    let campaignsHtml = campaigns.map(c => `<div style="margin-bottom:20px;border-bottom:1px solid #ea580c;padding-bottom:10px;">
-        <h3 style="color:#ea580c;">${escapeHtml(c.campaign_name || '')}</h3>
-        <p><strong>Type:</strong> ${c.campaign_type || ''}</p>
-        <p><strong>Status:</strong> ${c.status || ''}</p>
-        <p><strong>Budget:</strong> ${formatMoney(c.budget || 0)}</p>
-        <p><strong>Spent:</strong> ${formatMoney(c.spent || 0)}</p>
-        <p><strong>Remaining:</strong> ${formatMoney((c.budget||0) - (c.spent||0))}</p>
-        <p><strong>Created By:</strong> ${escapeHtml(c.created_by || 'System')}</p>
-    </div>`).join('');
-    win.document.write(`<!DOCTYPE html>
+    if (campaigns.length === 0) {
+        showToast('No campaigns to export', true);
+        return;
+    }
+    
+    // Calculate totals for all campaigns
+    let totalBudget = 0, totalSpent = 0, totalRemaining = 0;
+    let plannedCount = 0, activeCount = 0, completedCount = 0, cancelledCount = 0;
+    
+    campaigns.forEach(c => {
+        let budget = parseFloat(c.budget) || 0;
+        let spent = parseFloat(c.spent) || 0;
+        totalBudget += budget;
+        totalSpent += spent;
+        totalRemaining += (budget - spent);
+        
+        if (c.status === 'planned') plannedCount++;
+        else if (c.status === 'active') activeCount++;
+        else if (c.status === 'completed') completedCount++;
+        else if (c.status === 'cancelled') cancelledCount++;
+    });
+    
+    let overallUsagePercent = totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : 0;
+    
+    // Sort campaigns by date (newest first)
+    const sortedCampaigns = [...campaigns].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    // Build campaign cards - each campaign has its own section
+    let campaignCards = '';
+    for (let c of sortedCampaigns) {
+        let spentPercent = (c.budget && c.budget > 0) ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
+        let budgetVal = parseFloat(c.budget) || 0;
+        let spentVal = parseFloat(c.spent) || 0;
+        let remainingVal = budgetVal - spentVal;
+        
+        let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : 
+                       c.campaign_type === 'social_media' ? 'Social Media' : 
+                       c.campaign_type === 'tv_radio' ? 'TV/Radio' : 
+                       c.campaign_type === 'print' ? 'Print/Billboard' : 'Event/Seminar';
+        
+        let statusText = c.status === 'planned' ? 'Planned' : 
+                         c.status === 'active' ? 'Active' : 
+                         c.status === 'completed' ? 'Completed' : 'Cancelled';
+        let statusColor = c.status === 'planned' ? '#2563eb' : 
+                          c.status === 'active' ? '#ea580c' : 
+                          c.status === 'completed' ? '#059669' : '#dc2626';
+        let statusBg = c.status === 'planned' ? '#dbeafe' : 
+                       c.status === 'active' ? '#ffedd5' : 
+                       c.status === 'completed' ? '#d1fae5' : '#fee2e2';
+        
+        let progressColor = spentPercent < 50 ? '#10b981' : (spentPercent < 80 ? '#f59e0b' : '#ef4444');
+        
+        campaignCards += `
+            <div style="background: white; border: 2px solid #ea580c; border-radius: 16px; margin-bottom: 25px; overflow: hidden; page-break-inside: avoid; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                <!-- Campaign Header -->
+                <div style="background: linear-gradient(135deg, #ea580c, #c2410c); padding: 15px 20px; color: white;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <h3 style="font-size: 18px; font-weight: 700; margin: 0;">📢 ${escapeHtml(c.campaign_name || '-')}</h3>
+                            <p style="font-size: 11px; opacity: 0.85; margin: 5px 0 0 0;">ID: #${c.id} | ${typeText}</p>
+                        </div>
+                        <span style="display: inline-block; padding: 5px 15px; border-radius: 30px; font-size: 11px; font-weight: 600; background: ${statusBg}; color: ${statusColor};">${statusText}</span>
+                    </div>
+                </div>
+                
+                <!-- Campaign Body -->
+                <div style="padding: 20px;">
+                    <!-- Campaign Details Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                        <div style="background: #fef3c7; border-radius: 10px; padding: 12px; border-left: 4px solid #f59e0b;">
+                            <div style="font-size: 10px; color: #92400e; text-transform: uppercase; letter-spacing: 0.5px;">Target Audience</div>
+                            <div style="font-size: 13px; font-weight: 600; color: #78350f; margin-top: 4px;">${escapeHtml(c.target_audience || 'Not specified')}</div>
+                        </div>
+                        <div style="background: #dbeafe; border-radius: 10px; padding: 12px; border-left: 4px solid #3b82f6;">
+                            <div style="font-size: 10px; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Period</div>
+                            <div style="font-size: 13px; font-weight: 600; color: #1e3a8a; margin-top: 4px;">
+                                ${c.start_date ? c.start_date : 'Not set'} ${c.end_date ? ' → ' + c.end_date : ''}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Financial Cards -->
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 15px;">
+                        <div style="background: #f0fdf4; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bbf7d0;">
+                            <div style="font-size: 9px; color: #166534; text-transform: uppercase;">Budget</div>
+                            <div style="font-size: 16px; font-weight: 800; color: #059669;">${formatMoney(budgetVal)}</div>
+                        </div>
+                        <div style="background: #fff7ed; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #fed7aa;">
+                            <div style="font-size: 9px; color: #9a3412; text-transform: uppercase;">Spent</div>
+                            <div style="font-size: 16px; font-weight: 800; color: #ea580c;">${formatMoney(spentVal)}</div>
+                        </div>
+                        <div style="background: #eff6ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bfdbfe;">
+                            <div style="font-size: 9px; color: #1e40af; text-transform: uppercase;">Remaining</div>
+                            <div style="font-size: 16px; font-weight: 800; color: #2563eb;">${formatMoney(remainingVal)}</div>
+                        </div>
+                        <div style="background: #f5f3ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #ddd6fe;">
+                            <div style="font-size: 9px; color: #5b21b6; text-transform: uppercase;">Usage</div>
+                            <div style="font-size: 16px; font-weight: 800; color: ${progressColor};">${spentPercent}%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div style="margin-bottom: 15px;">
+                        <div style="background: #e2e8f0; border-radius: 10px; height: 10px; overflow: hidden;">
+                            <div style="width: ${Math.min(spentPercent, 100)}%; background: ${progressColor}; height: 100%; border-radius: 10px;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Description -->
+                    ${c.description ? `
+                    <div style="background: #f8fafc; border-radius: 10px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0;">
+                        <div style="font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Description</div>
+                        <div style="font-size: 12px; color: #334155;">${escapeHtml(c.description)}</div>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Footer Info -->
+                    <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px;">
+                        <span><i class="fas fa-user-plus"></i> Created by: ${escapeHtml(c.created_by || 'System')}</span>
+                        <span><i class="fas fa-calendar"></i> ${formatDateTime(c.created_at)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups", true);
+        return;
+    }
+    
+    printWindow.document.write(`<!DOCTYPE html>
     <html>
-    <head><title>All Campaigns Report</title>
-    <style>body{font-family:Arial;padding:30px;border:2px solid #ea580c;border-radius:12px;}h1{color:#ea580c;text-align:center;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#ea580c;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style>
-    </head><body><h1>All Campaigns Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${campaignsHtml}<div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`);
-    win.document.close(); showToast("PDF preview opened");
+    <head>
+        <meta charset="UTF-8">
+        <title>All Campaigns Report - Sales & Marketing Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
+                background: #f0f2f5; 
+                padding: 30px; 
+            }
+            .report-container { 
+                max-width: 1100px; 
+                margin: 0 auto; 
+                background: white; 
+                border-radius: 16px; 
+                overflow: hidden; 
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
+                border: 2px solid #ea580c; 
+            }
+            .header { 
+                background: linear-gradient(135deg, #ea580c, #c2410c); 
+                color: white; 
+                padding: 25px; 
+                text-align: center; 
+            }
+            .header h1 { 
+                font-size: 28px; 
+                margin: 0 0 5px 0; 
+                font-weight: 700; 
+            }
+            .header p { 
+                font-size: 12px; 
+                opacity: 0.85; 
+                margin: 0; 
+            }
+            .info-bar { 
+                background: #f8fafc; 
+                padding: 12px 25px; 
+                display: flex; 
+                justify-content: space-between; 
+                font-size: 12px; 
+                border-bottom: 1px solid #e2e8f0; 
+                color: #1e293b; 
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .section-title {
+                background: #ea580c;
+                color: white;
+                padding: 12px 25px;
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 0;
+            }
+            .summary-cards {
+                display: flex;
+                gap: 20px;
+                padding: 20px 25px;
+                background: #f0fdf4;
+                flex-wrap: wrap;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            .summary-card {
+                flex: 1;
+                background: white;
+                border-radius: 12px;
+                padding: 15px;
+                text-align: center;
+                border: 1px solid #d1fae5;
+                min-width: 130px;
+            }
+            .summary-card .label {
+                font-size: 11px;
+                font-weight: 600;
+                color: #64748b;
+                text-transform: uppercase;
+                margin-bottom: 8px;
+            }
+            .summary-card .value {
+                font-size: 18px;
+                font-weight: 800;
+                font-family: monospace;
+            }
+            .summary-card.budget .value { color: #059669; }
+            .summary-card.spent .value { color: #ea580c; }
+            .summary-card.remaining .value { color: #3b82f6; }
+            .summary-card.usage .value { color: #8b5cf6; }
+            
+            .status-stats {
+                display: flex;
+                gap: 15px;
+                padding: 15px 25px;
+                background: #f9fafb;
+                border-bottom: 1px solid #e2e8f0;
+                flex-wrap: wrap;
+            }
+            .status-stat {
+                background: white;
+                border-radius: 8px;
+                padding: 8px 15px;
+                text-align: center;
+                border: 1px solid #e2e8f0;
+                min-width: 80px;
+            }
+            .status-stat .count {
+                font-size: 22px;
+                font-weight: 700;
+            }
+            .status-stat .label {
+                font-size: 10px;
+                color: #64748b;
+            }
+            .status-stat.planned .count { color: #3b82f6; }
+            .status-stat.active .count { color: #ea580c; }
+            .status-stat.completed .count { color: #059669; }
+            .status-stat.cancelled .count { color: #dc2626; }
+            
+            .campaigns-container {
+                padding: 20px 25px;
+            }
+            .footer { 
+                text-align: center; 
+                font-size: 10px; 
+                color: #64748b; 
+                padding: 15px; 
+                border-top: 1px solid #e2e8f0; 
+                background: #f8fafc; 
+            }
+            .print-btn { 
+                text-align: center; 
+                padding: 15px; 
+                background: #f8fafc; 
+                border-top: 1px solid #e2e8f0; 
+            }
+            .print-btn button { 
+                background: #ea580c; 
+                color: white; 
+                border: none; 
+                padding: 10px 28px; 
+                border-radius: 6px; 
+                cursor: pointer; 
+                font-size: 13px; 
+                font-weight: 600; 
+                margin: 0 5px;
+            }
+            .print-btn button:hover {
+                background: #c2410c;
+            }
+            @media print { 
+                .print-btn { display: none; } 
+                body { background: white; padding: 0; } 
+                .report-container { box-shadow: none; border: 1px solid #ea580c; } 
+                .header { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .section-title { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .campaign-card { break-inside: avoid; page-break-inside: avoid; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="report-container">
+            <!-- HEADER -->
+            <div class="header">
+                <h1>📢 All Campaigns Report</h1>
+                <p>Sales & Marketing Department - Generated on ${new Date().toLocaleString()}</p>
+            </div>
+            
+            <!-- INFO BAR -->
+            <div class="info-bar">
+                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                <span><strong>Total Campaigns:</strong> ${campaigns.length}</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span>
+            </div>
+            
+            <!-- FINANCIAL SUMMARY -->
+            <div class="section-title">💰 Financial Summary</div>
+            <div class="summary-cards">
+                <div class="summary-card budget">
+                    <div class="label">Total Budget</div>
+                    <div class="value">${formatMoney(totalBudget)}</div>
+                </div>
+                <div class="summary-card spent">
+                    <div class="label">Total Spent</div>
+                    <div class="value">${formatMoney(totalSpent)}</div>
+                </div>
+                <div class="summary-card remaining">
+                    <div class="label">Total Remaining</div>
+                    <div class="value">${formatMoney(totalRemaining)}</div>
+                </div>
+                <div class="summary-card usage">
+                    <div class="label">Overall Usage</div>
+                    <div class="value">${overallUsagePercent}%</div>
+                </div>
+            </div>
+            
+            <!-- STATUS STATISTICS -->
+            <div class="section-title">📊 Campaign Status</div>
+            <div class="status-stats">
+                <div class="status-stat planned">
+                    <div class="count">${plannedCount}</div>
+                    <div class="label">Planned</div>
+                </div>
+                <div class="status-stat active">
+                    <div class="count">${activeCount}</div>
+                    <div class="label">Active</div>
+                </div>
+                <div class="status-stat completed">
+                    <div class="count">${completedCount}</div>
+                    <div class="label">Completed</div>
+                </div>
+                <div class="status-stat cancelled">
+                    <div class="count">${cancelledCount}</div>
+                    <div class="label">Cancelled</div>
+                </div>
+            </div>
+            
+            <!-- ALL CAMPAIGNS LIST (CARD FORMAT) -->
+            <div class="section-title">📋 All Campaigns (${campaigns.length})</div>
+            <div class="campaigns-container">
+                ${campaignCards}
+            </div>
+            
+            <!-- FOOTER -->
+            <div class="footer">
+                GeoTraverse ERP System - Sales & Marketing Department | Official Campaigns Report<br>
+                This document is system generated and requires no signature
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
+                    🖨️ Save as PDF / Print
+                </button>
+                <button onclick="window.close();">
+                    ❌ Close
+                </button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+    
+    printWindow.document.close();
+    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 function exportCampaignExcel(campaignId) { const c = campaigns.find(c => c.id === campaignId); if(c) { let ws = [["Campaign Name","Type","Budget","Spent","Remaining","Status","Start Date","End Date","Created By"]]; ws.push([c.campaign_name || '', c.campaign_type || '', c.budget || 0, c.spent || 0, (c.budget || 0) - (c.spent || 0), c.status || '', c.start_date || '', c.end_date || '', c.created_by || 'System']); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), "Campaign"); XLSX.writeFile(wb, `campaign_${c.id}.xlsx`); showToast("Exported to Excel"); } }
