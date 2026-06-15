@@ -34,6 +34,7 @@
         body.dark-mode .scroll-top { background: #0a5a8e; }
         body.dark-mode .dailywork-summary { background: #064e3b; }
         body.dark-mode .request-row-new { background: #422006 !important; }
+        body.dark-mode .uploaded-doc-card { background: #1e293b; border-color: #334155; }
         
         .sidebar { background: #0f74ba; position: fixed; width: 260px; height: 100vh; overflow-y: auto; z-index: 30; transition: left 0.3s; }
         .main-content { margin-left: 260px; }
@@ -85,10 +86,10 @@
         .tab-button:hover:not(.active) { background: #e5e7eb; }
         .tab-count { margin-left: 8px; padding: 2px 8px; border-radius: 20px; background: rgba(0,0,0,0.1); font-size: 10px; }
         
-        .projects-grid, .reports-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-        @media (max-width: 768px) { .projects-grid, .reports-grid { grid-template-columns: 1fr; } }
+        .projects-grid, .reports-grid, .documents-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        @media (max-width: 768px) { .projects-grid, .reports-grid, .documents-grid { grid-template-columns: 1fr; } }
         
-        .project-card, .report-card, .uploaded-report-card {
+        .project-card, .report-card, .uploaded-doc-card, .uploaded-report-card {
             background: white;
             border: 1px solid #e5e7eb;
             border-radius: 14px;
@@ -99,7 +100,7 @@
             flex-direction: column;
             height: 100%;
         }
-        .project-card:hover, .report-card:hover, .uploaded-report-card:hover {
+        .project-card:hover, .report-card:hover, .uploaded-doc-card:hover, .uploaded-report-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 15px rgba(0,0,0,0.1);
             border-color: #0f74ba;
@@ -235,6 +236,15 @@
         
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        
+        .doc-info-container { max-width: 550px; margin: 0 auto; background: #f9fafb; border-radius: 12px; padding: 20px; border: 1px solid #e5e7eb; }
+        body.dark-mode .doc-info-container { background: #0f172a; border-color: #334155; }
+        .doc-info-item { display: flex; padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
+        body.dark-mode .doc-info-item { border-bottom-color: #334155; }
+        .doc-info-label { width: 130px; font-weight: 600; color: #374151; flex-shrink: 0; }
+        body.dark-mode .doc-info-label { color: #94a3b8; }
+        .doc-info-value { flex: 1; word-break: break-word; color: #1f2937; }
+        body.dark-mode .doc-info-value { color: #f1f5f9; }
     </style>
 </head>
 <body>
@@ -258,7 +268,7 @@
             <div class="nav-item active" data-page="dashboard"><i class="fas fa-tachometer-alt w-5"></i><span>Dashboard</span></div>
             <div class="nav-item" data-page="employees"><i class="fas fa-users w-5"></i><span>Employees</span></div>
             <div class="nav-item" data-page="departments"><i class="fas fa-building w-5"></i><span>Departments</span></div>
-            <div class="nav-item" data-page="projects"><i class="fas fa-tasks w-5"></i><span>Projects</span><span id="projectBadge" class="badge hidden">0</span></div>
+            <div class="nav-item" data-page="projects"><i class="fas fa-tasks w-5"></i><span>Projects & Documents</span><span id="projectBadge" class="badge hidden">0</span></div>
             <div class="nav-item" data-page="requests"><i class="fas fa-hand-holding-usd w-5"></i><span>Budget Requests</span><span id="requestBadge" class="badge hidden">0</span></div>
             <div class="nav-item" data-page="reports"><i class="fas fa-chart-line w-5"></i><span>Reports</span></div>
             <div class="nav-item" data-page="settings"><i class="fas fa-cog w-5"></i><span>Settings</span></div>
@@ -300,6 +310,12 @@
 <div id="viewEmpModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-user mr-2"></i>Employee Details</h3><button onclick="closeModal('viewEmpModal')">&times;</button></div><div class="modal-body"><div id="viewEmpContent"></div><div id="empActionHistory" class="action-history"></div><button onclick="closeModal('viewEmpModal')" class="w-full bg-gray-200 py-1.5 rounded mt-3">Close</button></div></div></div>
 
 <div id="projModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-tasks mr-2"></i>Add/Edit Project</h3><button onclick="closeModal('projModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="projId"><div class="form-group"><label>Project Name *</label><input type="text" id="projName" required></div><div class="form-group"><label>Client Name</label><input type="text" id="projClient"></div><div class="form-group"><label>Amount (TZS)</label><input type="text" id="projAmount" class="money-input"></div><div class="form-group"><label>Location</label><input type="text" id="projLocation"></div><div class="form-group"><label>Description</label><textarea id="projDesc" rows="2"></textarea></div><div class="form-group"><label>Status</label><select id="projStatus"><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="completed">Completed</option><option value="approved">Approved</option></select></div><div class="form-group"><label>Progress (%)</label><input type="number" id="projProgress" min="0" max="100"></div><div class="form-group"><label>Department</label><select id="projDept"></select></div><div class="form-group"><label>Project Image (max 15MB)</label><div id="projImageUploadArea" class="file-upload-area" onclick="document.getElementById('projImageFile').click()"><i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i><p>Click to upload image (JPG, PNG, GIF) - Max 15MB</p></div><input type="file" id="projImageFile" accept="image/*" class="hidden"><div id="projImagePreviewContainer" class="hidden mt-2"><img id="projImagePreview" class="w-full h-24 object-cover rounded border"><button type="button" onclick="removeProjectImage()" class="mt-1 text-red-500 text-sm w-full">Remove</button></div></div><div class="flex gap-3"><button onclick="saveProject()" class="flex-1 btn-primary py-1.5 rounded">Save</button><button onclick="closeModal('projModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button></div></div></div></div>
+
+<!-- Project Document Upload Modal -->
+<div id="projectDocUploadModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-upload mr-2"></i>Upload Project Document</h3><button onclick="closeModal('projectDocUploadModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Document Title *</label><input type="text" id="projectDocTitle" required></div><div class="form-group"><label>Description</label><textarea id="projectDocDesc" rows="3"></textarea></div><div class="form-group"><div class="file-upload-area" onclick="document.getElementById('projectDocFile').click()"><i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i><p>Click to upload document (PDF, DOC, XLS, Images) - Max 10MB</p></div><input type="file" id="projectDocFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="hidden"></div><div id="projectDocPreview" class="hidden mt-2"><div class="flex justify-between items-center p-2 bg-gray-100 rounded"><span id="projectDocFileName"></span><button onclick="removeProjectDocument()" class="text-red-500 text-xs">Remove</button></div></div><div class="flex gap-3"><button onclick="saveProjectDocument()" class="flex-1 btn-primary py-1.5 rounded">Upload</button><button onclick="closeModal('projectDocUploadModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button></div></div></div></div>
+
+<!-- Document Info Modal -->
+<div id="documentInfoModal" class="modal"><div class="modal-content" style="max-width: 600px;"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Document Information</h3><button onclick="closeModal('documentInfoModal')">&times;</button></div><div class="modal-body"><div id="documentInfoContent" class="doc-info-container"></div><div id="documentInfoButtons" class="view-buttons-container mt-4"></div></div></div></div>
 
 <div id="viewProjModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-folder-open mr-2"></i>Project Details</h3><button onclick="closeModal('viewProjModal')">&times;</button></div><div class="modal-body">
     <div id="viewProjContent"></div>
@@ -380,6 +396,12 @@ function formatNumberWithCommas(num) { if (num === null || isNaN(num)) return '0
 function formatDate(d) { if (!d) return 'N/A'; return new Date(d).toLocaleDateString('en-GB'); }
 function formatDateTime(d) { if (!d) return 'N/A'; return new Date(d).toLocaleString(); }
 function formatDateTimeFull(d) { if (!d) return 'N/A'; return new Date(d).toLocaleString(); }
+function formatFileSize(bytes) {
+    if (!bytes) return 'Unknown';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
 
 // ==================== HELPER FUNCTIONS ====================
 function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]); }
@@ -467,13 +489,14 @@ function initDarkMode() {
 
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
-let employeesData = [], projectsData = [], dailyworkData = [], reportsData = [], departmentsList = [], uploadedReportsData = [];
+let employeesData = [], projectsData = [], dailyworkData = [], reportsData = [], departmentsList = [], uploadedReportsData = [], projectDocuments = [];
 let budgetRequests = [];
 let recycleBinData = [];
 let unviewedProjectsCount = 0, unviewedRequestsCount = 0;
 let currentProjectImageFile = null;
 let currentProjectId = null;
 let currentUploadedFile = null;
+let currentProjectDocFile = null;
 let currentProjectTab = 'added';
 let currentReportTab = 'added';
 let currentUserFullName = "Super Admin";
@@ -481,6 +504,7 @@ let viewedProjectIds = JSON.parse(localStorage.getItem('superadmin_viewedProject
 
 // Path Constants
 const PROJECTS_UPLOAD_PATH = '/geotraverse/frontend/assets/uploads/projects/';
+const PROJECT_DOCUMENTS_PATH = '/geotraverse/frontend/assets/uploads/projects/';
 
 // Department Icons and Colors
 const departmentIcons = {
@@ -550,14 +574,16 @@ async function fetchProjects() {
     } 
     updateProjectBadge(); 
 }
+async function fetchProjectDocuments() { 
+    const res = await apiCall('get_project_documents.php?department_id=1'); 
+    projectDocuments = (res.success && res.data) ? res.data.filter(d => !d.is_deleted || d.is_deleted != 1) : []; 
+}
 async function fetchDailyWork() { 
     const res = await apiCall('get_dailywork.php');
     if (res.success && res.data) { 
         dailyworkData = res.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-        console.log('Daily work fetched:', dailyworkData.length, 'records');
     } else { 
         dailyworkData = []; 
-        console.log('No daily work data');
     }
 }
 async function fetchReports() { 
@@ -679,6 +705,157 @@ function removeProjectImage() {
     document.getElementById('projImageUploadArea').classList.remove('hidden'); 
 }
 
+// ==================== PROJECT DOCUMENT FUNCTIONS ====================
+function openUploadProjectDocModal() { 
+    document.getElementById('projectDocTitle').value = ''; 
+    document.getElementById('projectDocDesc').value = ''; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+    currentProjectDocFile = null; 
+    openModal('projectDocUploadModal'); 
+}
+
+document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
+    if(e.target.files && e.target.files[0]) { 
+        currentProjectDocFile = e.target.files[0]; 
+        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
+        document.getElementById('projectDocPreview').classList.remove('hidden'); 
+    } 
+});
+
+function removeProjectDocument() { 
+    currentProjectDocFile = null; 
+    document.getElementById('projectDocFile').value = ''; 
+    document.getElementById('projectDocPreview').classList.add('hidden'); 
+}
+
+async function saveProjectDocument() {
+    const title = document.getElementById('projectDocTitle').value.trim();
+    const description = document.getElementById('projectDocDesc').value;
+    if (!title) { showToast('Document title required', true); return; }
+    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
+    if (currentProjectDocFile.size > 10 * 1024 * 1024) { showToast('File too large. Max size is 10MB', true); return; }
+    
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', description);
+    formData.append('department_id', 1);
+    formData.append('uploaded_by', currentUserFullName);
+    formData.append('document_file', currentProjectDocFile);
+    formData.append('doc_type', 'general');
+    
+    const sendBtn = document.querySelector('#projectDocUploadModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.disabled = true;
+    
+    try {
+        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
+        const result = await response.json();
+        if (result.success) { 
+            showToast('✅ Document uploaded successfully'); 
+            addLog(`Project document uploaded: ${title}`);
+            closeModal('projectDocUploadModal'); 
+            await loadProjects(); 
+        } else { 
+            showToast('❌ ' + (result.message || 'Upload failed'), true); 
+        }
+    } catch (error) { 
+        console.error('Upload error:', error);
+        showToast('❌ Network error: ' + error.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
+}
+
+function showDocumentInfo(doc, type) {
+    let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+    let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
+    let infoHtml = `
+        <div class="doc-info-container">
+            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+        </div>
+    `;
+    
+    document.getElementById('documentInfoContent').innerHTML = infoHtml;
+    
+    let deptOptions = ''; 
+    allDepartmentsForSend.forEach(d => { 
+        if (d.id !== 1) {
+            deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        }
+    });
+    
+    let downloadUrl = type === 'project' ? 
+        `../backend/api/download_document.php?id=${doc.id}&type=project` : 
+        `../backend/api/download_report_document.php?id=${doc.id}`;
+    
+    document.getElementById('documentInfoButtons').innerHTML = `
+        <button onclick="window.open('${downloadUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
+        <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
+    `;
+    openModal('documentInfoModal');
+}
+
+function viewUploadedDocument(docId) {
+    const doc = projectDocuments.find(d => d.id === docId);
+    if(doc) {
+        showDocumentInfo(doc, 'project');
+    }
+}
+
+async function deleteProjectDocument(docId) {
+    if (confirm('Delete this document? It will be moved to recycle bin.')) {
+        const doc = projectDocuments.find(d => d.id === docId);
+        if(doc) await addToRecycleBin(docId, 'project_document', doc.title);
+        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: currentUserFullName });
+        if (res.success) { 
+            showToast('Document moved to recycle bin'); 
+            await loadProjects(); 
+        } else { 
+            showToast(res.message || 'Failed', true); 
+        }
+    }
+}
+
+async function sendDocumentToDept(docId, deptId, type) { 
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    showToast(`✅ Document sent to ${deptName}`, false);
+    toggleSendDropdown(`docSendDropdown-${docId}`);
+    closeModal('documentInfoModal');
+}
+
+function exportAllProjectDocsToExcel() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
+    projectDocuments.forEach(d => { 
+        let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; 
+        ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at, fileSize]); 
+    }); 
+    let wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'ProjectDocuments'); 
+    XLSX.writeFile(wb, `project_documents.xlsx`); 
+    showToast('Exported'); 
+}
+
+function exportAllProjectDocsToPDF() { 
+    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
+    let rows = projectDocuments.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Uploaded:</strong> ${d.uploaded_by} on ${new Date(d.created_at).toLocaleString()}</p><p><strong>Description:</strong> ${escapeHtml(d.description || '-')}</p><p><strong>File Size:</strong> ${d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'}</p><hr/></div>`).join(''); 
+    let w = window.open('', '_blank'); 
+    w.document.write(`<!DOCTYPE html><html><head><title>All Project Documents</title><style>body{font-family:Arial;padding:20px;border:2px solid #0f74ba;border-radius:12px;}h1{color:#0f74ba;text-align:center;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#0f74ba;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>All Project Documents</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+    w.document.close(); 
+    showToast("PDF preview opened - Click Print to save"); 
+}
+
 // ==================== RECYCLE BIN ====================
 async function loadRecycleBinFromDB() { 
     const res = await apiCall('get_recycle_bin.php'); 
@@ -725,12 +902,16 @@ function renderRecycleBin() {
     const container = document.getElementById('recycleBinContainer'); 
     if(!container) return; 
     if(recycleBinData.length === 0) { 
-        container.innerHTML = '<div class="text-center py-6 text-gray-400 text-xs">Recycle bin is empty</div>'; 
+        container.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm">Recycle bin is empty</div>'; 
         return; 
     } 
     let html = ''; 
     for(let item of recycleBinData) { 
-        const icon = item.item_type === 'project' ? 'fa-tasks' : item.item_type === 'employee' ? 'fa-user' : item.item_type === 'report' ? 'fa-chart-line' : item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 'fa-file-alt';
+        const icon = item.item_type === 'project' ? 'fa-tasks' : 
+                    item.item_type === 'employee' ? 'fa-user' : 
+                    item.item_type === 'report' ? 'fa-chart-line' : 
+                    item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 
+                    item.item_type === 'project_document' ? 'fa-file-alt' : 'fa-file-alt';
         html += `<div class="recycle-bin-item flex justify-between items-center">
             <div class="flex items-center gap-2"><i class="fas ${icon} text-gray-500 text-xs"></i><div><p class="font-medium text-xs">${escapeHtml(item.item_name)}</p><p class="text-[8px] text-gray-500">${item.item_type} · Deleted: ${new Date(item.deleted_at).toLocaleString()}</p></div></div>
             <div class="flex gap-1"><button onclick="restoreFromRecycleBin(${item.id})" class="action-btn restore text-[9px] px-1 py-0.5"><i class="fas fa-trash-restore"></i> Restore</button><button onclick="permanentlyDeleteItem(${item.id})" class="action-btn delete text-[9px] px-1 py-0.5"><i class="fas fa-trash-alt"></i> Delete</button></div>
@@ -742,7 +923,7 @@ function renderRecycleBin() {
 // ==================== DASHBOARD ====================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading dashboard...</span></div>';
-    await Promise.all([fetchEmployees(), fetchProjects(), fetchDailyWork(), fetchReports(), fetchUploadedReports(), fetchBudgetRequests(), loadRecycleBinFromDB()]);
+    await Promise.all([fetchEmployees(), fetchProjects(), fetchDailyWork(), fetchReports(), fetchUploadedReports(), fetchBudgetRequests(), fetchProjectDocuments(), loadRecycleBinFromDB()]);
     
     let totalBudgetRequestsAmount = budgetRequests.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     let pending = projectsData.filter(p => p.status === 'pending').length;
@@ -754,19 +935,20 @@ async function loadDashboard() {
         <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
             <div class="stat-card cursor-pointer" onclick="showPage('employees')"><div class="stat-icon bg-blue-100 text-blue-600"><i class="fas fa-users text-lg"></i></div><p class="stat-label">Employees</p><p class="stat-number text-blue-600">${employeesData.length}</p></div>
             <div class="stat-card cursor-pointer" onclick="showPage('projects')"><div class="stat-icon bg-green-100 text-green-600"><i class="fas fa-tasks text-lg"></i></div><p class="stat-label">Projects</p><p class="stat-number text-green-600">${projectsData.length}</p></div>
+            <div class="stat-card cursor-pointer" onclick="showPage('projects')"><div class="stat-icon bg-cyan-100 text-cyan-600"><i class="fas fa-file-alt text-lg"></i></div><p class="stat-label">Documents</p><p class="stat-number text-cyan-600">${projectDocuments.length}</p></div>
             <div class="stat-card cursor-pointer" onclick="showPage('reports')"><div class="stat-icon bg-purple-100 text-purple-600"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Reports</p><p class="stat-number text-purple-600">${reportsData.length + uploadedReportsData.length}</p></div>
-            <div class="stat-card cursor-pointer" onclick="showPage('requests')"><div class="stat-icon bg-orange-100 text-orange-600"><i class="fas fa-hand-holding-usd text-lg"></i></div><p class="stat-label">Budget Requests</p><p class="stat-number text-orange-600">${budgetRequests.length}</p><p class="text-[10px] text-gray-500">Pending: ${pendingRequests}</p></div>
-            <div class="stat-card cursor-pointer" onclick="showPage('requests')"><div class="stat-icon bg-cyan-100 text-cyan-600"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Total Amount</p><p class="stat-number text-cyan-600">${formatMoney(totalBudgetRequestsAmount)}</p></div>
+            <div class="stat-card cursor-pointer" onclick="showPage('requests')"><div class="stat-icon bg-orange-100 text-orange-600"><i class="fas fa-hand-holding-usd text-lg"></i></div><p class="stat-label">Budget Requests</p><p class="stat-number text-orange-600">${budgetRequests.length}</p><p class="text-[10px] text-gray-500 mt-1">Pending: ${pendingRequests}</p></div>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <div class="bg-white rounded-xl p-4 shadow-sm border"><canvas id="statusChart" height="180"></canvas><div class="flex justify-center gap-3 mt-3 text-xs"><span class="text-yellow-600">Pending: ${pending}</span><span class="text-blue-600">Progress: ${inProgress}</span><span class="text-green-600">Complete: ${completed}</span></div></div>
             <div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3">Financial Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Total Budget Requests</p><p class="text-lg font-bold text-green-600">${formatMoney(totalBudgetRequestsAmount)}</p></div><div class="bg-blue-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Departments</p><p class="text-lg font-bold text-blue-600">${departmentsList.length}</p></div></div></div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
             <button onclick="showPage('employees')" class="bg-blue-600 text-white py-2 rounded text-sm">+ Employee</button>
             <button onclick="openAddProjectModal()" class="bg-green-600 text-white py-2 rounded text-sm">+ Project</button>
+            <button onclick="openUploadProjectDocModal()" class="bg-cyan-600 text-white py-2 rounded text-sm">+ Upload Doc</button>
             <button onclick="openModal('reportModal')" class="bg-purple-600 text-white py-2 rounded text-sm">+ Report</button>
-            <button onclick="openUploadReportModal()" class="bg-cyan-600 text-white py-2 rounded text-sm">Upload Report</button>
+            <button onclick="openUploadReportModal()" class="bg-orange-600 text-white py-2 rounded text-sm">Upload Report</button>
         </div>
     `;
     const ctx = document.getElementById('statusChart')?.getContext('2d');
@@ -795,7 +977,7 @@ async function loadDashboard() {
 async function loadEmployees() {
     await fetchEmployees();
     let html = `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-lg font-bold"><i class="fas fa-users text-blue-600 mr-2"></i>Employees (${employeesData.length})</h2><div class="flex gap-2"><button onclick="openEmployeeModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Employee</button><button onclick="exportEmployeesToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportEmployeesToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF</button></div></div>
-    <div class="employees-table-container"><table class="employees-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Dept</th><th>Role</th><th>Salary</th><th>Actions</th></tr></thead><tbody>`;
+    <div class="employees-table-container"><table class="employees-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Dept</th><th>Role</th><th>Salary</th><th>Actions</th><tr></thead><tbody>`;
     employeesData.forEach(e => { 
         html += `<tr id="emp-row-${e.id}"><td class="text-center">${e.id}<\/td><td class="font-medium">${escapeHtml(e.name)}<\/td><td class="text-sm">${escapeHtml(e.email)}<\/td><td class="text-sm">${escapeHtml(e.phone || '-')}<\/td><td class="text-sm">${departmentNames[e.department_id] || e.department_id}<\/td><td><span class="status-badge ${e.role === 'Super Administrator' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${e.role || 'Staff'}</span><\/td><td class="text-green-600 font-semibold text-right">${formatMoney(e.salary)}<\/td><td class="text-center"><div class="flex gap-1 justify-center"><button onclick="viewEmployee(${e.id})" class="action-btn view"><i class="fas fa-eye"></i><\/button><button onclick="editEmployee(${e.id})" class="action-btn edit"><i class="fas fa-edit"></i><\/button><button onclick="deleteEmployee(${e.id})" class="action-btn delete"><i class="fas fa-trash"></i><\/button><\/div><\/td><\/tr>`; 
     });
@@ -918,45 +1100,96 @@ function loadDepartmentsPage() {
     document.getElementById('departmentsPage').innerHTML = html;
 }
 
-// ==================== PROJECTS SECTION ====================
+// ==================== PROJECTS SECTION WITH UPLOADED DOCUMENTS TAB ====================
 async function loadProjects() {
     await fetchProjects();
-    let html = `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3><div class="flex gap-2"><button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
-    <div class="section-card-body"><div id="projectsGrid" class="projects-grid"></div></div></div>`;
-    document.getElementById('projectsPage').innerHTML = html;
+    await fetchProjectDocuments();
     
-    if (projectsData.length === 0) {
-        document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No projects found. Click "Add Project" to create one.</div>';
-        return;
-    }
+    let html = `
+        <div class="tab-container">
+            <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span></button>
+            <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span></button>
+        </div>
+    `;
     
-    let projectsHtml = '';
-    for (let p of projectsData) {
-        let imageUrl = getFullImageUrl(p.image);
-        let isNew = p.sent_from_dept && p.sent_from_dept != 1 && p.is_viewed_by_admin == 0 && !viewedProjectIds.includes(p.id);
-        let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
-        let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+    if (currentProjectTab === 'added') {
+        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3><div class="flex gap-2"><button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
+        <div class="section-card-body"><div id="projectsGrid" class="projects-grid"></div></div></div>`;
+        document.getElementById('projectsPage').innerHTML = html;
         
-        projectsHtml += `<div class="project-card" id="proj-card-${p.id}">
-            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
-            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-            ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'}
-            <div class="p-3">
-                <div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span></div>
-                <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
-                <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-blue-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
-                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                    <button onclick="viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                    <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                    <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+        if (projectsData.length === 0) {
+            document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No projects found. Click "Add Project" to create one.</div>';
+            return;
+        }
+        
+        let projectsHtml = '';
+        for (let p of projectsData) {
+            let imageUrl = getFullImageUrl(p.image);
+            let isNew = p.sent_from_dept && p.sent_from_dept != 1 && p.is_viewed_by_admin == 0 && !viewedProjectIds.includes(p.id);
+            let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
+            let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+            
+            projectsHtml += `<div class="project-card" id="proj-card-${p.id}">
+                <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
+                ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'}
+                <div class="p-3">
+                    <div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span></div>
+                    <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
+                    <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-blue-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
+                    <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                        <button onclick="viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                        <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                        <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                    <div class="user-info-line">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}</div>
                 </div>
-                <div class="user-info-line">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}</div>
-            </div>
-        </div>`;
+            </div>`;
+        }
+        document.getElementById('projectsGrid').innerHTML = projectsHtml;
+    } else {
+        // UPLOADED DOCUMENTS TAB
+        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Project Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
+        <div class="section-card-body"><div id="uploadedDocsGrid" class="documents-grid"></div></div></div>`;
+        document.getElementById('projectsPage').innerHTML = html;
+        
+        if (projectDocuments.length === 0) {
+            document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents. Click "Upload Document" to add one.</div>';
+            return;
+        }
+        
+        let docsHtml = '';
+        for (let doc of projectDocuments) {
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+            let fileIcon = 'fa-file-alt';
+            if (fileExt === 'pdf') fileIcon = 'fa-file-pdf';
+            else if (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' || fileExt === 'gif') fileIcon = 'fa-file-image';
+            else if (fileExt === 'doc' || fileExt === 'docx') fileIcon = 'fa-file-word';
+            else if (fileExt === 'xls' || fileExt === 'xlsx') fileIcon = 'fa-file-excel';
+            
+            docsHtml += `<div class="uploaded-doc-card" id="doc-card-${doc.id}">
+                <div class="card-header"><h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
+                <div class="p-3">
+                    <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span></div>
+                    <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
+                    <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                        <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                        <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                    <div class="user-info-line">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
+                </div>
+            </div>`;
+        }
+        document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
     }
-    document.getElementById('projectsGrid').innerHTML = projectsHtml;
     updateProjectBadge();
 }
+
+function switchProjectTab(tab) { 
+    currentProjectTab = tab; 
+    loadProjects(); 
+}
+
 function openAddProjectModal() { 
     document.getElementById('projId').value = ''; 
     document.getElementById('projName').value = ''; 
@@ -1030,7 +1263,7 @@ async function saveProject() {
     } catch(e) { showToast('Network error: ' + e.message, true); }
     finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
 }
-// ==================== FIXED DELETE PROJECT FUNCTION (SOFT DELETE) ====================
+
 async function softDeleteProject(id) {
     if(!confirm('Delete this project? It will be moved to recycle bin.')) {
         return;
@@ -1042,7 +1275,6 @@ async function softDeleteProject(id) {
         return;
     }
     
-    // Show loading state on the delete button
     const deleteBtn = document.querySelector(`#proj-card-${id} .action-btn.delete`);
     let originalText = '';
     if (deleteBtn) {
@@ -1051,15 +1283,12 @@ async function softDeleteProject(id) {
         deleteBtn.disabled = true;
     }
     
-    // Check if this project was unviewed (NEW)
     const wasUnviewed = p.sent_from_dept && p.sent_from_dept != 1 && 
                         p.is_viewed_by_admin == 0 && !viewedProjectIds.includes(p.id);
     
     try {
-        // FIRST: Add to recycle bin
         await addToRecycleBin(id, 'project', p.name);
         
-        // THEN: Call delete API
         const response = await fetch(API_BASE + 'delete_project.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1072,58 +1301,40 @@ async function softDeleteProject(id) {
             })
         });
         
-        // Check if response is OK
         if (response.ok) {
-            // Try to parse as JSON, but if it fails, assume success
             try {
                 const result = await response.json();
                 if (result && result.success === false) {
                     throw new Error(result.message || 'Failed to delete');
                 }
             } catch(jsonError) {
-                // If JSON parsing fails but response is OK, still consider success
                 console.log('Non-JSON response but OK status, proceeding with deletion');
             }
-        } else {
-            console.warn('Delete API returned status:', response.status);
         }
         
-        // Remove from local array IMMEDIATELY
         projectsData = projectsData.filter(project => project.id !== id);
-        
-        // Remove from UI immediately
         const projectCard = document.getElementById(`proj-card-${id}`);
-        if (projectCard) {
-            projectCard.remove();
-        }
+        if (projectCard) projectCard.remove();
         
-        // Update unviewed count if the deleted project was unviewed
         if (wasUnviewed) {
             unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
             updateProjectBadge();
         }
         
-        // Update the dashboard total count
         const dashboardStat = document.querySelector('.stat-card[onclick="showPage(\'projects\')"] .stat-number');
-        if (dashboardStat) {
-            dashboardStat.innerText = projectsData.length;
-        }
+        if (dashboardStat) dashboardStat.innerText = projectsData.length;
         
         showToast('Project moved to recycle bin'); 
         addLog(`Project deleted: ${p.name}`);
         
-        // Refresh data in background
         await loadProjects();
         await loadDashboard();
         
     } catch(error) {
         console.error('Delete project error:', error);
-        // Even if error, remove from local view
         projectsData = projectsData.filter(project => project.id !== id);
         const projectCard = document.getElementById(`proj-card-${id}`);
-        if (projectCard) {
-            projectCard.remove();
-        }
+        if (projectCard) projectCard.remove();
         if (wasUnviewed) {
             unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
             updateProjectBadge();
@@ -1137,11 +1348,7 @@ async function softDeleteProject(id) {
     }
 }
 
-// ==================== REPLACE deleteProject WITH softDeleteProject ====================
-// In the HTML, the delete button calls deleteProject, so we need to alias it
 window.deleteProject = softDeleteProject;
-
-// Also keep the original function name for compatibility
 async function deleteProject(id) {
     return softDeleteProject(id);
 }
@@ -1172,7 +1379,7 @@ function exportAllProjectsToPDF() {
     showToast("PDF preview opened"); 
 }
 
-// ==================== DAILY WORK FUNCTIONS - FIXED TABLE COLUMNS ====================
+// ==================== DAILY WORK FUNCTIONS ====================
 async function loadDailyWorkForProject(projectId) {
     console.log('Loading daily work for project ID:', projectId);
     
@@ -1244,41 +1451,10 @@ async function loadDailyWorkForProject(projectId) {
     console.log('Daily work loading complete -', projectDailyWork.length, 'records displayed');
 }
 
-// Export Daily Work to Excel with correct columns
-function exportDailyWorkToExcel() { 
-    const project = projectsData.find(p => p.id === currentProjectId); 
-    if(!project) return; 
-    const work = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(currentProjectId)); 
-    if(work.length === 0) { showToast('No records to export', true); return; } 
-    
-    let ws = [['Date/Time', 'Description', 'Budget Allocated (TZS)', 'Expenses (TZS)', 'Status', 'Created By', 'Created At']]; 
-    work.forEach(w => {
-        let budget = parseFloat(w.budget) || 0;
-        let expenses = parseFloat(w.amount) || 0;
-        ws.push([
-            new Date(w.date).toLocaleString(), 
-            w.work_description || '-', 
-            budget, 
-            expenses, 
-            w.status || 'pending', 
-            w.created_by || 'System',
-            w.created_at || ''
-        ]);
-    }); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'DailyWork'); 
-    XLSX.writeFile(wb, `dailywork_${project.name.replace(/[^a-z0-9]/gi, '_')}.xlsx`); 
-    showToast('Exported to Excel'); 
-}
-
 function updateDailyWorkSummary() { 
     const project = projectsData.find(p => p.id === currentProjectId);
-    if(!project) {
-        console.log('Cannot update summary - project not found:', currentProjectId);
-        return;
-    }
+    if(!project) return;
     
-    // Calculate totals from daily work records ONLY for this project
     let totalBudget = 0, totalExpenses = 0;
     const projectWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(currentProjectId));
     
@@ -1316,18 +1492,12 @@ function toggleDailyWorkTable() {
     const p = document.getElementById('exportDailyWorkPDFBtn'); 
     const t = document.getElementById('toggleDailyWorkBtn'); 
     if(c.style.display === 'none' || c.style.display === '') { 
-        c.style.display = 'block'; 
-        s.style.display = 'grid'; 
-        if(a) a.style.display = 'inline-flex'; 
-        if(e) e.style.display = 'inline-flex'; 
-        if(p) p.style.display = 'inline-flex'; 
+        c.style.display = 'block'; s.style.display = 'grid'; 
+        if(a) a.style.display = 'inline-flex'; if(e) e.style.display = 'inline-flex'; if(p) p.style.display = 'inline-flex'; 
         if(t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Hide Daily Work';
     } else { 
-        c.style.display = 'none'; 
-        s.style.display = 'none'; 
-        if(a) a.style.display = 'none'; 
-        if(e) e.style.display = 'none'; 
-        if(p) p.style.display = 'none'; 
+        c.style.display = 'none'; s.style.display = 'none'; 
+        if(a) a.style.display = 'none'; if(e) e.style.display = 'none'; if(p) p.style.display = 'none'; 
         if(t) t.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
     } 
 }
@@ -1361,13 +1531,8 @@ async function saveDailyWork() {
     if(!projectId && !projectName) { showToast('Project information missing', true); return; }
     if(budget <= 0) { showToast('Budget amount required', true); return; }
     
-    // Auto-update status based on expenses vs budget
-    if (status === 'pending' && amount > 0) {
-        status = 'partial';
-    }
-    if (budget > 0 && amount >= budget) {
-        status = 'completed';
-    }
+    if (status === 'pending' && amount > 0) status = 'partial';
+    if (budget > 0 && amount >= budget) status = 'completed';
     
     let data = { 
         date: datetime,
@@ -1389,15 +1554,7 @@ async function saveDailyWork() {
     sendBtn.disabled = true;
     
     try {
-        let res;
-        if (id) {
-            res = await apiCall('update_dailywork.php', 'POST', { ...data, id: parseInt(id) });
-        } else {
-            res = await apiCall('add_dailywork.php', 'POST', data);
-        }
-        
-        console.log('Daily work save response:', res);
-        
+        let res = id ? await apiCall('update_dailywork.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_dailywork.php', 'POST', data);
         if(res && res.success) { 
             showToast(id ? 'Daily work updated' : 'Daily work added'); 
             addLog(id ? `Daily work updated for ${projectName}` : `Daily work added for ${projectName}`);
@@ -1410,7 +1567,6 @@ async function saveDailyWork() {
             await loadDashboard(); 
         } else { 
             showToast(res?.message || 'Failed to save daily work', true); 
-            console.error('Save failed:', res);
         }
     } catch(e) {
         console.error('Save daily work error:', e);
@@ -1499,7 +1655,7 @@ function exportDailyWorkToExcel() {
     XLSX.writeFile(wb, `dailywork_${project.name.replace(/[^a-z0-9]/gi, '_')}.xlsx`); 
     showToast('Exported'); 
 }
-// ==================== EXPORT DAILY WORK PDF - 6 COLUMNS (NO VARIANCE) ====================
+
 async function exportDailyWorkToPDF() {
     const project = projectsData.find(p => p.id === currentProjectId);
     if (!project) { 
@@ -1684,7 +1840,7 @@ async function sendProjectToDept(projectId, deptId) {
     showToast(`✅ Project "${p.name}" sent to ${deptName}`, false); 
     toggleSendDropdown(`projSendDropdown-${projectId}`);
 }
-// ==================== EXPORT FULL PROJECT PDF - NEW WINDOW ====================
+
 async function exportProjectToPDFNewWindow(projectId) {
     console.log('exportProjectToPDFNewWindow called for project:', projectId);
     
@@ -1834,6 +1990,7 @@ async function exportProjectToPDFNewWindow(projectId) {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
+
 // ==================== BUDGET REQUESTS SECTION ====================
 async function loadRequests() {
     await fetchBudgetRequests();
@@ -2000,7 +2157,6 @@ async function loadReports() {
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
-            let fileUrl = doc.file_path || '';
             reportsHtml += `<div class="uploaded-report-card" id="uploaded-report-card-${doc.id}"><div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
             <div class="p-3"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span></div>
             <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
@@ -2180,13 +2336,12 @@ async function generateAndSaveReport() {
     else { showToast(res.message || 'Failed', true); }
 }
 
-// ==================== SETTINGS WITH WHITE BACKGROUND ====================
+// ==================== SETTINGS ====================
 async function loadSettings() {
     await loadRecycleBinFromDB();
     const darkMode = document.body.classList.contains('dark-mode');
     let colors = ["#0f74ba", "#1e3a5f", "#7c3aed", "#059669", "#dc2626", "#d97706", "#0891b2", "#4338ca"];
     
-    // Build recycle bin HTML - White background rows
     let recycleHtml = '';
     if (recycleBinData.length === 0) {
         recycleHtml = '<div class="text-center py-6 text-gray-500 text-sm">Recycle bin is empty</div>';
@@ -2196,21 +2351,17 @@ async function loadSettings() {
             const icon = item.item_type === 'project' ? 'fa-tasks' : 
                         item.item_type === 'employee' ? 'fa-user' : 
                         item.item_type === 'report' ? 'fa-chart-line' : 
-                        item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 'fa-file-alt';
+                        item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 
+                        item.item_type === 'project_document' ? 'fa-file-alt' : 'fa-file-alt';
             recycleHtml += `
                 <div class="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                            <i class="fas ${icon} text-gray-600 text-sm"></i>
-                        </div>
-                        <div>
-                            <p class="font-medium text-sm text-gray-800">${escapeHtml(item.item_name)}</p>
-                            <p class="text-[10px] text-gray-500">${item.item_type} · Deleted: ${new Date(item.deleted_at).toLocaleString()}</p>
-                        </div>
+                        <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><i class="fas ${icon} text-gray-600 text-sm"></i></div>
+                        <div><p class="font-medium text-sm text-gray-800">${escapeHtml(item.item_name)}</p><p class="text-[10px] text-gray-500">${item.item_type} · Deleted: ${new Date(item.deleted_at).toLocaleString()}</p></div>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="restoreFromRecycleBin(${item.id})" class="px-2 py-1 rounded text-xs bg-emerald-600 hover:bg-emerald-700 text-white transition"><i class="fas fa-trash-restore mr-1"></i>Restore</button>
-                        <button onclick="permanentlyDeleteItem(${item.id})" class="px-2 py-1 rounded text-xs bg-red-600 hover:bg-red-700 text-white transition"><i class="fas fa-trash-alt mr-1"></i>Delete</button>
+                        <button onclick="restoreFromRecycleBin(${item.id})" class="px-2 py-1 rounded text-xs bg-emerald-600 hover:bg-emerald-700 text-white"><i class="fas fa-trash-restore mr-1"></i>Restore</button>
+                        <button onclick="permanentlyDeleteItem(${item.id})" class="px-2 py-1 rounded text-xs bg-red-600 hover:bg-red-700 text-white"><i class="fas fa-trash-alt mr-1"></i>Delete</button>
                     </div>
                 </div>
             `;
@@ -2221,60 +2372,19 @@ async function loadSettings() {
     let html = `
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-5">
             <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-cog mr-2 text-blue-600"></i>Settings</h2>
-            
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <!-- Appearance Card -->
                 <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
                     <h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-palette text-purple-500 mr-2"></i>Appearance</h3>
                     <div class="space-y-4">
-                        <div class="flex justify-between items-center">
-                            <span class="text-sm text-gray-700"><i class="fas fa-moon mr-2 text-blue-500"></i> Dark Mode</span>
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="darkModeToggle" class="sr-only peer" ${darkMode ? 'checked' : ''}>
-                                <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                            </label>
-                        </div>
-                        <div>
-                            <span class="text-sm text-gray-700"><i class="fas fa-palette mr-2 text-green-500"></i> Sidebar Color</span>
-                            <div class="flex flex-wrap gap-2 mt-2" id="colorOptionsContainer"></div>
-                        </div>
+                        <div class="flex justify-between items-center"><span class="text-sm text-gray-700"><i class="fas fa-moon mr-2 text-blue-500"></i> Dark Mode</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="darkModeToggle" class="sr-only peer" ${darkMode ? 'checked' : ''}><div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div></label></div>
+                        <div><span class="text-sm text-gray-700"><i class="fas fa-palette mr-2 text-green-500"></i> Sidebar Color</span><div class="flex flex-wrap gap-2 mt-2" id="colorOptionsContainer"></div></div>
                     </div>
                 </div>
-                
-                <!-- Security Card -->
-                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                    <h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-shield-alt text-red-500 mr-2"></i>Security</h3>
-                    <button onclick="openModal('pwdModal')" class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 transition">Change Password</button>
-                </div>
-                
-                <!-- Data Management Card -->
-                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                    <h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-database text-green-500 mr-2"></i>Data Management</h3>
-                    <button onclick="openModal('backupModal')" class="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm hover:bg-emerald-700 transition">Backup & Restore</button>
-                </div>
-                
-                <!-- System Info Card -->
-                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                    <h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-info-circle text-indigo-500 mr-2"></i>System Info</h3>
-                    <div class="space-y-2 text-sm text-gray-600">
-                        <div class="flex justify-between"><span>Employees:</span><span class="font-semibold">${employeesData.length}</span></div>
-                        <div class="flex justify-between"><span>Projects:</span><span class="font-semibold">${projectsData.length}</span></div>
-                        <div class="flex justify-between"><span>Reports:</span><span class="font-semibold">${reportsData.length + uploadedReportsData.length}</span></div>
-                        <div class="flex justify-between"><span>Budget Requests:</span><span class="font-semibold">${budgetRequests.length}</span></div>
-                        <div class="flex justify-between"><span>Daily Work Records:</span><span class="font-semibold">${dailyworkData.length}</span></div>
-                        <div class="flex justify-between pt-2 border-t border-gray-200"><span>Logged in as:</span><span class="font-semibold text-blue-600">${escapeHtml(currentUserFullName)}</span></div>
-                    </div>
-                </div>
+                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"><h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-shield-alt text-red-500 mr-2"></i>Security</h3><button onclick="openModal('pwdModal')" class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm">Change Password</button></div>
+                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"><h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-database text-green-500 mr-2"></i>Data Management</h3><button onclick="openModal('backupModal')" class="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm">Backup & Restore</button></div>
+                <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"><h3 class="font-semibold text-md mb-3 text-gray-800"><i class="fas fa-info-circle text-indigo-500 mr-2"></i>System Info</h3><div class="space-y-2 text-sm text-gray-600"><div class="flex justify-between"><span>Employees:</span><span class="font-semibold">${employeesData.length}</span></div><div class="flex justify-between"><span>Projects:</span><span class="font-semibold">${projectsData.length}</span></div><div class="flex justify-between"><span>Project Documents:</span><span class="font-semibold">${projectDocuments.length}</span></div><div class="flex justify-between"><span>Reports:</span><span class="font-semibold">${reportsData.length + uploadedReportsData.length}</span></div><div class="flex justify-between"><span>Budget Requests:</span><span class="font-semibold">${budgetRequests.length}</span></div><div class="flex justify-between pt-2 border-t border-gray-200"><span>Logged in as:</span><span class="font-semibold text-blue-600">${escapeHtml(currentUserFullName)}</span></div></div></div>
             </div>
-            
-            <!-- RECYCLE BIN SECTION -->
-            <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm mt-5">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-semibold text-md text-gray-800"><i class="fas fa-trash-restore text-orange-500 mr-2"></i>Recycle Bin (${recycleBinData.length} items)</h3>
-                    <button onclick="emptyRecycleBin()" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg transition"><i class="fas fa-trash-alt mr-1"></i>Empty Bin</button>
-                </div>
-                ${recycleHtml}
-            </div>
+            <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm mt-5"><div class="flex justify-between items-center mb-4"><h3 class="font-semibold text-md text-gray-800"><i class="fas fa-trash-restore text-orange-500 mr-2"></i>Recycle Bin (${recycleBinData.length} items)</h3><button onclick="emptyRecycleBin()" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg"><i class="fas fa-trash-alt mr-1"></i>Empty Bin</button></div>${recycleHtml}</div>
         </div>
     `;
     
@@ -2297,106 +2407,25 @@ async function loadSettings() {
             localStorage.setItem('dark_mode', e.target.checked); 
             const icon = document.getElementById('darkIcon'); 
             if (icon) { 
-                if (e.target.checked) { 
-                    icon.classList.remove('fa-moon'); 
-                    icon.classList.add('fa-sun'); 
-                } else { 
-                    icon.classList.remove('fa-sun'); 
-                    icon.classList.add('fa-moon'); 
-                } 
+                if (e.target.checked) { icon.classList.remove('fa-moon'); icon.classList.add('fa-sun'); } 
+                else { icon.classList.remove('fa-sun'); icon.classList.add('fa-moon'); } 
             } 
         }); 
     }
 }
 
-// ==================== FIXED SIDEBAR COLOR CHANGE FUNCTION ====================
 function changeSidebarColor(color, el) { 
-    // Remove selected class from all color options
     document.querySelectorAll('.color-option').forEach(opt => opt.classList.remove('selected')); 
-    
-    // Add selected class to clicked element
     el.classList.add('selected'); 
-    
-    // Change sidebar background color
     const sidebar = document.getElementById('mainSidebar');
     if (sidebar) {
         sidebar.style.background = color;
-        sidebar.style.backgroundColor = color;
         sidebar.style.setProperty('background', color, 'important');
     }
-    
-    // Also change the sidebar's inner gradient if any
-    const sidebarLogo = document.querySelector('.sidebar .sidebar-logo');
-    if (sidebarLogo) {
-        sidebarLogo.style.background = 'rgba(255,255,255,0.1)';
-    }
-    
-    // Save to localStorage
     localStorage.setItem('sidebar_color', color); 
-    
-    // Show success message
     showToast('Sidebar color changed successfully!', false); 
-    
-    // Force repaint
-    setTimeout(() => {
-        if (sidebar) {
-            sidebar.style.background = color;
-        }
-    }, 10);
 }
 
-// ==================== ADD CSS TO ENSURE SIDEBAR STYLE IS NOT OVERRIDDEN ====================
-(function addSidebarStyleFix() {
-    const style = document.createElement('style');
-    style.textContent = `
-        /* Ensure sidebar color changes take effect */
-        .sidebar {
-            transition: background 0.2s ease !important;
-        }
-        .sidebar .sidebar-logo {
-            background: transparent !important;
-        }
-        .sidebar .nav-item:hover {
-            background: rgba(255,255,255,0.15) !important;
-        }
-        .sidebar .nav-item.active {
-            background: rgba(255,255,255,0.25) !important;
-        }
-    `;
-    document.head.appendChild(style);
-})();
-
-function renderRecycleBin() { 
-    const container = document.getElementById('recycleBinContainer'); 
-    if(!container) return; 
-    if(recycleBinData.length === 0) { 
-        container.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm">Recycle bin is empty</div>'; 
-        return; 
-    } 
-    let html = ''; 
-    for(let item of recycleBinData) { 
-        const icon = item.item_type === 'project' ? 'fa-tasks' : 
-                    item.item_type === 'employee' ? 'fa-user' : 
-                    item.item_type === 'report' ? 'fa-chart-line' : 
-                    item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 'fa-file-alt';
-        html += `<div class="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition mb-2">
-            <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                    <i class="fas ${icon} text-gray-600 text-sm"></i>
-                </div>
-                <div>
-                    <p class="font-medium text-sm text-gray-800">${escapeHtml(item.item_name)}</p>
-                    <p class="text-[10px] text-gray-500">${item.item_type} · Deleted: ${new Date(item.deleted_at).toLocaleString()}</p>
-                </div>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="restoreFromRecycleBin(${item.id})" class="px-2 py-1 rounded text-xs bg-emerald-600 hover:bg-emerald-700 text-white transition"><i class="fas fa-trash-restore mr-1"></i>Restore</button>
-                <button onclick="permanentlyDeleteItem(${item.id})" class="px-2 py-1 rounded text-xs bg-red-600 hover:bg-red-700 text-white transition"><i class="fas fa-trash-alt mr-1"></i>Delete</button>
-            </div>
-        </div>`; 
-    } 
-    container.innerHTML = html; 
-}
 // ==================== GLOBAL SEARCH ====================
 let searchTimeout = null;
 function performGlobalSearch() {
@@ -2410,6 +2439,8 @@ function performGlobalSearch() {
         if (empResults.length) { html += '<div class="p-2 bg-gray-100 text-xs font-semibold">👥 EMPLOYEES</div>' + empResults.slice(0,3).map(e => `<div class="search-result-item" onclick="searchAndHighlight('employees', 'emp-row-${e.id}')"><div class="font-medium">${escapeHtml(e.name)}</div><div class="text-xs text-gray-500">${e.email}</div></div>`).join(''); }
         const projResults = projectsData.filter(p => p.name.toLowerCase().includes(term));
         if (projResults.length) { html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📋 PROJECTS</div>' + projResults.slice(0,3).map(p => `<div class="search-result-item" onclick="searchAndHighlight('projects', 'proj-card-${p.id}')"><div class="font-medium">${escapeHtml(p.name)}</div><div class="text-xs text-gray-500">${formatMoney(p.amount)}</div></div>`).join(''); }
+        const docResults = projectDocuments.filter(d => d.title.toLowerCase().includes(term));
+        if (docResults.length) { html += '<div class="p-2 bg-gray-100 text-xs font-semibold">📄 PROJECT DOCUMENTS</div>' + docResults.slice(0,3).map(d => `<div class="search-result-item" onclick="searchAndHighlight('projects', 'doc-card-${d.id}')"><div class="font-medium">${escapeHtml(d.title)}</div><div class="text-xs text-gray-500">${d.file_name}</div></div>`).join(''); }
         const reqResults = budgetRequests.filter(r => r.title.toLowerCase().includes(term));
         if (reqResults.length) { html += '<div class="p-2 bg-gray-100 text-xs font-semibold">💰 BUDGET REQUESTS</div>' + reqResults.slice(0,3).map(r => `<div class="search-result-item" onclick="searchAndHighlight('requests', 'req-row-${r.id}')"><div class="font-medium">${escapeHtml(r.title)}</div><div class="text-xs text-gray-500">${formatMoney(r.amount)} | ${r.status}</div></div>`).join(''); }
         const reportResults = reportsData.filter(r => r.title.toLowerCase().includes(term));
