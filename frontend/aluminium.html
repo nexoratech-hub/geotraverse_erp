@@ -732,13 +732,17 @@ let viewedIronProjectIds = JSON.parse(localStorage.getItem('iron_viewedProjectId
 let viewedRequestIds = JSON.parse(localStorage.getItem('aluminium_viewedRequestIds') || '[]');
 let viewedReportIds = JSON.parse(localStorage.getItem('aluminium_viewedReportIds') || '[]');
 
-function updateProjectBadge() {
-    const badge = document.getElementById('projectBadge');
-    if (badge) {
+function updateProjectBadge() { 
+    const badge = document.getElementById('projectBadge'); 
+    if (badge) { 
         const totalUnviewed = unviewedAluminiumProjectsCount + unviewedIronProjectsCount;
-        if (totalUnviewed > 0) { badge.classList.remove('hidden'); badge.innerText = totalUnviewed > 99 ? '99+' : totalUnviewed; }
-        else { badge.classList.add('hidden'); }
-    }
+        if (totalUnviewed > 0) { 
+            badge.classList.remove('hidden'); 
+            badge.innerText = totalUnviewed > 99 ? '99+' : totalUnviewed; 
+        } else { 
+            badge.classList.add('hidden'); 
+        } 
+    } 
 }
 function updateRequestBadge() {
     const badge = document.getElementById('requestBadge');
@@ -769,27 +773,62 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 async function fetchAluminiumProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&project_type=aluminium`); 
     if (res.success && res.data) { 
-        aluminiumProjects = res.data.filter(p => (p.department_id === DEPARTMENT_ID || p.sent_to_department === DEPARTMENT_ID) && (!p.deleted_by_department || p.deleted_by_department != 1) && (!p.deleted_by_admin || p.deleted_by_admin != 1)).sort((a,b) => b.id - a.id); 
-        unviewedAluminiumProjectsCount = aluminiumProjects.filter(p => p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedAluminiumProjectIds.includes(p.id)).length;
-    } else { aluminiumProjects = []; unviewedAluminiumProjectsCount = 0; }
+        // BADILISHA: sent_to_department → sent_to_dept
+        aluminiumProjects = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
+            (!p.deleted_by_department || p.deleted_by_department != 1) && 
+            (!p.deleted_by_admin || p.deleted_by_admin != 1)
+        ).sort((a,b) => b.id - a.id); 
+        
+        // BADILISHA: sent_to_department → sent_to_dept
+        unviewedAluminiumProjectsCount = aluminiumProjects.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept != DEPARTMENT_ID && 
+            p.sent_to_dept === DEPARTMENT_ID && 
+            (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+            !viewedAluminiumProjectIds.includes(p.id)
+        ).length;
+    } else { 
+        aluminiumProjects = []; 
+        unviewedAluminiumProjectsCount = 0; 
+    }
     updateProjectBadge();
 }
+
 async function fetchIronProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&project_type=iron`); 
     if (res.success && res.data) { 
-        ironProjects = res.data.filter(p => (p.department_id === DEPARTMENT_ID || p.sent_to_department === DEPARTMENT_ID) && (!p.deleted_by_department || p.deleted_by_department != 1) && (!p.deleted_by_admin || p.deleted_by_admin != 1)).sort((a,b) => b.id - a.id); 
-        unviewedIronProjectsCount = ironProjects.filter(p => p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedIronProjectIds.includes(p.id)).length;
-    } else { ironProjects = []; unviewedIronProjectsCount = 0; }
+        // BADILISHA: sent_to_department → sent_to_dept
+        ironProjects = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
+            (!p.deleted_by_department || p.deleted_by_department != 1) && 
+            (!p.deleted_by_admin || p.deleted_by_admin != 1)
+        ).sort((a,b) => b.id - a.id); 
+        
+        // BADILISHA: sent_to_department → sent_to_dept
+        unviewedIronProjectsCount = ironProjects.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept != DEPARTMENT_ID && 
+            p.sent_to_dept === DEPARTMENT_ID && 
+            (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+            !viewedIronProjectIds.includes(p.id)
+        ).length;
+    } else { 
+        ironProjects = []; 
+        unviewedIronProjectsCount = 0; 
+    }
     updateProjectBadge();
 }
 async function fetchAluminiumDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}&doc_type=aluminium`); 
     aluminiumDocuments = (res.success && res.data) ? res.data : []; 
 }
+
 async function fetchIronDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}&doc_type=iron`); 
     ironDocuments = (res.success && res.data) ? res.data : []; 
 }
+
 async function fetchDailyWork() { 
     try {
         const res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}`); 
@@ -1495,34 +1534,92 @@ async function saveProjectDocument() {
 }
 
 // ==================== VIEW PROJECT ====================
-async function viewAluminiumProject(id) { await viewProject(id, 'aluminium'); }
-async function viewIronProject(id) { await viewProject(id, 'iron'); }
+async function viewAluminiumProject(id) { 
+    await viewProject(id, 'aluminium'); 
+}
 
+async function viewIronProject(id) { 
+    await viewProject(id, 'iron'); 
+}
 async function viewProject(id, type) {
     const projects = type === 'aluminium' ? aluminiumProjects : ironProjects;
     const p = projects.find(p => p.id === id);
-    if (p) {
-        if (type === 'aluminium' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedAluminiumProjectIds.includes(id)) markAluminiumProjectViewed(id);
-        if (type === 'iron' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedIronProjectIds.includes(id)) markIronProjectViewed(id);
-        currentProjectId = id;
-        currentProjectType = type;
-        
-        let imageUrl = getFullImageUrl(p.image);
-        let imageHtml = imageUrl ? `<div class="w-full mb-4"><img src="${imageUrl}?t=${Date.now()}" class="w-full max-h-64 object-contain rounded-lg cursor-pointer mx-auto" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo%20Image%3C/text%3E%3C/svg%3E'"></div>` : '<div class="w-full h-40 mb-4 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
-        
-        document.getElementById('viewProjectContent').innerHTML = `${imageHtml}<div class="space-y-2 text-sm"><p><strong>Name:</strong> ${escapeHtml(p.name)}</p><p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p><p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></p><p><strong>Status:</strong> <span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status}</span></p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p><p><strong>Start Date:</strong> ${p.start_date || 'N/A'}</p><p><strong>End Date:</strong> ${p.end_date || 'N/A'}</p><p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p></div>`;
-        document.getElementById('projectUserInfo').innerHTML = `Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}`;
-        
-        await fetchDailyWork();
-        await loadDailyWorkTable(id);
-        
-        let deptOptions = '';
-        allDepartmentsForSend.forEach(d => { if (d.id !== DEPARTMENT_ID) { deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; } });
-        document.getElementById('viewProjectButtons').innerHTML = `<button onclick="exportSingleProjectExcel(${p.id}, '${type}')" class="btn-success text-white px-3 py-1.5 rounded text-sm">Excel</button><button onclick="exportProjectToPDFNewWindow(${p.id}, '${type}')" class="btn-danger text-white px-3 py-1.5 rounded text-sm">PDF</button>${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm">View Image</button>` : ''}<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>`;
-        openModal('viewProjectModal');
+    
+    if (!p) {
+        showToast('Project not found', true);
+        return;
     }
+    
+    // Mark as viewed if sent from another department
+    if (type === 'aluminium' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedAluminiumProjectIds.includes(id)) {
+        markAluminiumProjectViewed(id);
+        // Update in database
+        apiCall('mark_project_viewed.php', 'POST', { 
+            project_id: id, 
+            department_id: DEPARTMENT_ID 
+        });
+    }
+    if (type === 'iron' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedIronProjectIds.includes(id)) {
+        markIronProjectViewed(id);
+        // Update in database
+        apiCall('mark_project_viewed.php', 'POST', { 
+            project_id: id, 
+            department_id: DEPARTMENT_ID 
+        });
+    }
+    
+    currentProjectId = id;
+    currentProjectType = type;
+    
+    // Get image URL
+    let imageUrl = getFullImageUrl(p.image);
+    let imageHtml = imageUrl ? 
+        `<div class="w-full mb-4"><img src="${imageUrl}?t=${Date.now()}" class="w-full max-h-64 object-contain rounded-lg cursor-pointer mx-auto" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo%20Image%3C/text%3E%3C/svg%3E'"></div>` : 
+        '<div class="w-full h-40 mb-4 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
+    
+    // Project details
+    document.getElementById('viewProjectContent').innerHTML = `
+        ${imageHtml}
+        <div class="space-y-2 text-sm">
+            <p><strong>Name:</strong> ${escapeHtml(p.name)}</p>
+            <p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p>
+            <p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></p>
+            <p><strong>Status:</strong> <span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status}</span></p>
+            <p><strong>Progress:</strong> ${p.progress}%</p>
+            <p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p>
+            <p><strong>Start Date:</strong> ${p.start_date || 'N/A'}</p>
+            <p><strong>End Date:</strong> ${p.end_date || 'N/A'}</p>
+            <p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p>
+        </div>
+    `;
+    
+    document.getElementById('projectUserInfo').innerHTML = `Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}`;
+    
+    // Load daily work
+    await fetchDailyWork();
+    await loadDailyWorkTable(id);
+    
+    // Build department options for sending
+    let deptOptions = '';
+    allDepartmentsForSend.forEach(d => { 
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        }
+    });
+    
+    // View buttons
+    document.getElementById('viewProjectButtons').innerHTML = `
+        <button onclick="exportSingleProjectExcel(${p.id}, '${type}')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+        <button onclick="exportProjectToPDFNewWindow(${p.id}, '${type}')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+        ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View Image</button>` : ''}
+        <div class="send-dropdown">
+            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send</button>
+            <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
+        </div>
+    `;
+    
+    openModal('viewProjectModal');
 }
-
 function toggleDailyWorkTable() {
     const c = document.getElementById('dailyWorkListContainer');
     const s = document.getElementById('dailyWorkSummary');
@@ -1674,8 +1771,65 @@ async function deleteDailyWork(id) {
         else { showToast(res?.message || 'Failed to delete', true); }
     }
 }
-async function sendProjectToDept(projectId, deptId, type) { const dept = allDepartmentsForSend.find(d => d.id == deptId); const deptName = dept ? dept.name : 'Department'; showToast(`✅ Project sent to ${deptName}`); closeModal('viewProjectModal'); }
-
+async function sendProjectToDept(projectId, deptId, type) { 
+    const dept = allDepartmentsForSend.find(d => d.id == deptId); 
+    const deptName = dept ? dept.name : 'Department'; 
+    
+    // Pata project kutoka kwenye array sahihi
+    let project = null;
+    if (type === 'aluminium') {
+        project = aluminiumProjects.find(p => p.id === projectId);
+    } else if (type === 'iron') {
+        project = ironProjects.find(p => p.id === projectId);
+    }
+    
+    if (!project) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Onyesha loading
+    const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+    
+    try {
+        // Tuma API call
+        const payload = { 
+            project_id: parseInt(projectId), 
+            to_department_id: parseInt(deptId), 
+            from_department_id: DEPARTMENT_ID
+        };
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Project "${project.name}" sent to ${deptName}`, false);
+            
+            // Update local data
+            project.sent_to_dept = deptId;
+            project.sent_from_dept = DEPARTMENT_ID;
+            project.is_viewed_by_department = 0;
+            
+            // Refresh projects list
+            if (type === 'aluminium') {
+                await fetchAluminiumProjects();
+            } else {
+                await fetchIronProjects();
+            }
+            
+        } else {
+            showToast(res?.message || 'Failed to send project', true);
+        }
+    } catch(e) {
+        console.error('Send project error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) btn.innerHTML = originalText;
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        closeModal('viewProjectModal');
+    }
+}
 function exportDailyWorkToExcel() {
     const project = currentProjectType === 'aluminium' ? aluminiumProjects.find(p => p.id === currentProjectId) : ironProjects.find(p => p.id === currentProjectId);
     if (!project) return;

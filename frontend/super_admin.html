@@ -488,7 +488,7 @@ function initDarkMode() {
 }
 
 // ==================== CONFIGURATION ====================
-const API_BASE = '../backend/api/';
+const API_BASE = '../backend/api/'; const DEPARTMENT_ID = 1;
 let employeesData = [], projectsData = [], dailyworkData = [], reportsData = [], departmentsList = [], uploadedReportsData = [], projectDocuments = [];
 let budgetRequests = [];
 let recycleBinData = [];
@@ -564,15 +564,39 @@ async function fetchEmployees() {
     employeesData = res.success ? res.data.sort((a,b)=>b.id-a.id) : []; 
 }
 async function fetchProjects() { 
-    const res = await apiCall('get_projects.php?department_id=1'); 
+    const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        projectsData = res.data.filter(p => p.department_id == 1 && (!p.deleted_by_admin || p.deleted_by_admin != 1)).sort((a,b)=>b.id-a.id); 
-        unviewedProjectsCount = projectsData.filter(p => p.sent_from_dept && p.sent_from_dept != 1 && p.is_viewed_by_admin == 0 && !viewedProjectIds.includes(p.id)).length; 
+        // Tumia sent_to_dept (si sent_to_department)
+        projectsData = res.data.filter(p => 
+            (p.department_id == DEPARTMENT_ID || p.sent_to_dept == DEPARTMENT_ID) &&
+            (!p.deleted_by_admin || p.deleted_by_admin != 1)
+        ).sort((a,b) => b.id - a.id); 
+        
+        unviewedProjectsCount = projectsData.filter(p => 
+            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+            p.sent_to_dept == DEPARTMENT_ID && 
+            (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null) &&
+            !viewedProjectIds.includes(p.id)
+        ).length; 
     } else { 
         projectsData = []; 
         unviewedProjectsCount = 0; 
     } 
     updateProjectBadge(); 
+}
+function markProjectViewed(id) { 
+    if(!viewedProjectIds.includes(id)) { 
+        viewedProjectIds.push(id); 
+        localStorage.setItem('your_viewedProjectIds', JSON.stringify(viewedProjectIds)); 
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
+        updateProjectBadge(); 
+        
+        // PIA TUMIA API KU MARK VIEWED KWENYE DATABASE
+        apiCall('mark_project_viewed.php', 'POST', { 
+            project_id: id, 
+            department_id: DEPARTMENT_ID 
+        });
+    } 
 }
 async function fetchProjectDocuments() { 
     const res = await apiCall('get_project_documents.php?department_id=1'); 
@@ -827,9 +851,38 @@ async function deleteProjectDocument(docId) {
 }
 
 async function sendDocumentToDept(docId, deptId, type) { 
+    const doc = projectDocuments.find(d => d.id === docId);
+    if (!doc) { 
+        showToast('Document not found', true); 
+        return; 
+    }
+    if (deptId == 1) { 
+        showToast('Cannot send to Super Admin', true); 
+        return; 
+    }
+    
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
-    showToast(`✅ Document sent to ${deptName}`, false);
+    
+    try {
+        const res = await apiCall('send_document.php', 'POST', { 
+            document_id: parseInt(docId), 
+            to_department_id: parseInt(deptId), 
+            from_department_id: 1 
+        });
+        
+        if(res && res.success) { 
+            showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = 1;
+            doc.is_viewed_by_department = 0;
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    } catch(e) {
+        showToast('Network error: ' + e.message, true);
+    }
+    
     toggleSendDropdown(`docSendDropdown-${docId}`);
     closeModal('documentInfoModal');
 }
@@ -2078,12 +2131,48 @@ async function viewProjectDetails(id) {
 }
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p=>p.id===projectId); 
-    if (!p) return; 
-    if (deptId === 1) { showToast('Cannot send to Super Admin', true); return; } 
+    if (!p) { 
+        showToast('Project not found', true); 
+        return; 
+    }
+    if (deptId === 1) { 
+        showToast('Cannot send to Super Admin', true); 
+        return; 
+    }
+    
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
-    showToast(`✅ Project "${p.name}" sent to ${deptName}`, false); 
-    toggleSendDropdown(`projSendDropdown-${projectId}`);
+    
+    // Onyesha loading
+    const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+    
+    try {
+        const payload = { 
+            project_id: parseInt(projectId), 
+            to_department_id: parseInt(deptId), 
+            from_department_id: 1  // Super Admin
+        };
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`, false);
+            // Update local data
+            p.sent_to_department = deptId;
+            p.sent_from_dept = 1;
+            p.is_viewed_by_department = 0;
+        } else {
+            showToast(res?.message || 'Failed to send project', true);
+        }
+    } catch(e) {
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) btn.innerHTML = originalText;
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        closeModal('viewProjModal');
+    }
 }
 
 async function exportProjectToPDFNewWindow(projectId) {
@@ -2424,11 +2513,73 @@ function viewReportDetailsModal(id) {
 }
 async function sendReportToDeptModal(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
-    if (!r) return; 
-    if (deptId == 1) { showToast('Cannot send to Super Admin', true); return; } 
+    if (!r) { 
+        showToast('Report not found', true); 
+        return; 
+    }
+    if (deptId == 1) { 
+        showToast('Cannot send to Super Admin', true); 
+        return; 
+    }
+    
     const dept = allDepartmentsForSend.find(d=>d.id==deptId);
     const deptName = dept ? dept.name : 'Department';
-    showToast(`✅ Report "${r.title}" sent to ${deptName}`, false); 
+    
+    try {
+        const res = await apiCall('send_report.php', 'POST', { 
+            report_id: parseInt(reportId), 
+            to_department_id: parseInt(deptId), 
+            from_department_id: 1 
+        });
+        
+        if(res && res.success) { 
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+            r.sent_to_department = deptId;
+            r.sent_from_department = 1;
+            r.is_viewed_by_department = 0;
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        showToast('Network error: ' + e.message, true);
+    }
+    
+    toggleSendDropdown(`reportSendDropdown-${reportId}`);
+    closeModal('reportViewModal');
+}
+
+async function sendUploadedReportToDept(reportId, deptId) { 
+    const doc = uploadedReportsData.find(d => d.id === reportId); 
+    if (!doc) { 
+        showToast('Report not found', true); 
+        return; 
+    }
+    if (deptId == 1) { 
+        showToast('Cannot send to Super Admin', true); 
+        return; 
+    }
+    
+    const deptName = allDepartmentsForSend.find(d=>d.id==deptId)?.name || 'Department';
+    
+    try {
+        const res = await apiCall('send_uploaded_report.php', 'POST', { 
+            report_id: parseInt(reportId), 
+            to_department_id: parseInt(deptId), 
+            from_department_id: 1 
+        });
+        
+        if(res && res.success) { 
+            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = 1;
+            doc.is_viewed_by_department = 0;
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        showToast('Network error: ' + e.message, true);
+    }
+    
     toggleSendDropdown(`reportSendDropdown-${reportId}`);
     closeModal('reportViewModal');
 }
