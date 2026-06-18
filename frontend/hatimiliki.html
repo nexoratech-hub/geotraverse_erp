@@ -68,7 +68,7 @@
         .card-pending { background: linear-gradient(135deg, #f59e0b, #d97706); }
         .card-progress { background: linear-gradient(135deg, #3b82f6, #2563eb); }
         .card-completed { background: linear-gradient(135deg, #10b981, #059669); }
-        .card-netprofit { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .card-request { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
         
         .project-card, .report-card, .document-card {
             background: white;
@@ -150,6 +150,7 @@
         .action-btn.delete { background: #ef4444; color: white; }
         .action-btn.restore { background: #10b981; color: white; }
         .action-btn.download { background: #0d9488; color: white; }
+        .action-btn.send { background: #10b981; color: white; }
         
         .image-upload-area { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
         .image-upload-area:hover { border-color: #059669; background-color: #ecfdf5; }
@@ -569,26 +570,36 @@ function getFullImageUrl(imagePath) {
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // Tumia sent_to_dept (si sent_to_department)
-        projectsData = res.data.filter(p => 
-            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
+        projects = res.data.filter(p => 
+            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
             (!p.deleted_by_admin || p.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id); 
+        ).sort((a,b) => {
+            const aIsNew = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID && 
+                           a.sent_to_dept === DEPARTMENT_ID && 
+                           (a.is_viewed_by_department == 0 || a.is_viewed_by_department === null);
+            const bIsNew = b.sent_from_dept && b.sent_from_dept != DEPARTMENT_ID && 
+                           b.sent_to_dept === DEPARTMENT_ID && 
+                           (b.is_viewed_by_department == 0 || b.is_viewed_by_department === null);
+            
+            if (aIsNew && !bIsNew) return -1;
+            if (!aIsNew && bIsNew) return 1;
+            return b.id - a.id;
+        }); 
         
-        unviewedProjectsCount = projectsData.filter(p => 
-            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+        unviewedProjectsCount = projects.filter(p => 
+            p.sent_from_dept && 
+            p.sent_from_dept != DEPARTMENT_ID && 
             p.sent_to_dept === DEPARTMENT_ID && 
-            (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
+            (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
             !viewedProjectIds.includes(p.id)
         ).length;
     } else { 
-        projectsData = []; 
+        projects = []; 
         unviewedProjectsCount = 0; 
-    } 
+    }
     updateProjectBadge(); 
 }
-
 async function fetchTitleDeedDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     titleDeedDocuments = (res.success && res.data) ? res.data : []; 
@@ -669,19 +680,31 @@ async function loadDashboard() {
     let totalProjects = projects.length, pending = projects.filter(p => p.status === 'pending').length, inProgress = projects.filter(p => p.status === 'in_progress').length, completed = projects.filter(p => p.status === 'completed').length;
     let totalIncome = 0, totalExpenses = 0;
     requestsData.forEach(b => { let amount = parseFloat(b.amount) || 0; if(b.type === 'income' && b.status === 'paid') totalIncome += amount; else if(b.type === 'expense' && b.status === 'paid') totalExpenses += amount; });
-    let netProfit = totalIncome - totalExpenses;
+    
+    // REQUEST SUMMARIES - BADALA YA FINANCIAL SUMMARY
+    let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
+    let approvedRequests = requestsData.filter(r => r.status === 'approved' || r.status === 'paid').length;
+    let totalRequests = requestsData.length;
+    let totalRequestAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     
     let html = `<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Hatimiliki Dashboard</h2><p class="text-xs text-gray-500">Title Deeds & Land Registration Management</p></div>
-        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div class="stat-card card-title-deeds" onclick="showSection('titledeeds')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">${formatNumberWithCommas(totalProjects)}</p></div>
             <div class="stat-card card-pending" onclick="showSection('titledeeds')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending</p><p class="stat-number">${formatNumberWithCommas(pending)}</p></div>
             <div class="stat-card card-progress" onclick="showSection('titledeeds')"><div class="stat-icon"><i class="fas fa-spinner text-lg"></i></div><p class="stat-label">In Progress</p><p class="stat-number">${formatNumberWithCommas(inProgress)}</p></div>
             <div class="stat-card card-completed" onclick="showSection('titledeeds')"><div class="stat-icon"><i class="fas fa-check-circle text-lg"></i></div><p class="stat-label">Completed</p><p class="stat-number">${formatNumberWithCommas(completed)}</p></div>
-            <div class="stat-card card-netprofit" onclick="showSection('requests')"><div class="stat-icon"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Net Profit</p><p class="stat-number" style="font-size:16px;">${formatCurrency(netProfit)}</p></div>
         </div>
+        <!-- REQUEST SUMMARIES - BADALA YA FINANCIAL SUMMARY -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-chart-pie text-emerald-600 mr-2"></i>Title Deeds Status</h3><canvas id="statusChart" height="180"></canvas></div>
-            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-chart-line text-green-600 mr-2"></i>Financial Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="p-3 bg-green-50 rounded-xl"><p class="text-xs text-gray-500">Income</p><p class="text-xl font-bold text-green-600">${formatCurrency(totalIncome)}</p></div><div class="p-3 bg-red-50 rounded-xl"><p class="text-xs text-gray-500">Expenses</p><p class="text-xl font-bold text-red-600">${formatCurrency(totalExpenses)}</p></div></div></div>
+            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-list-check text-purple-600 mr-2"></i>Request Summaries</h3>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="p-3 bg-purple-50 rounded-xl"><p class="text-xs text-gray-500">Total Requests</p><p class="text-xl font-bold text-purple-600">${totalRequests}</p></div>
+                    <div class="p-3 bg-yellow-50 rounded-xl"><p class="text-xs text-gray-500">Pending</p><p class="text-xl font-bold text-yellow-600">${pendingRequests}</p></div>
+                    <div class="p-3 bg-green-50 rounded-xl"><p class="text-xs text-gray-500">Approved/Paid</p><p class="text-xl font-bold text-green-600">${approvedRequests}</p></div>
+                    <div class="p-3 bg-blue-50 rounded-xl"><p class="text-xs text-gray-500">Total Amount</p><p class="text-xl font-bold text-blue-600">${formatCurrency(totalRequestAmount)}</p></div>
+                </div>
+            </div>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-6"><button onclick="openAddProjectModal()" class="bg-emerald-600 text-white py-2 rounded-lg text-sm hover:bg-emerald-700"><i class="fas fa-plus-circle mr-2"></i>Add Title Deed</button><button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus-circle mr-2"></i>Add Request</button><button onclick="openModal('addReportModal')" class="bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"><i class="fas fa-chart-line mr-2"></i>Add Report</button></div>
         <div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-emerald-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">${activityLogs.slice(0,5).map(l => `<div class="py-1 border-b flex justify-between"><span>${escapeHtml(l.action)}</span><span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('')}</div></div>`;
@@ -696,45 +719,64 @@ function getProjectStatusText(s) { return { pending: "Pending", in_progress: "In
 
 async function loadTitleDeeds() {
     await Promise.all([fetchProjects(), fetchTitleDeedDocuments()]);
-    let html = `<div class="tab-container"><button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Title Deeds <span class="tab-count">${projects.length}</span></button><button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${titleDeedDocuments.length}</span></button></div>
-    <div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h2 class="text-xl font-bold"><i class="fas fa-file-contract text-emerald-600 mr-2"></i>Title Deeds</h2><div class="flex gap-2">`;
-    if (currentProjectTab === 'added') {
-        html += `<button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i>Add</button><button onclick="exportProjectsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i>Excel All</button><button onclick="exportProjectsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF All</button>`;
-    } else {
-        html += `<button onclick="openModal('uploadTitleDeedModal')" class="btn-cyan"><i class="fas fa-upload mr-1"></i>Upload</button><button onclick="exportAllTitleDeedDocsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i>Excel All</button><button onclick="exportAllTitleDeedDocsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF All</button>`;
-    }
-    html += `</div></div><div class="projects-grid" id="projectsGrid"></div>`;
+    let html = `<div class="tab-container">
+        <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Title Deeds <span class="tab-count">${projects.length}</span></button>
+        <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${titleDeedDocuments.length}</span></button>
+    </div>
+    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+        <h2 class="text-xl font-bold"><i class="fas fa-file-contract text-emerald-600 mr-2"></i>Title Deeds</h2>
+        <div class="flex gap-2">
+            <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i>Add</button>
+            <button onclick="exportProjectsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i>Excel All</button>
+            <button onclick="exportProjectsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF All</button>
+        </div>
+    </div>
+    <div class="projects-grid" id="projectsGrid"></div>`;
+    
     document.getElementById("titledeedsSection").innerHTML = html;
     
-    if (currentProjectTab === 'added') {
-        if (projects.length === 0) { document.getElementById("projectsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No title deeds</div>'; return; }
-        let gridHtml = '';
-        for (let p of projects) {
-            const isUnviewed = p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null) && !viewedProjectIds.includes(p.id);
-            let imageUrl = getFullImageUrl(p.image);
-            gridHtml += `<div class="project-card" id="proj-card-${p.id}" onclick="viewTitleDeed(${p.id})">
-                ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                <div class="delete-proj-btn" onclick="event.stopPropagation(); deleteTitleDeed(${p.id})"><i class="fas fa-trash-alt"></i></div>
-                <div class="project-image-wrapper">${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}<div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-file-image text-3xl"></i><p class="text-xs mt-1">No Image</p></div></div>
-                <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
-                <div class="p-3"><div class="flex justify-between items-start"><span class="text-xs text-gray-500">Owner: ${escapeHtml(p.client_name||'N/A')}</span><span class="px-1.5 py-0.5 text-[9px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span></div>
-                <p class="text-sm font-semibold text-purple-600 mt-1">${formatCurrency(p.amount)}</p><div class="mt-2"><div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-emerald-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div></div>
-                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewTitleDeed(${p.id})" class="action-btn view"><i class="fas fa-eye"></i>View</button>${p.department_id === DEPARTMENT_ID ? `<button onclick="event.stopPropagation(); editTitleDeed(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button>` : ''}<button onclick="event.stopPropagation(); deleteTitleDeed(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i>Delete</button></div></div>
-            </div>`;
-        }
-        document.getElementById("projectsGrid").innerHTML = gridHtml;
-    } else {
-        if (titleDeedDocuments.length === 0) { document.getElementById("projectsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No uploaded documents. Click "Upload" to add a document.</div>'; return; }
-        let docsHtml = '';
-        for (let doc of titleDeedDocuments) {
-            docsHtml += `<div class="document-card" id="doc-card-${doc.id}" onclick="viewTitleDeedDocument(${doc.id})">
-                <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>Uploaded Document</p></div>
-                <div class="p-3"><p class="text-sm">${escapeHtml(doc.description || 'No description')}</p><p class="text-[9px] text-gray-400 mt-2">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</p>
-                <div class="flex flex-wrap gap-1 mt-2"><button onclick="event.stopPropagation(); viewTitleDeedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); deleteTitleDeedDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div></div>
-            </div>`;
-        }
-        document.getElementById("projectsGrid").innerHTML = docsHtml;
+    if (projects.length === 0) {
+        document.getElementById("projectsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No title deeds</div>';
+        return;
     }
+    
+    let gridHtml = '';
+    for (let p of projects) {
+        let isNew = p.sent_from_dept && 
+                    p.sent_from_dept != DEPARTMENT_ID && 
+                    p.sent_to_dept === DEPARTMENT_ID && 
+                    (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+                    !viewedProjectIds.includes(p.id);
+        
+        let imageUrl = getFullImageUrl(p.image);
+        
+        gridHtml += `<div class="project-card" id="proj-card-${p.id}" onclick="viewTitleDeed(${p.id})">
+            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
+            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+            <div class="project-image-wrapper">
+                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
+                <div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-file-image text-3xl"></i><p class="text-xs mt-1">No Image</p></div>
+            </div>
+            <div class="p-3">
+                <div class="flex justify-between items-start">
+                    <span class="text-xs text-gray-500">Owner: ${escapeHtml(p.client_name||'N/A')}</span>
+                    <span class="px-1.5 py-0.5 text-[9px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span>
+                </div>
+                <p class="text-sm font-semibold text-purple-600 mt-1">${formatCurrency(p.amount)}</p>
+                <div class="mt-2">
+                    <div class="flex justify-between text-xs"><span>Progress</span><span>${p.progress||0}%</span></div>
+                    <div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-emerald-600 h-1.5 rounded-full" style="width:${p.progress||0}%"></div></div>
+                </div>
+                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                    <button onclick="event.stopPropagation(); viewTitleDeed(${p.id})" class="action-btn view"><i class="fas fa-eye"></i>View</button>
+                    <button onclick="event.stopPropagation(); editTitleDeed(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button>
+                    <button onclick="event.stopPropagation(); deleteTitleDeed(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i>Delete</button>
+                </div>
+                <div class="user-info">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
+            </div>
+        </div>`;
+    }
+    document.getElementById("projectsGrid").innerHTML = gridHtml;
 }
 
 function switchProjectTab(tab) { currentProjectTab = tab; loadTitleDeeds(); }
@@ -812,7 +854,272 @@ async function viewTitleDeed(id) {
     } 
 }
 
-// ==================== DAILY WORK FUNCTIONS - BUDGET & AMOUNT SPENT PEKEE (NO PROJECT AMOUNT) ====================
+// ==================== FIXED SEND FUNCTIONS ====================
+
+// SEND TITLE DEED (PROJECT) - Fixed
+async function sendTitleDeedToDept(projectId, toDeptId) {
+    const p = projects.find(p => p.id === projectId);
+    if (!p) {
+        showToast('Title deed not found', true);
+        return;
+    }
+    if (toDeptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    const dept = allDepartments.find(d => d.id == toDeptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    // Show loading
+    const btn = document.querySelector(`#projectSendDropdown-${projectId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        // Get daily work for this project
+        const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
+        
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            project_data: {
+                ...p,
+                daily_work: projectDailyWork,
+                sent_count: (p.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Title deed "${p.name}" sent to ${deptName}`, false);
+            addLog(`Title deed sent: "${p.name}" to ${deptName}`);
+            
+            // Update local data - Keep copy for sender AND send to receiver
+            p.sent_to_dept = toDeptId;
+            p.sent_from_dept = DEPARTMENT_ID;
+            p.is_viewed_by_department = 0;
+            p.sent_count = (p.sent_count || 0) + 1;
+            p.last_sent_at = new Date().toISOString();
+            p.is_sent = 1;
+            p.is_original = 1;
+            
+            // Reload projects
+            await fetchProjects();
+            await fetchDailyWork();
+            await loadTitleDeeds();
+            await loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send title deed', true);
+        }
+    } catch(e) {
+        console.error('Send title deed error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`projectSendDropdown-${projectId}`);
+        closeModal('viewProjectModal');
+    }
+}
+
+// SEND REPORT - Fixed
+async function sendReportToDept(reportId, toDeptId) {
+    const r = reportsList.find(r => r.id === reportId);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    if (toDeptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    const dept = allDepartments.find(d => d.id == toDeptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            report_data: {
+                ...r,
+                sent_count: (r.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+            addLog(`Report sent: "${r.title}" to ${deptName}`);
+            
+            r.sent_to_department = toDeptId;
+            r.sent_from_department = DEPARTMENT_ID;
+            r.is_viewed_by_department = 0;
+            r.sent_count = (r.sent_count || 0) + 1;
+            r.is_sent = 1;
+            
+            await fetchReports();
+            await loadReports();
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        console.error('Send report error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        closeModal('viewReportModal');
+    }
+}
+
+// SEND UPLOADED REPORT - Fixed
+function sendUploadedReportToDept(docId, toDeptId) {
+    const doc = uploadedReports.find(d => d.id === docId);
+    if (!doc) {
+        showToast('Document not found', true);
+        return;
+    }
+    if (toDeptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    const dept = allDepartments.find(d => d.id == toDeptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#docSendDropdown-${docId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            document_id: parseInt(docId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            doc_type: 'uploaded_report',
+            doc_data: {
+                ...doc,
+                sent_count: (doc.sent_count || 0) + 1
+            }
+        };
+        
+        const res = apiCall('send_document.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Uploaded report sent: "${doc.title}" to ${deptName}`);
+            
+            doc.sent_to_department = toDeptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            
+            closeModal('documentInfoModal');
+            loadReports();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    } catch(e) {
+        console.error('Send uploaded report error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`docSendDropdown-${docId}`);
+    }
+}
+
+// SEND TITLE DEED DOCUMENT - Fixed
+async function sendDocumentToDept(docId, toDeptId, type) {
+    const doc = titleDeedDocuments.find(d => d.id === docId);
+    if (!doc) {
+        showToast('Document not found', true);
+        return;
+    }
+    if (toDeptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    const dept = allDepartments.find(d => d.id == toDeptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#docSendDropdown-${docId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            document_id: parseInt(docId),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: DEPARTMENT_ID,
+            doc_type: type || 'project',
+            doc_data: {
+                ...doc,
+                sent_count: (doc.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_document.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Document sent: "${doc.title}" to ${deptName}`);
+            
+            doc.sent_to_department = toDeptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            
+            closeModal('documentInfoModal');
+            loadTitleDeeds();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    } catch(e) {
+        console.error('Send document error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`docSendDropdown-${docId}`);
+    }
+}
+
+// ==================== DAILY WORK FUNCTIONS ====================
 async function loadDailyWorkForProject(projectId) {
     console.log('Loading daily work for project:', projectId);
     await fetchDailyWork();
@@ -870,6 +1177,7 @@ async function loadDailyWorkForProject(projectId) {
     tbody.innerHTML = html;
     updateDailyWorkSummary();
 }
+
 function updateDailyWorkSummary() {
     const project = projects.find(p => p.id === currentProjectId);
     if (!project) return;
@@ -1077,7 +1385,7 @@ function exportDailyWorkToExcel() {
     showToast('Exported to Excel');
 }
 
-// ==================== EXPORT DAILY WORK TO PDF - CLEAN VERSION ====================
+// ==================== EXPORT DAILY WORK TO PDF ====================
 function exportDailyWorkToPDF() {
     const project = projects.find(p => p.id === currentProjectId);
     if (!project) {
@@ -1091,7 +1399,6 @@ function exportDailyWorkToPDF() {
         return;
     }
     
-    // Calculate totals
     let totalBudget = 0, totalAmount = 0;
     for (let w of work) {
         totalBudget += parseFloat(w.budget) || 0;
@@ -1099,7 +1406,6 @@ function exportDailyWorkToPDF() {
     }
     let remainingBudget = totalBudget - totalAmount;
     
-    // Build table rows - EXACTLY 6 COLUMNS (NO VARIANCE COLUMN)
     let rows = '';
     for (let w of work) {
         let budget = parseFloat(w.budget) || 0;
@@ -1237,7 +1543,6 @@ function exportDailyWorkToPDF() {
                 border: 1px solid #059669; 
                 vertical-align: top; 
             }
-            /* EXACT 6 COLUMN WIDTHS AND ALIGNMENTS */
             th:nth-child(1), td:nth-child(1) { white-space: nowrap; width: 16%; }
             th:nth-child(2), td:nth-child(2) { word-break: break-word; width: 28%; }
             th:nth-child(3), td:nth-child(3) { text-align: right; width: 12%; }
@@ -1272,9 +1577,6 @@ function exportDailyWorkToPDF() {
                 font-size: 13px; 
                 font-weight: 600; 
             }
-            .print-btn button:hover {
-                background: #047857;
-            }
             @media print { 
                 body { background: white; padding: 0; } 
                 .print-btn { display: none; } 
@@ -1297,7 +1599,6 @@ function exportDailyWorkToPDF() {
                 <span><strong>Generated By:</strong> ${CURRENT_USER}</span>
             </div>
             
-            <!-- SUMMARY CARDS - 3 CARDS ONLY (NO VARIANCE) -->
             <div class="summary-cards">
                 <div class="summary-card budget">
                     <div class="label">💰 Total Budget</div>
@@ -1313,7 +1614,6 @@ function exportDailyWorkToPDF() {
                 </div>
             </div>
             
-            <!-- TABLE WITH EXACT 6 COLUMNS - NO TOTALS ROW AT BOTTOM -->
             <div class="table-container">
                 <table>
                     <thead>
@@ -1348,19 +1648,13 @@ function exportDailyWorkToPDF() {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
-function sendTitleDeedToDept(projectId, toDeptId) { 
-    const dept = allDepartments.find(d => d.id == toDeptId);
-    const deptName = dept ? dept.name : 'Department';
-    showToast(`✅ Title deed sent to ${deptName}`, false);
-    toggleSendDropdown(`projectSendDropdown-${projectId}`);
-}
 
 function exportSingleProjectExcel(id) { let p = projects.find(p => p.id === id); if(p) { let ws = [['Reference','Owner','Amount','Status','Progress']]; ws.push([p.name, p.client_name, p.amount, p.status, p.progress]); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'TitleDeed'); XLSX.writeFile(wb, `titledeed_${p.id}.xlsx`); showToast('Exported'); } }
 
 function exportSingleProjectPDF(id) { 
     let p = projects.find(p => p.id === id); 
     if(!p) { 
-        showToast("Project not found", true); 
+        showToast("Title deed not found", true); 
         return; 
     }
     
@@ -1369,7 +1663,7 @@ function exportSingleProjectPDF(id) {
     let statusClass = getProjectStatusClass(p.status);
     let statusText = getProjectStatusText(p.status);
     
-    // Get daily work records for this project
+    // Get daily work records
     const projectWork = dailyworkData.filter(w => w.project_id == id);
     let totalBudget = 0, totalAmountSpent = 0;
     for (let w of projectWork) {
@@ -1379,7 +1673,7 @@ function exportSingleProjectPDF(id) {
     let remainingBudget = totalBudget - totalAmountSpent;
     let totalVariance = totalAmountSpent - totalBudget;
     
-    // Build daily work table HTML
+    // Build daily work table rows
     let dailyWorkHtml = '';
     if (projectWork.length > 0) {
         dailyWorkHtml = '<h3 style="margin-top:20px; color:#059669;">Daily Work Records</h3><table style="width:100%; border-collapse:collapse; margin-top:10px;"><thead><tr style="background:#f0fdf4;"><th style="border:1px solid #059669; padding:8px; text-align:left;">Date/Time</th><th style="border:1px solid #059669; padding:8px; text-align:left;">Description</th><th style="border:1px solid #059669; padding:8px; text-align:right;">Budget (TZS)</th><th style="border:1px solid #059669; padding:8px; text-align:right;">Amount Spent (TZS)</th><th style="border:1px solid #059669; padding:8px; text-align:right;">Variance (TZS)</th><th style="border:1px solid #059669; padding:8px; text-align:left;">Status</th></tr></thead><tbody>';
@@ -1395,7 +1689,7 @@ function exportSingleProjectPDF(id) {
         }
         dailyWorkHtml += `<tr style="background:#f0fdf4; font-weight:bold;"><td colspan="2" style="border:1px solid #059669; padding:8px; text-align:right;">TOTALS:</td><td style="border:1px solid #059669; padding:8px; text-align:right;">${formatCurrency(totalBudget)}</td><td style="border:1px solid #059669; padding:8px; text-align:right;">${formatCurrency(totalAmountSpent)}</td><td style="border:1px solid #059669; padding:8px; text-align:right;">${formatCurrency(totalVariance)}</td><td style="border:1px solid #059669; padding:8px;"></td></tr></tbody></table>`;
     } else {
-        dailyWorkHtml = '<h3 style="margin-top:20px; color:#059669;">Daily Work Records</h3><div style="text-align:center; padding:20px; color:#9ca3af; border:1px solid #ddd; border-radius:8px;">No daily work records found for this project.</div>';
+        dailyWorkHtml = '<h3 style="margin-top:20px; color:#059669;">Daily Work Records</h3><div style="text-align:center; padding:20px; color:#9ca3af; border:1px solid #ddd; border-radius:8px;">No daily work records found for this title deed.</div>';
     }
     
     let printWindow = window.open('', '_blank');
@@ -1516,9 +1810,6 @@ function exportSingleProjectPDF(id) {
                 font-size: 13px;
                 font-weight: 600;
             }
-            .print-btn button:hover {
-                background: #047857;
-            }
             hr {
                 margin: 20px 0;
                 border: none;
@@ -1545,11 +1836,10 @@ function exportSingleProjectPDF(id) {
             <div class="info-row"><div class="info-label">Created By:</div><div class="info-value">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div></div>
         </div>
         
-        ${imageUrl && isImage ? `<div class="image-container"><img src="${imageUrl}" onerror="this.style.display='none'"><p style="font-size:10px; color:#999; margin-top:5px;">Project Image</p></div>` : ''}
+        ${imageUrl && isImage ? `<div class="image-container"><img src="${imageUrl}" onerror="this.style.display='none'"><p style="font-size:10px; color:#999; margin-top:5px;">Title Deed Image</p></div>` : ''}
         
         <hr>
         
-        <!-- Daily Work Summary Cards -->
         <div class="summary-cards">
             <div class="summary-card">
                 <div class="label">Total Budget</div>
@@ -1583,20 +1873,284 @@ function exportSingleProjectPDF(id) {
     printWindow.document.close();
     showToast("PDF preview opened - Click Print to save");
 }
-
 function exportProjectsToExcel() { 
     let ws = [['Reference','Owner','Amount','Status','Progress','Location','Start Date','End Date','Created By']]; 
     projects.forEach(p => ws.push([p.name, p.client_name, p.amount, p.status, p.progress, p.location||'-', p.start_date||'', p.end_date||'', p.created_by||'System'])); 
     let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'TitleDeeds'); XLSX.writeFile(wb, `titledeeds.xlsx`); showToast('All exported to Excel'); 
 }
 
-function exportProjectsToPDF() { 
-    let rows = projects.map(p => `<div style="margin-bottom:20px;border-bottom:1px solid #059669;padding-bottom:10px;"><h3 style="color:#059669;">${escapeHtml(p.name)}</h3><p><strong>Owner:</strong> ${escapeHtml(p.client_name||'N/A')}</p><p><strong>Amount:</strong> ${formatCurrency(p.amount)}</p><p><strong>Status:</strong> ${p.status}</p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Created by:</strong> ${escapeHtml(p.created_by||'System')}</p></div>`).join(''); 
-    let win = window.open('', '_blank'); 
-    win.document.write(`<!DOCTYPE html><html><head><title>Title Deeds Report</title><style>body{font-family:Arial;padding:30px;border:2px solid #059669;border-radius:12px;}h1{color:#059669;text-align:center;}</style></head><body><h1>Title Deeds Report</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    win.document.close(); showToast("PDF preview opened - Click Print"); 
+function exportProjectsToPDF() {
+    if (projects.length === 0) {
+        showToast('No title deeds to export', true);
+        return;
+    }
+    
+    // ============ STEP 1: HAKIKISHA DAILYWORK DATA IMELOAD ============
+    // Ikiwa dailyworkData ni tupu, load kwanza
+    if (dailyworkData.length === 0) {
+        showToast('Loading daily work data...', false);
+        fetchDailyWork().then(function() {
+            // Baada ya kuload, endelea na export
+            exportProjectsToPDFContinue();
+        }).catch(function(e) {
+            showToast('Failed to load daily work: ' + e.message, true);
+        });
+        return;
+    }
+    
+    // Ikiwa tayari imeload, endelea moja kwa moja
+    exportProjectsToPDFContinue();
 }
 
+// ============ STEP 2: CONTINUE FUNCTION ============
+function exportProjectsToPDFContinue() {
+    // Debug - Angalia data
+    console.log('Daily work data count:', dailyworkData.length);
+    console.log('Projects count:', projects.length);
+    console.log('Sample daily work:', dailyworkData.slice(0, 3));
+    
+    // Calculate totals
+    let totalAmount = 0;
+    let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
+    
+    for (let p of projects) {
+        totalAmount += parseFloat(p.amount) || 0;
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+        
+        // ============ STEP 3: FIXED FILTERING LOGIC ============
+        // Tumia project_id kwanza, kisha project_name kama fallback
+        const projectWork = dailyworkData.filter(function(w) {
+            // Filter by project_id (sahihi zaidi)
+            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) {
+                return true;
+            }
+            // Fallback: Filter by project_name
+            if (w.project_name && w.project_name === p.name) {
+                return true;
+            }
+            return false;
+        });
+        
+        console.log('Project "' + p.name + '" (ID: ' + p.id + ') has ' + projectWork.length + ' daily records');
+        
+        totalDailyRecords += projectWork.length;
+        for (let w of projectWork) {
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            totalExpensesAll += (expensesValue + amountSpent);
+        }
+    }
+    let totalRemainingAll = totalBudgetAll - totalExpensesAll;
+    
+    // ============ STEP 4: BUILD ROWS FOR EACH TITLE DEED ============
+    let rows = '';
+    for (let p of projects) {
+        let imageUrl = getFullImageUrl(p.image);
+        let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
+        let statusClass = getProjectStatusClass(p.status);
+        let statusText = getProjectStatusText(p.status);
+        
+        // ============ STEP 5: FIXED FILTER FOR EACH PROJECT ============
+        const projectWork = dailyworkData.filter(function(w) {
+            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) {
+                return true;
+            }
+            if (w.project_name && w.project_name === p.name) {
+                return true;
+            }
+            return false;
+        });
+        
+        console.log('Building project "' + p.name + '" - Found ' + projectWork.length + ' daily records');
+        
+        let projBudget = 0, projExpenses = 0;
+        for (let w of projectWork) {
+            projBudget += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            projExpenses += (expensesValue + amountSpent);
+        }
+        let projRemaining = projBudget - projExpenses;
+        let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+        
+        // ============ STEP 6: BUILD DAILY WORK TABLE ROWS ============
+        let dailyRows = '';
+        if (projectWork.length > 0) {
+            console.log('Project "' + p.name + '" has ' + projectWork.length + ' records, building table...');
+            for (let w of projectWork) {
+                let budget = parseFloat(w.budget) || 0;
+                let expensesValue = parseFloat(w.expenses) || 0;
+                let amountSpent = parseFloat(w.amount) || 0;
+                let totalExpenseForRecord = expensesValue + amountSpent;
+                
+                let statusBg = w.status === 'completed' ? '#d1fae5' : 
+                              w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+                let statusColor = w.status === 'completed' ? '#059669' : 
+                                 w.status === 'partial' ? '#d97706' : '#dc2626';
+                let statusTextDW = w.status === 'completed' ? 'Completed' : 
+                                  w.status === 'partial' ? 'Partial' : 'Pending';
+                let description = (w.work_description || '-').replace(/\n/g, '<br>');
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                
+                dailyRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; white-space: nowrap;">' + recordDate + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word;">' + escapeHtml(description) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; white-space: nowrap;">' + formatCurrency(budget) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; white-space: nowrap;">' + formatCurrency(totalExpenseForRecord) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusTextDW + '</span></td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;">' + escapeHtml(w.created_by || 'System') + '</td>' +
+                    '</tr>';
+            }
+        } else {
+            dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records found</td></tr>';
+        }
+        
+        // ============ STEP 7: BUILD EACH TITLE DEED CARD ============
+        rows += '<div style="margin-bottom: 40px; border: 2px solid #059669; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            
+            // Header
+            '<div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 15px 20px;">' +
+            '<h3 style="margin: 0; font-size: 18px; font-weight: 700;">' + escapeHtml(p.name) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Title Deed ID: #' + p.id + ' | Owner: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + ' | Daily Records: ' + projectWork.length + '</p>' +
+            '</div>' +
+            
+            // Image
+            '<div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">' +
+            (imageUrl && isImage ? '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\'>No Image</div>\'">' : '<div style="color:#999;padding:10px;">No Image Available</div>') +
+            '</div>' +
+            
+            // Title Deed Details - VERTICAL TABLE
+            '<div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">' +
+            '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #059669;">📌 Title Deed Reference:</td><td style="padding: 8px 12px;"><strong>' + escapeHtml(p.name) + '</strong></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">👤 Owner Name:</td><td style="padding: 8px 12px;">' + escapeHtml(p.client_name || 'N/A') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">💰 Amount:</td><td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">' + formatCurrency(p.amount) + '</span></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📊 Status:</td><td style="padding: 8px 12px;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; background: ' + (p.status === 'pending' ? '#fef3c7' : p.status === 'in_progress' ? '#dbeafe' : p.status === 'completed' ? '#d1fae5' : '#e9d5ff') + '; color: ' + (p.status === 'pending' ? '#d97706' : p.status === 'in_progress' ? '#2563eb' : p.status === 'completed' ? '#059669' : '#7e22ce') + ';">' + statusText + '</span></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📈 Progress:</td><td style="padding: 8px 12px;">' + (p.progress || 0) + '%<div style="background:#e2e8f0; border-radius:10px; margin-top:6px; height:6px; max-width:200px;"><div style="width:' + (p.progress||0) + '%; background:#059669; border-radius:10px; height:6px;"></div></div></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📍 Location:</td><td style="padding: 8px 12px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📅 Start Date:</td><td style="padding: 8px 12px;">' + (p.start_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📅 End Date:</td><td style="padding: 8px 12px;">' + (p.end_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">📝 Description:</td><td style="padding: 8px 12px;">' + escapeHtml(p.description || 'No description') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">👤 Created By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>' +
+            (p.updated_by ? '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #059669;">✏️ Updated By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>' : '') +
+            '</table></div>' +
+            
+            // Daily Work Section
+            '<div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #059669;">' +
+            '<h4 style="margin: 0 0 12px 0; font-size: 14px; color: #059669;"><i class="fas fa-calendar-day"></i> Daily Work Records (' + projectWork.length + ')</h4>' +
+            
+            // Summary Cards
+            (projectWork.length > 0 ? 
+            '<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;"><div style="font-size: 10px; color: #166534;">💰 Total Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669;">' + formatCurrency(projBudget) + '</div></div>' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;"><div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c;">' + formatCurrency(projExpenses) + '</div></div>' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;"><div style="font-size: 10px; color: #1e40af;">📊 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ' + projRemainingColor + ';">' + formatCurrency(projRemaining) + '</div></div>' +
+            '</div>' : '') +
+            
+            // Daily Work Table
+            '<div style="overflow-x: auto;">' +
+            '<table style="width: 100%; border-collapse: collapse; font-size: 11px;">' +
+            '<thead>' +
+            '<tr style="background: #059669; color: white;">' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 16%;">Date/Time</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 30%;">Description</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 12%; text-align: right;">Budget (TZS)</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 12%; text-align: right;">Expenses (TZS)</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 12%; text-align: center;">Status</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #047857; width: 18%; text-align: center;">Created By</th>' +
+            '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+            dailyRows +
+            (projectWork.length > 0 ? 
+            '<tfoot><tr style="background: #fef3c7; font-weight: bold;">' +
+            '<td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>' +
+            '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>' + formatCurrency(projBudget) + '</strong></td>' +
+            '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>' + formatCurrency(projExpenses) + '</strong></td>' +
+            '<td colspan="2" style="border: 1px solid #cbd5e1;"></td>' +
+            '</tr></tfoot>' : '') +
+            '</tbody></table></div></div></div>';
+    }
+    
+    // ============ STEP 8: CREATE PRINT WINDOW ============
+    let win = window.open('', '_blank');
+    if (!win) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+    
+    win.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Title Deeds Report - Hatimiliki Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #059669; }\n' +
+            '.header { background: linear-gradient(135deg, #059669, #047857); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }\n' +
+            '.summary-card.total .value { color: #059669; }\n' +
+            '.summary-card.amount .value { color: #059669; }\n' +
+            '.summary-card.budget .value { color: #3b82f6; }\n' +
+            '.summary-card.expenses .value { color: #dc2626; }\n' +
+            '.summary-card.records .value { color: #8b5cf6; }\n' +
+            '.summary-card.remaining .value { color: #f59e0b; }\n' +
+            '.projects-section { padding: 20px 25px; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #059669; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button:hover { background: #047857; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #059669 !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>🏛️ All Title Deeds Report</h1>\n' +
+                '<p>Hatimiliki Department - Complete Title Deeds Overview with Daily Work Records</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Title Deeds:</strong> ' + projects.length + '</span>\n' +
+                '<span><strong>Total Daily Records:</strong> ' + totalDailyRecords + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">Total Title Deeds</div><div class="value">' + projects.length + '</div></div>\n' +
+                '<div class="summary-card amount"><div class="label">Total Amount</div><div class="value">' + formatCurrency(totalAmount) + '</div></div>\n' +
+                '<div class="summary-card budget"><div class="label">Total Budget</div><div class="value">' + formatCurrency(totalBudgetAll) + '</div></div>\n' +
+                '<div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">' + formatCurrency(totalExpensesAll) + '</div></div>\n' +
+                '<div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value" style="color: ' + (totalRemainingAll >= 0 ? '#059669' : '#dc2626') + ';">' + formatCurrency(totalRemainingAll) + '</div></div>\n' +
+                '<div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">' + totalDailyRecords + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="projects-section">\n' +
+                rows +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button onclick="window.close();" style="background: #6b7280; margin-left: 10px;">❌ Close</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+    
+    win.document.close();
+    showToast("📄 All Title Deeds PDF preview opened - Click 'Save as PDF' to download", false);
+}
 async function saveTitleDeedDocument() {
     let title = document.getElementById('titleDeedDocTitle').value.trim();
     let description = document.getElementById('titleDeedDocDesc').value;
@@ -1635,7 +2189,6 @@ function showDocumentInfo(doc, type) {
 }
 
 async function viewTitleDeedDocument(id) { let doc = titleDeedDocuments.find(d => d.id === id); if (doc) { showDocumentInfo(doc, 'project'); } }
-async function sendDocumentToDept(docId, deptId, type) { const deptName = allDepartments.find(d => d.id == deptId)?.name || 'Department'; showToast(`✅ Document sent to ${deptName}`, false); toggleSendDropdown(`docSendDropdown-${docId}`); closeModal('documentInfoModal'); }
 async function deleteTitleDeedDocument(id) { if (confirm("Delete this document?")) { let res = await deleteTitleDeedDocumentAPI(id); if (res.success) { showToast("Document deleted"); await fetchTitleDeedDocuments(); await loadTitleDeeds(); } else { showToast(res.message || "Failed", true); } } }
 
 function exportAllTitleDeedDocsToExcel() {
@@ -1893,9 +2446,6 @@ function exportAllRequestsToPDF() {
                 font-size: 13px; 
                 font-weight: 600; 
             }
-            .print-btn button:hover {
-                background: #047857;
-            }
             @media print { 
                 body { background: white; padding: 0; } 
                 .print-btn { display: none; } 
@@ -2048,12 +2598,364 @@ async function addReport() { let title = document.getElementById('newReportTitle
 async function viewReportDetails(id) { let r = reportsList.find(r => r.id === id); if(r) { if(r.sent_from_department && r.sent_from_department !== DEPARTMENT_ID && (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(id)) { await markReportAsViewed(id); } let deptOptions = ''; allDepartments.forEach(d => { if (d.id !== DEPARTMENT_ID) { deptOptions += `<a onclick="sendReportToDept(${r.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; } }); document.getElementById('viewReportContent').innerHTML = `<div class="bg-emerald-100 dark:bg-emerald-900 p-3 rounded"><strong>${escapeHtml(r.title)}</strong> <span class="float-right">${r.period}</span></div><div class="mt-3 whitespace-pre-wrap">${escapeHtml(r.content)}</div><div class="text-xs text-gray-400 mt-2">Created: ${formatDateTime(r.created_at)}</div>`; document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success">Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-pdf">PDF</button><div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane mr-1"></i>Send</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content">${deptOptions}</div></div>`; openModal('viewReportModal'); } }
 async function sendReportToDept(reportId, toDeptId) { const dept = allDepartments.find(d => d.id == toDeptId); const deptName = dept ? dept.name : 'Department'; showToast(`✅ Report sent to ${deptName}`, false); toggleSendDropdown(`reportSendDropdown-${reportId}`); closeModal('viewReportModal'); }
 function exportSingleReportExcel(id) { let r = reportsList.find(r=>r.id===id); if(r) { let ws = [['Title','Period','Content','Created']]; ws.push([r.title, r.period, r.content, r.created_at]); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Report'); XLSX.writeFile(wb, `report_${r.id}.xlsx`); showToast('Exported'); } }
-function exportSingleReportPDF(id) { let r = reportsList.find(r=>r.id===id); if(r) { let w = window.open('', '_blank'); w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(r.title)}</title><style>body{font-family:Arial;padding:30px;border:2px solid #059669;}h1{color:#059669;text-align:center;}</style></head><body><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDate(r.created_at)}</p><div style="background:#f5f5f5;padding:15px;">${escapeHtml(r.content)}</div><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); w.document.close(); showToast("PDF preview opened"); } }
+
+function exportSingleReportPDF(id) { 
+    let r = reportsList.find(r => r.id === id); 
+    if(!r) { 
+        showToast("Report not found", true); 
+        return; 
+    }
+    
+    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+    let periodLabel = r.period ? r.period.charAt(0).toUpperCase() + r.period.slice(1) : 'Not specified';
+    let content = r.content || 'No content available';
+    let wordCount = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+    let charCount = content.length;
+    
+    // FULL CONTENT - NO TRUNCATION
+    let fullContent = escapeHtml(content);
+    
+    let printWindow = window.open('', '_blank');
+    if(!printWindow) { 
+        showToast("Please allow popups", true); 
+        return; 
+    }
+    
+    printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${escapeHtml(r.title)} - Report</title>
+        <style>
+            body {
+                font-family: 'Inter', Arial, sans-serif; 
+                padding: 30px; 
+                border: 2px solid #059669; 
+                border-radius: 16px;
+                max-width: 1000px;
+                margin: 0 auto;
+                background: white;
+            }
+            h1 {
+                color: #059669; 
+                text-align: center; 
+                font-size: 24px;
+                margin-bottom: 20px;
+                border-bottom: 2px solid #059669;
+                padding-bottom: 15px;
+            }
+            .info-section {
+                background: #f8fafc;
+                padding: 15px 20px;
+                border-radius: 10px;
+                margin: 15px 0;
+                border: 1px solid #e5e7eb;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px 20px;
+            }
+            .info-item {
+                display: flex;
+                padding: 4px 0;
+            }
+            .info-item .label {
+                font-weight: 600;
+                color: #059669;
+                width: 130px;
+                flex-shrink: 0;
+            }
+            .info-item .value {
+                color: #1f2937;
+            }
+            .status-badge {
+                display: inline-block; 
+                padding: 4px 14px; 
+                border-radius: 20px; 
+                background: ${statusBg}; 
+                color: ${statusColor};
+                font-size: 12px;
+                font-weight: 500;
+            }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 15px;
+                margin: 20px 0;
+            }
+            .stat-card {
+                background: #f0fdf4;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #d1fae5;
+            }
+            .stat-card .label {
+                font-size: 10px;
+                font-weight: 600;
+                color: #6b7280;
+                text-transform: uppercase;
+            }
+            .stat-card .value {
+                font-size: 16px;
+                font-weight: 800;
+                color: #059669;
+                margin-top: 4px;
+            }
+            .content-box {
+                background: #f8fafc;
+                padding: 25px 30px;
+                border-radius: 10px;
+                border: 1px solid #e5e7eb;
+                min-height: 200px;
+                white-space: pre-wrap;
+                line-height: 1.8;
+                font-size: 14px;
+                color: #1e293b;
+                margin: 15px 0;
+            }
+            .print-btn {
+                text-align: center; 
+                margin-top: 20px;
+                padding-top: 15px;
+                border-top: 2px solid #059669;
+            }
+            .print-btn button {
+                background: #059669; 
+                color: white; 
+                border: none; 
+                padding: 10px 28px; 
+                border-radius: 6px; 
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            .print-btn button:hover { background: #047857; }
+            .footer {
+                text-align: center;
+                font-size: 10px;
+                color: #6b7280;
+                margin-top: 20px;
+                padding-top: 10px;
+                border-top: 1px solid #e5e7eb;
+            }
+            @media print {
+                .print-btn { display: none; }
+                body { border: none; padding: 10px; }
+                .info-section { background: #f8fafc !important; -webkit-print-color-adjust: exact; }
+                .stat-card { background: #f0fdf4 !important; -webkit-print-color-adjust: exact; }
+            }
+        </style>
+    </head>
+    <body>
+        <h1>${escapeHtml(r.title)}</h1>
+        
+        <div class="info-section">
+            <div class="info-item"><span class="label">📊 Status:</span><span class="value"><span class="status-badge">${statusText}</span></span></div>
+            <div class="info-item"><span class="label">📆 Period:</span><span class="value">${periodLabel}</span></div>
+            <div class="info-item"><span class="label">📅 Created:</span><span class="value">${formatDateTime(r.created_at)}</span></div>
+            <div class="info-item"><span class="label">👤 Created By:</span><span class="value">${escapeHtml(r.created_by || 'System')}</span></div>
+            ${r.updated_by ? `<div class="info-item"><span class="label">✏️ Updated:</span><span class="value">${formatDateTime(r.updated_at)}</span></div><div class="info-item"><span class="label">✏️ Updated By:</span><span class="value">${escapeHtml(r.updated_by)}</span></div>` : ''}
+            <div class="info-item"><span class="label">📝 Words:</span><span class="value">${wordCount.toLocaleString()}</span></div>
+            <div class="info-item"><span class="label">📝 Characters:</span><span class="value">${charCount.toLocaleString()}</span></div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card"><div class="label">Words</div><div class="value">${wordCount.toLocaleString()}</div></div>
+            <div class="stat-card"><div class="label">Characters</div><div class="value">${charCount.toLocaleString()}</div></div>
+            <div class="stat-card"><div class="label">Status</div><div class="value">${statusText}</div></div>
+            <div class="stat-card"><div class="label">Period</div><div class="value">${periodLabel}</div></div>
+        </div>
+        
+        <h3 style="color:#059669; margin-top:20px;">📄 Report Content</h3>
+        <!-- FULL CONTENT - NO TRUNCATION -->
+        <div class="content-box">${fullContent}</div>
+        
+        <div class="footer">
+            GeoTraverse ERP System - Hatimiliki Department | Official Report Document<br>
+            Generated: ${new Date().toLocaleString()}
+        </div>
+        <div class="print-btn">
+            <button onclick="window.print(); setTimeout(() => window.close(), 1000);">
+                🖨️ Save as PDF / Print
+            </button>
+        </div>
+    </body>
+    </html>`);
+    
+    printWindow.document.close();
+    showToast("📄 PDF preview opened - Click Print to save", false);
+}
 function editReport(id) { let r = reportsList.find(r => r.id === id); if(r) { document.getElementById('editReportId').value = r.id; document.getElementById('editReportTitle').value = r.title; document.getElementById('editReportPeriod').value = r.period; document.getElementById('editReportContent').value = r.content; openModal('editReportModal'); } }
 async function updateReport() { let id = parseInt(document.getElementById('editReportId').value); let data = { title: document.getElementById('editReportTitle').value, period: document.getElementById('editReportPeriod').value, content: document.getElementById('editReportContent').value }; let res = await updateReportAPI(id, data); if(res.success) { showToast("Report updated"); closeModal('editReportModal'); loadReports(); loadDashboard(); } else showToast(res.message || "Failed", true); }
 async function deleteReport(id) { if(confirm("Delete report?")) { let r = reportsList.find(r=>r.id===id); if(r) await addToRecycleBin(id, 'report', r.title); let res = await deleteReportAPI(id); if(res.success) { showToast("Deleted"); loadReports(); loadDashboard(); } else showToast(res.message || "Failed", true); } }
 function exportAllReportsToExcel() { let ws = [['Title','Period','Content','Created','Status']]; reportsList.forEach(r => ws.push([r.title, r.period, r.content, r.created_at, r.status])); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports'); XLSX.writeFile(wb, `reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('All reports exported to Excel'); }
-function exportAllReportsToPDF() { let rows = reportsList.map(r => `<div style="margin-bottom:20px;border-bottom:1px solid #ddd;padding-bottom:10px;"><h3 style="color:#059669;">${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period} | <strong>Created:</strong> ${formatDate(r.created_at)} | <strong>Status:</strong> ${r.status}</p><div style="background:#f9fafb;padding:10px;border-radius:5px;">${escapeHtml(r.content)}</div></div>`).join(''); let win = window.open('', '_blank'); win.document.write(`<!DOCTYPE html><html><head><title>All Reports</title><style>body{font-family:Arial;padding:30px;border:2px solid #059669;border-radius:12px;}h1{color:#059669;text-align:center;}</style></head><body><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); win.document.close(); showToast("PDF preview opened - Click Print"); }
+
+function exportAllReportsToPDF() { 
+    if (reportsList.length === 0) { 
+        showToast('No reports to export', true); 
+        return; 
+    }
+    
+    // Calculate summary statistics
+    let totalReports = reportsList.length;
+    let sentCount = 0;
+    let draftCount = 0;
+    let totalChars = 0;
+    let periodCounts = {};
+    let wordCount = 0;
+    
+    for (let r of reportsList) {
+        if (r.status === 'sent') sentCount++;
+        else if (r.status === 'draft') draftCount++;
+        if (r.content) {
+            totalChars += r.content.length;
+            wordCount += r.content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+        }
+        let period = r.period || 'unknown';
+        periodCounts[period] = (periodCounts[period] || 0) + 1;
+    }
+    
+    // Build period summary table
+    let periodRows = '';
+    let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+    for (let period of periodOrder) {
+        let count = periodCounts[period] || 0;
+        if (count > 0) {
+            let percentage = ((count / totalReports) * 100).toFixed(1);
+            periodRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                '<td style="padding: 10px 12px; text-transform: capitalize;">' + escapeHtml(period) + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; font-weight: 600;">' + count + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; color: #059669; font-weight: 600;">' + percentage + '%</td>' +
+                '</tr>';
+        }
+    }
+    
+    // ============ BUILD REPORT ROWS - FULL CONTENT ============
+    let rows = '';
+    for (let r of reportsList) {
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+        let content = r.content || 'No content available';
+        
+        // FULL CONTENT - NO TRUNCATION
+        let fullContent = escapeHtml(content);
+        
+        rows += '<div style="margin-bottom: 35px; border: 2px solid #059669; border-radius: 12px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            '<div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 15px 20px;">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">' +
+            '<div><h3 style="margin: 0; font-size: 17px; font-weight: 700;">' + escapeHtml(r.title) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Report ID: #' + r.id + ' | Period: ' + r.period + '</p></div>' +
+            '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>' +
+            '</div></div>' +
+            '<div style="padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">' +
+            '<span><strong>📅 Created:</strong> ' + formatDateTime(r.created_at) + ' by ' + escapeHtml(r.created_by || 'System') + '</span>' +
+            (r.updated_by ? '<span><strong>✏️ Updated:</strong> ' + formatDateTime(r.updated_at) + ' by ' + escapeHtml(r.updated_by) + '</span>' : '') +
+            '<span><strong>📊 Status:</strong> ' + statusText + '</span>' +
+            '<span><strong>📋 Period:</strong> ' + r.period + '</span>' +
+            '<span><strong>📝 Characters:</strong> ' + (r.content ? r.content.length : 0).toLocaleString() + '</span>' +
+            '</div>' +
+            // FULL CONTENT - NO MAX HEIGHT, NO TRUNCATION
+            '<div style="padding: 18px 22px; background: white; font-size: 13px; line-height: 1.8; color: #1e293b; white-space: pre-wrap; word-wrap: break-word;">' +
+            fullContent +
+            '</div>' +
+            '<div style="padding: 8px 20px; background: #f8fafc; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: right;">' +
+            'Report #' + r.id + ' | ' + (r.content ? r.content.length : 0).toLocaleString() + ' characters' +
+            '</div></div>';
+    }
+    
+    let win = window.open('', '_blank');
+    if (!win) { 
+        showToast("Please allow popups", true); 
+        return; 
+    }
+    
+    win.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>All Reports - Hatimiliki Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #059669; }
+            .header { background: linear-gradient(135deg, #059669, #047857); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
+            .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }
+            .summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }
+            .summary-card.total .value { color: #059669; }
+            .summary-card.sent .value { color: #059669; }
+            .summary-card.draft .value { color: #d97706; }
+            .summary-card.chars .value { color: #3b82f6; }
+            .summary-card.words .value { color: #8b5cf6; }
+            .period-summary { margin: 0 25px 25px 25px; background: #f9fafb; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }
+            .period-summary h4 { background: #f1f5f9; padding: 12px 18px; font-size: 14px; font-weight: 700; margin: 0; border-bottom: 1px solid #e2e8f0; color: #1e293b; }
+            .period-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .period-table th { background: #f8fafc; padding: 10px 16px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #475569; }
+            .period-table td { padding: 10px 16px; border-bottom: 1px solid #e2e8f0; color: #334155; }
+            .reports-section { padding: 0 25px 25px 25px; }
+            .reports-title { margin: 25px 0 18px 0; font-size: 16px; font-weight: 700; color: #059669; border-bottom: 3px solid #059669; padding-bottom: 10px; display: inline-block; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #059669; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #047857; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #059669 !important; -webkit-print-color-adjust: exact; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 All Reports Report</h1>
+                <p>Hatimiliki Department - Complete Reports Overview</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                <span><strong>Total Reports:</strong> ${totalReports}</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+            <div class="summary-cards">
+                <div class="summary-card total"><div class="label">Total Reports</div><div class="value">${totalReports}</div></div>
+                <div class="summary-card sent"><div class="label">Sent Reports</div><div class="value">${sentCount}</div></div>
+                <div class="summary-card draft"><div class="label">Draft Reports</div><div class="value">${draftCount}</div></div>
+                <div class="summary-card chars"><div class="label">Total Characters</div><div class="value">${totalChars.toLocaleString()}</div></div>
+                <div class="summary-card words"><div class="label">Total Words</div><div class="value">${wordCount.toLocaleString()}</div></div>
+            </div>
+            <div class="period-summary">
+                <h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>
+                <table class="period-table">
+                    <thead><tr><th style="width: 40%;">Period Type</th><th style="width: 30%; text-align: center;">Count</th><th style="width: 30%; text-align: center;">Percentage</th></tr></thead>
+                    <tbody>${periodRows}</tbody>
+                </table>
+            </div>
+            <div class="reports-section">
+                <div class="reports-title">📄 Reports List (${totalReports} reports)</div>
+                ${rows}
+            </div>
+            <div class="footer">
+                GeoTraverse ERP System - Hatimiliki Department | Official All Reports Report<br>
+                This document is system generated and requires no signature
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                    🖨️ Save as PDF / Print
+                </button>
+                <button onclick="window.close();" style="background: #6b7280; margin-left: 10px;">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+    
+    win.document.close();
+    showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
+}
+
 function exportAllUploadedReportsToExcel() { let ws = [['Title','File Name','Description','Uploaded By','Uploaded At']]; uploadedReports.forEach(u => ws.push([u.title, u.file_name, u.description||'-', u.uploaded_by, new Date(u.created_at).toLocaleString()])); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports'); XLSX.writeFile(wb, `uploaded_reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Uploaded reports exported to Excel'); }
 function exportAllUploadedReportsToPDF() { let rows = uploadedReports.map(u => `<div style="margin-bottom:20px;border-bottom:1px solid #ddd;padding-bottom:10px;"><h3 style="color:#059669;">${escapeHtml(u.title)}</h3><p><strong>File:</strong> ${u.file_name}</p><p><strong>Description:</strong> ${escapeHtml(u.description||'-')}</p><p><strong>Uploaded:</strong> ${new Date(u.created_at).toLocaleString()}</p></div>`).join(''); let win = window.open('', '_blank'); win.document.write(`<!DOCTYPE html><html><head><title>All Uploaded Reports</title><style>body{font-family:Arial;padding:30px;border:2px solid #059669;border-radius:12px;}h1{color:#059669;text-align:center;}</style></head><body><h1>All Uploaded Reports</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); win.document.close(); showToast("PDF preview opened - Click Print"); }
 
@@ -2143,9 +3045,11 @@ async function init() {
     initScrollTop(); setInterval(updateConnectionStatus, 30000); updateConnectionStatus(); await loadDashboard(); addLog("Hatimiliki Dashboard initialized");
 }
 
+// Expose all functions globally
 window.showSection = showSection; window.closeModal = closeModal; window.openModal = openModal; window.goToMainWebsite = goToMainWebsite; window.logout = logout; window.closeMobileSidebar = closeMobileSidebar; window.showFullImage = showFullImage; window.closeFullImageModal = closeFullImageModal;
 window.openAddProjectModal = openAddProjectModal; window.saveProject = saveProject; window.deleteTitleDeed = deleteTitleDeed; window.editTitleDeed = editTitleDeed; window.viewTitleDeed = viewTitleDeed;
-window.exportSingleProjectExcel = exportSingleProjectExcel; window.exportSingleProjectPDF = exportSingleProjectPDF; window.exportProjectsToExcel = exportProjectsToExcel; window.exportProjectsToPDF = exportProjectsToPDF; window.sendTitleDeedToDept = sendTitleDeedToDept;
+window.exportSingleProjectExcel = exportSingleProjectExcel; window.exportSingleProjectPDF = exportSingleProjectPDF; window.exportProjectsToExcel = exportProjectsToExcel; window.exportProjectsToPDF = exportProjectsToPDF;
+window.sendTitleDeedToDept = sendTitleDeedToDept;
 window.saveTitleDeedDocument = saveTitleDeedDocument; window.viewTitleDeedDocument = viewTitleDeedDocument; window.deleteTitleDeedDocument = deleteTitleDeedDocument;
 window.exportAllTitleDeedDocsToExcel = exportAllTitleDeedDocsToExcel; window.exportAllTitleDeedDocsToPDF = exportAllTitleDeedDocsToPDF;
 window.openRequestModal = openRequestModal; window.saveRequest = saveRequest; window.viewRequestDetails = viewRequestDetails; window.editRequest = editRequest; window.deleteRequest = deleteRequest; window.exportAllRequestsToExcel = exportAllRequestsToExcel; window.exportAllRequestsToPDF = exportAllRequestsToPDF;
@@ -2154,7 +3058,8 @@ window.exportSingleReportExcel = exportSingleReportExcel; window.exportSingleRep
 window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel; window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF;
 window.saveUploadedReport = saveUploadedReport; window.deleteUploadedReport = deleteUploadedReport; window.viewUploadedReport = viewUploadedReport;
 window.switchProjectTab = switchProjectTab; window.switchReportTab = switchReportTab;
-window.saveDailyWork = saveDailyWork; window.viewDailyWork = viewDailyWork; window.editDailyWork = editDailyWork; window.deleteDailyWork = deleteDailyWork; window.toggleDailyWorkTable = toggleDailyWorkTable; window.openDailyWorkModal = openDailyWorkModal; window.exportDailyWorkToExcel = exportDailyWorkToExcel; window.exportDailyWorkToPDF = exportDailyWorkToPDF; window.sendDocumentToDept = sendDocumentToDept;
+window.saveDailyWork = saveDailyWork; window.viewDailyWork = viewDailyWork; window.editDailyWork = editDailyWork; window.deleteDailyWork = deleteDailyWork; window.toggleDailyWorkTable = toggleDailyWorkTable; window.openDailyWorkModal = openDailyWorkModal; window.exportDailyWorkToExcel = exportDailyWorkToExcel; window.exportDailyWorkToPDF = exportDailyWorkToPDF;
+window.sendDocumentToDept = sendDocumentToDept; window.sendUploadedReportToDept = sendUploadedReportToDept;
 window.changeColor = changeColor; window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.clearLogs = clearLogs; window.emptyRecycleBin = emptyRecycleBin; window.restoreFromRecycleBin = restoreFromRecycleBin; window.permanentlyDeleteItem = permanentlyDeleteItem;
 window.showDocumentInfo = showDocumentInfo;
 window.openGenerateReportModal = openGenerateReportModal;

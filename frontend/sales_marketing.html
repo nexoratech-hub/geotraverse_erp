@@ -759,37 +759,45 @@ function exportAllCampaignsPDF() {
         showToast('No campaigns to export', true);
         return;
     }
-    
-    // Calculate totals for all campaigns
+
+    // ============ CALCULATE TOTALS ============
     let totalBudget = 0, totalSpent = 0, totalRemaining = 0;
     let plannedCount = 0, activeCount = 0, completedCount = 0, cancelledCount = 0;
-    
-    campaigns.forEach(c => {
+    let totalDailyRecords = 0;
+
+    for (let c of campaigns) {
         let budget = parseFloat(c.budget) || 0;
         let spent = parseFloat(c.spent) || 0;
         totalBudget += budget;
         totalSpent += spent;
         totalRemaining += (budget - spent);
-        
+
         if (c.status === 'planned') plannedCount++;
         else if (c.status === 'active') activeCount++;
         else if (c.status === 'completed') completedCount++;
         else if (c.status === 'cancelled') cancelledCount++;
-    });
-    
+
+        // Get daily work for this campaign
+        const campaignWork = dailyworkData.filter(function(w) {
+            if (w.campaign_id && parseInt(w.campaign_id) === parseInt(c.id)) return true;
+            if (w.campaign_name && w.campaign_name === c.campaign_name) return true;
+            if (w.project_id && parseInt(w.project_id) === parseInt(c.id)) return true;
+            return false;
+        });
+        totalDailyRecords += campaignWork.length;
+    }
+
     let overallUsagePercent = totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : 0;
-    
-    // Sort campaigns by date (newest first)
     const sortedCampaigns = [...campaigns].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    
-    // Build campaign cards - each campaign has its own section
+
+    // ============ BUILD CAMPAIGN CARDS ============
     let campaignCards = '';
     for (let c of sortedCampaigns) {
         let spentPercent = (c.budget && c.budget > 0) ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
         let budgetVal = parseFloat(c.budget) || 0;
         let spentVal = parseFloat(c.spent) || 0;
         let remainingVal = budgetVal - spentVal;
-        
+
         let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : 
                        c.campaign_type === 'social_media' ? 'Social Media' : 
                        c.campaign_type === 'tv_radio' ? 'TV/Radio' : 
@@ -804,25 +812,25 @@ function exportAllCampaignsPDF() {
         let statusBg = c.status === 'planned' ? '#dbeafe' : 
                        c.status === 'active' ? '#ffedd5' : 
                        c.status === 'completed' ? '#d1fae5' : '#fee2e2';
-        
         let progressColor = spentPercent < 50 ? '#10b981' : (spentPercent < 80 ? '#f59e0b' : '#ef4444');
-        
+
+        // Get daily work count for this campaign
+        const campaignWork = dailyworkData.filter(function(w) {
+            if (w.campaign_id && parseInt(w.campaign_id) === parseInt(c.id)) return true;
+            if (w.campaign_name && w.campaign_name === c.campaign_name) return true;
+            if (w.project_id && parseInt(w.project_id) === parseInt(c.id)) return true;
+            return false;
+        });
+
         campaignCards += `
             <div style="background: white; border: 2px solid #ea580c; border-radius: 16px; margin-bottom: 25px; overflow: hidden; page-break-inside: avoid; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-                <!-- Campaign Header -->
                 <div style="background: linear-gradient(135deg, #ea580c, #c2410c); padding: 15px 20px; color: white;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                        <div>
-                            <h3 style="font-size: 18px; font-weight: 700; margin: 0;">📢 ${escapeHtml(c.campaign_name || '-')}</h3>
-                            <p style="font-size: 11px; opacity: 0.85; margin: 5px 0 0 0;">ID: #${c.id} | ${typeText}</p>
-                        </div>
+                        <div><h3 style="font-size: 18px; font-weight: 700; margin: 0;">📢 ${escapeHtml(c.campaign_name || '-')}</h3><p style="font-size: 11px; opacity: 0.85; margin: 5px 0 0 0;">ID: #${c.id} | ${typeText} | Daily Records: ${campaignWork.length}</p></div>
                         <span style="display: inline-block; padding: 5px 15px; border-radius: 30px; font-size: 11px; font-weight: 600; background: ${statusBg}; color: ${statusColor};">${statusText}</span>
                     </div>
                 </div>
-                
-                <!-- Campaign Body -->
                 <div style="padding: 20px;">
-                    <!-- Campaign Details Grid -->
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
                         <div style="background: #fef3c7; border-radius: 10px; padding: 12px; border-left: 4px solid #f59e0b;">
                             <div style="font-size: 10px; color: #92400e; text-transform: uppercase; letter-spacing: 0.5px;">Target Audience</div>
@@ -830,48 +838,17 @@ function exportAllCampaignsPDF() {
                         </div>
                         <div style="background: #dbeafe; border-radius: 10px; padding: 12px; border-left: 4px solid #3b82f6;">
                             <div style="font-size: 10px; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Period</div>
-                            <div style="font-size: 13px; font-weight: 600; color: #1e3a8a; margin-top: 4px;">
-                                ${c.start_date ? c.start_date : 'Not set'} ${c.end_date ? ' → ' + c.end_date : ''}
-                            </div>
+                            <div style="font-size: 13px; font-weight: 600; color: #1e3a8a; margin-top: 4px;">${c.start_date || 'Not set'} ${c.end_date ? ' → ' + c.end_date : ''}</div>
                         </div>
                     </div>
-                    
-                    <!-- Financial Cards -->
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 15px;">
-                        <div style="background: #f0fdf4; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bbf7d0;">
-                            <div style="font-size: 9px; color: #166534; text-transform: uppercase;">Budget</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #059669;">${formatMoney(budgetVal)}</div>
-                        </div>
-                        <div style="background: #fff7ed; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #fed7aa;">
-                            <div style="font-size: 9px; color: #9a3412; text-transform: uppercase;">Spent</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #ea580c;">${formatMoney(spentVal)}</div>
-                        </div>
-                        <div style="background: #eff6ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bfdbfe;">
-                            <div style="font-size: 9px; color: #1e40af; text-transform: uppercase;">Remaining</div>
-                            <div style="font-size: 16px; font-weight: 800; color: #2563eb;">${formatMoney(remainingVal)}</div>
-                        </div>
-                        <div style="background: #f5f3ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #ddd6fe;">
-                            <div style="font-size: 9px; color: #5b21b6; text-transform: uppercase;">Usage</div>
-                            <div style="font-size: 16px; font-weight: 800; color: ${progressColor};">${spentPercent}%</div>
-                        </div>
+                        <div style="background: #f0fdf4; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bbf7d0;"><div style="font-size: 9px; color: #166534; text-transform: uppercase;">Budget</div><div style="font-size: 16px; font-weight: 800; color: #059669;">${formatMoney(budgetVal)}</div></div>
+                        <div style="background: #fff7ed; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #fed7aa;"><div style="font-size: 9px; color: #9a3412; text-transform: uppercase;">Spent</div><div style="font-size: 16px; font-weight: 800; color: #ea580c;">${formatMoney(spentVal)}</div></div>
+                        <div style="background: #eff6ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #bfdbfe;"><div style="font-size: 9px; color: #1e40af; text-transform: uppercase;">Remaining</div><div style="font-size: 16px; font-weight: 800; color: #2563eb;">${formatMoney(remainingVal)}</div></div>
+                        <div style="background: #f5f3ff; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #ddd6fe;"><div style="font-size: 9px; color: #5b21b6; text-transform: uppercase;">Usage</div><div style="font-size: 16px; font-weight: 800; color: ${progressColor};">${spentPercent}%</div></div>
                     </div>
-                    
-                    <!-- Progress Bar -->
-                    <div style="margin-bottom: 15px;">
-                        <div style="background: #e2e8f0; border-radius: 10px; height: 10px; overflow: hidden;">
-                            <div style="width: ${Math.min(spentPercent, 100)}%; background: ${progressColor}; height: 100%; border-radius: 10px;"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Description -->
-                    ${c.description ? `
-                    <div style="background: #f8fafc; border-radius: 10px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0;">
-                        <div style="font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Description</div>
-                        <div style="font-size: 12px; color: #334155;">${escapeHtml(c.description)}</div>
-                    </div>
-                    ` : ''}
-                    
-                    <!-- Footer Info -->
+                    <div style="margin-bottom: 15px;"><div style="background: #e2e8f0; border-radius: 10px; height: 10px; overflow: hidden;"><div style="width: ${Math.min(spentPercent, 100)}%; background: ${progressColor}; height: 100%; border-radius: 10px;"></div></div></div>
+                    ${c.description ? `<div style="background: #f8fafc; border-radius: 10px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0;"><div style="font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Description</div><div style="font-size: 12px; color: #334155;">${escapeHtml(c.description)}</div></div>` : ''}
                     <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px;">
                         <span><i class="fas fa-user-plus"></i> Created by: ${escapeHtml(c.created_by || 'System')}</span>
                         <span><i class="fas fa-calendar"></i> ${formatDateTime(c.created_at)}</span>
@@ -880,279 +857,116 @@ function exportAllCampaignsPDF() {
             </div>
         `;
     }
-    
-    let printWindow = window.open('', '_blank');
-    if (!printWindow) {
+
+    // ============ CREATE PRINT WINDOW ============
+    let w = window.open('', '_blank');
+    if (!w) {
         showToast("Please allow popups", true);
         return;
     }
-    
-    printWindow.document.write(`<!DOCTYPE html>
+
+    w.document.write(`<!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
         <title>All Campaigns Report - Sales & Marketing Department</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
-                background: #f0f2f5; 
-                padding: 30px; 
-            }
-            .report-container { 
-                max-width: 1100px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 16px; 
-                overflow: hidden; 
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                border: 2px solid #ea580c; 
-            }
-            .header { 
-                background: linear-gradient(135deg, #ea580c, #c2410c); 
-                color: white; 
-                padding: 25px; 
-                text-align: center; 
-            }
-            .header h1 { 
-                font-size: 28px; 
-                margin: 0 0 5px 0; 
-                font-weight: 700; 
-            }
-            .header p { 
-                font-size: 12px; 
-                opacity: 0.85; 
-                margin: 0; 
-            }
-            .info-bar { 
-                background: #f8fafc; 
-                padding: 12px 25px; 
-                display: flex; 
-                justify-content: space-between; 
-                font-size: 12px; 
-                border-bottom: 1px solid #e2e8f0; 
-                color: #1e293b; 
-                flex-wrap: wrap;
-                gap: 10px;
-            }
-            .section-title {
-                background: #ea580c;
-                color: white;
-                padding: 12px 25px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 0;
-            }
-            .summary-cards {
-                display: flex;
-                gap: 20px;
-                padding: 20px 25px;
-                background: #f0fdf4;
-                flex-wrap: wrap;
-                border-bottom: 1px solid #e2e8f0;
-            }
-            .summary-card {
-                flex: 1;
-                background: white;
-                border-radius: 12px;
-                padding: 15px;
-                text-align: center;
-                border: 1px solid #d1fae5;
-                min-width: 130px;
-            }
-            .summary-card .label {
-                font-size: 11px;
-                font-weight: 600;
-                color: #64748b;
-                text-transform: uppercase;
-                margin-bottom: 8px;
-            }
-            .summary-card .value {
-                font-size: 18px;
-                font-weight: 800;
-                font-family: monospace;
-            }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #ea580c; }
+            .header { background: linear-gradient(135deg, #ea580c, #c2410c); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 28px; margin: 0 0 5px 0; font-weight: 700; }
+            .header p { font-size: 12px; opacity: 0.85; margin: 0; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; gap: 10px; }
+            .section-title { background: #ea580c; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin-top: 0; }
+            .summary-cards { display: flex; gap: 20px; padding: 20px 25px; background: #f0fdf4; flex-wrap: wrap; border-bottom: 1px solid #e2e8f0; }
+            .summary-card { flex: 1; background: white; border-radius: 12px; padding: 15px; text-align: center; border: 1px solid #d1fae5; min-width: 130px; }
+            .summary-card .label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
+            .summary-card .value { font-size: 18px; font-weight: 800; font-family: monospace; }
             .summary-card.budget .value { color: #059669; }
             .summary-card.spent .value { color: #ea580c; }
             .summary-card.remaining .value { color: #3b82f6; }
             .summary-card.usage .value { color: #8b5cf6; }
-            
-            .status-stats {
-                display: flex;
-                gap: 15px;
-                padding: 15px 25px;
-                background: #f9fafb;
-                border-bottom: 1px solid #e2e8f0;
-                flex-wrap: wrap;
-            }
-            .status-stat {
-                background: white;
-                border-radius: 8px;
-                padding: 8px 15px;
-                text-align: center;
-                border: 1px solid #e2e8f0;
-                min-width: 80px;
-            }
-            .status-stat .count {
-                font-size: 22px;
-                font-weight: 700;
-            }
-            .status-stat .label {
-                font-size: 10px;
-                color: #64748b;
-            }
+            .summary-card.records .value { color: #7c3aed; }
+            .status-stats { display: flex; gap: 15px; padding: 15px 25px; background: #f9fafb; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+            .status-stat { background: white; border-radius: 8px; padding: 8px 15px; text-align: center; border: 1px solid #e2e8f0; min-width: 80px; }
+            .status-stat .count { font-size: 22px; font-weight: 700; }
+            .status-stat .label { font-size: 10px; color: #64748b; }
             .status-stat.planned .count { color: #3b82f6; }
             .status-stat.active .count { color: #ea580c; }
             .status-stat.completed .count { color: #059669; }
             .status-stat.cancelled .count { color: #dc2626; }
-            
-            .campaigns-container {
-                padding: 20px 25px;
-            }
-            .footer { 
-                text-align: center; 
-                font-size: 10px; 
-                color: #64748b; 
-                padding: 15px; 
-                border-top: 1px solid #e2e8f0; 
-                background: #f8fafc; 
-            }
-            .print-btn { 
-                text-align: center; 
-                padding: 15px; 
-                background: #f8fafc; 
-                border-top: 1px solid #e2e8f0; 
-            }
-            .print-btn button { 
-                background: #ea580c; 
-                color: white; 
-                border: none; 
-                padding: 10px 28px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-size: 13px; 
-                font-weight: 600; 
-                margin: 0 5px;
-            }
-            .print-btn button:hover {
-                background: #c2410c;
-            }
-            @media print { 
-                .print-btn { display: none; } 
-                body { background: white; padding: 0; } 
-                .report-container { box-shadow: none; border: 1px solid #ea580c; } 
-                .header { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .section-title { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .campaign-card { break-inside: avoid; page-break-inside: avoid; }
-            }
+            .campaigns-container { padding: 20px 25px; }
+            .footer { text-align: center; font-size: 10px; color: #64748b; padding: 15px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
+            .print-btn { text-align: center; padding: 15px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+            .print-btn button { background: #ea580c; color: white; border: none; padding: 10px 28px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 5px; }
+            .print-btn button:hover { background: #c2410c; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { box-shadow: none; border: 1px solid #ea580c; } .header { background: #ea580c !important; -webkit-print-color-adjust: exact; } .section-title { background: #ea580c !important; -webkit-print-color-adjust: exact; } }
         </style>
     </head>
     <body>
-        <div class="report-container">
-            <!-- HEADER -->
-            <div class="header">
-                <h1>📢 All Campaigns Report</h1>
-                <p>Sales & Marketing Department - Generated on ${new Date().toLocaleString()}</p>
-            </div>
-            
-            <!-- INFO BAR -->
-            <div class="info-bar">
-                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                <span><strong>Total Campaigns:</strong> ${campaigns.length}</span>
-                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
-                <span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span>
-            </div>
-            
-            <!-- FINANCIAL SUMMARY -->
+        <div class="container">
+            <div class="header"><h1>📢 All Campaigns Report</h1><p>Sales & Marketing Department - Generated on ${new Date().toLocaleString()}</p></div>
+            <div class="info-bar"><span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span><span><strong>Total Campaigns:</strong> ${campaigns.length}</span><span><strong>Total Daily Records:</strong> ${totalDailyRecords}</span><span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span><span><strong>Date:</strong> ${new Date().toLocaleDateString()}</span></div>
             <div class="section-title">💰 Financial Summary</div>
             <div class="summary-cards">
-                <div class="summary-card budget">
-                    <div class="label">Total Budget</div>
-                    <div class="value">${formatMoney(totalBudget)}</div>
-                </div>
-                <div class="summary-card spent">
-                    <div class="label">Total Spent</div>
-                    <div class="value">${formatMoney(totalSpent)}</div>
-                </div>
-                <div class="summary-card remaining">
-                    <div class="label">Total Remaining</div>
-                    <div class="value">${formatMoney(totalRemaining)}</div>
-                </div>
-                <div class="summary-card usage">
-                    <div class="label">Overall Usage</div>
-                    <div class="value">${overallUsagePercent}%</div>
-                </div>
+                <div class="summary-card budget"><div class="label">Total Budget</div><div class="value">${formatMoney(totalBudget)}</div></div>
+                <div class="summary-card spent"><div class="label">Total Spent</div><div class="value">${formatMoney(totalSpent)}</div></div>
+                <div class="summary-card remaining"><div class="label">Total Remaining</div><div class="value">${formatMoney(totalRemaining)}</div></div>
+                <div class="summary-card usage"><div class="label">Overall Usage</div><div class="value">${overallUsagePercent}%</div></div>
+                <div class="summary-card records"><div class="label">Daily Records</div><div class="value">${totalDailyRecords}</div></div>
             </div>
-            
-            <!-- STATUS STATISTICS -->
             <div class="section-title">📊 Campaign Status</div>
             <div class="status-stats">
-                <div class="status-stat planned">
-                    <div class="count">${plannedCount}</div>
-                    <div class="label">Planned</div>
-                </div>
-                <div class="status-stat active">
-                    <div class="count">${activeCount}</div>
-                    <div class="label">Active</div>
-                </div>
-                <div class="status-stat completed">
-                    <div class="count">${completedCount}</div>
-                    <div class="label">Completed</div>
-                </div>
-                <div class="status-stat cancelled">
-                    <div class="count">${cancelledCount}</div>
-                    <div class="label">Cancelled</div>
-                </div>
+                <div class="status-stat planned"><div class="count">${plannedCount}</div><div class="label">Planned</div></div>
+                <div class="status-stat active"><div class="count">${activeCount}</div><div class="label">Active</div></div>
+                <div class="status-stat completed"><div class="count">${completedCount}</div><div class="label">Completed</div></div>
+                <div class="status-stat cancelled"><div class="count">${cancelledCount}</div><div class="label">Cancelled</div></div>
             </div>
-            
-            <!-- ALL CAMPAIGNS LIST (CARD FORMAT) -->
             <div class="section-title">📋 All Campaigns (${campaigns.length})</div>
-            <div class="campaigns-container">
-                ${campaignCards}
-            </div>
-            
-            <!-- FOOTER -->
-            <div class="footer">
-                GeoTraverse ERP System - Sales & Marketing Department | Official Campaigns Report<br>
-                This document is system generated and requires no signature
-            </div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
-                    🖨️ Save as PDF / Print
-                </button>
-                <button onclick="window.close();">
-                    ❌ Close
-                </button>
-            </div>
+            <div class="campaigns-container">${campaignCards}</div>
+            <div class="footer">GeoTraverse ERP System - Sales & Marketing Department | Official Campaigns Report<br>This document is system generated and requires no signature</div>
+            <div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button><button onclick="window.close();">❌ Close</button></div>
         </div>
     </body>
     </html>`);
-    
-    printWindow.document.close();
+
+    w.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
-
 function exportCampaignExcel(campaignId) { const c = campaigns.find(c => c.id === campaignId); if(c) { let ws = [["Campaign Name","Type","Budget","Spent","Remaining","Status","Start Date","End Date","Created By"]]; ws.push([c.campaign_name || '', c.campaign_type || '', c.budget || 0, c.spent || 0, (c.budget || 0) - (c.spent || 0), c.status || '', c.start_date || '', c.end_date || '', c.created_by || 'System']); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), "Campaign"); XLSX.writeFile(wb, `campaign_${c.id}.xlsx`); showToast("Exported to Excel"); } }
 
 // ==================== EXPORT CAMPAIGN PDF (IMPROVED) ====================
-// ==================== EXPORT CAMPAIGN PDF (NO VARIANCE COLUMN) - FIXED ====================
 function exportCampaignPDFNewWindow(campaignId) {
-    const c = campaigns.find(c => c.id === campaignId);
+    const c = campaigns.find(item => item.id === campaignId);
     if (!c) {
         showToast('Campaign not found', true);
         return;
     }
-    
-    // Get daily work records for this campaign
-    const campaignDailyWork = dailyworkData.filter(w => w.campaign_id == campaignId || w.project_id == campaignId || w.campaign_name === c.campaign_name);
-    
-    // Calculate totals from daily work
+
+    // ============ GET DAILY WORK FOR THIS CAMPAIGN ============
+    const campaignWork = dailyworkData.filter(function(w) {
+        if (w.campaign_id && parseInt(w.campaign_id) === parseInt(c.id)) {
+            return true;
+        }
+        if (w.campaign_name && w.campaign_name === c.campaign_name) {
+            return true;
+        }
+        if (w.project_id && parseInt(w.project_id) === parseInt(c.id)) {
+            return true;
+        }
+        return false;
+    });
+
+    // ============ CALCULATE TOTALS ============
     let totalBudget = 0, totalAmount = 0;
-    campaignDailyWork.forEach(w => {
+    for (let w of campaignWork) {
         totalBudget += parseFloat(w.budget) || 0;
         totalAmount += parseFloat(w.amount) || 0;
-    });
-    
+    }
+    let dailyRemaining = totalBudget - totalAmount;
+
+    // ============ CAMPAIGN DETAILS ============
     let spentPercent = (c.budget && c.budget > 0) ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
     let typeText = c.campaign_type === 'digital' ? 'Digital Ads' : 
                    c.campaign_type === 'social_media' ? 'Social Media' : 
@@ -1161,20 +975,18 @@ function exportCampaignPDFNewWindow(campaignId) {
     let statusText = c.status === 'planned' ? 'Planned' : 
                      c.status === 'active' ? 'Active' : 
                      c.status === 'completed' ? 'Completed' : 'Cancelled';
-    
     let statusColor = c.status === 'planned' ? '#3b82f6' : 
                       c.status === 'active' ? '#d97706' : 
                       c.status === 'completed' ? '#059669' : '#dc2626';
     let statusBg = c.status === 'planned' ? '#dbeafe' : 
                    c.status === 'active' ? '#fef3c7' : 
                    c.status === 'completed' ? '#d1fae5' : '#fee2e2';
-    
-    // Generate daily work table rows - 5 columns only
-    let dailyWorkRows = '';
-    if (campaignDailyWork.length > 0) {
-        // Sort by date (newest first)
-        const sortedWork = [...campaignDailyWork].sort((a, b) => new Date(b.date) - new Date(a.date));
-        
+    let campaignRemaining = (c.budget || 0) - (c.spent || 0);
+
+    // ============ BUILD DAILY WORK TABLE ROWS ============
+    let dailyRows = '';
+    if (campaignWork.length > 0) {
+        const sortedWork = [...campaignWork].sort((a, b) => new Date(b.date) - new Date(a.date));
         for (let w of sortedWork) {
             let budgetVal = parseFloat(w.budget) || 0;
             let amountVal = parseFloat(w.amount) || 0;
@@ -1184,410 +996,112 @@ function exportCampaignPDFNewWindow(campaignId) {
                                w.status === 'partial' ? '#d97706' : '#dc2626';
             let statusBgW = w.status === 'completed' ? '#d1fae5' : 
                             w.status === 'partial' ? '#fef3c7' : '#fee2e2';
-            
-            // Format date properly
             let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
             
-            dailyWorkRows += `
-                <tr>
-                    <td style="padding: 10px 12px; border: 1px solid #ea580c; white-space: nowrap;">${recordDate}</td>
-                    <td style="padding: 10px 12px; border: 1px solid #ea580c; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
-                    <td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: right; font-family: monospace;">${formatMoney(budgetVal)}</td>
-                    <td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: right; font-family: monospace;">${formatMoney(amountVal)}</td>
-                    <td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: center;">
-                        <span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 10px; background: ${statusBgW}; color: ${statusColorW};">${statusTextW}</span>
-                    </td>
-                </tr>`;
+            dailyRows += '<tr>' +
+                '<td style="padding: 10px 12px; border: 1px solid #ea580c; white-space: nowrap;">' + recordDate + '</td>' +
+                '<td style="padding: 10px 12px; border: 1px solid #ea580c; word-break: break-word;">' + escapeHtml(w.work_description || '-') + '</td>' +
+                '<td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: right; font-family: monospace;">' + formatMoney(budgetVal) + '</td>' +
+                '<td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: right; font-family: monospace;">' + formatMoney(amountVal) + '</td>' +
+                '<td style="padding: 10px 12px; border: 1px solid #ea580c; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 10px; background: ' + statusBgW + '; color: ' + statusColorW + ';">' + statusTextW + '</span></td>' +
+                '</tr>';
         }
     }
-    
-    // Calculate summary
-    let campaignRemaining = (c.budget || 0) - (c.spent || 0);
-    let campaignUsagePercent = (c.budget && c.budget > 0) ? ((c.spent / c.budget) * 100).toFixed(1) : 0;
-    let dailyRemaining = totalBudget - totalAmount;
-    
-    let printWindow = window.open('', '_blank');
-    if (!printWindow) {
+
+    // ============ CREATE PRINT WINDOW ============
+    let w = window.open('', '_blank');
+    if (!w) {
         showToast("Please allow popups", true);
         return;
     }
-    
-    printWindow.document.write(`<!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>${escapeHtml(c.campaign_name || 'Campaign')} - Campaign Report</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
-                background: #f0f2f5; 
-                padding: 30px; 
-            }
-            .report-container { 
-                max-width: 1200px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 16px; 
-                overflow: hidden; 
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                border: 2px solid #ea580c; 
-            }
-            .header { 
-                background: linear-gradient(135deg, #ea580c, #c2410c); 
-                color: white; 
-                padding: 25px; 
-                text-align: center; 
-            }
-            .header h1 { 
-                font-size: 24px; 
-                margin: 0 0 5px 0; 
-                font-weight: 700; 
-            }
-            .header p { 
-                font-size: 12px; 
-                opacity: 0.85; 
-                margin: 0; 
-            }
-            .info-bar { 
-                background: #f8fafc; 
-                padding: 12px 25px; 
-                display: flex; 
-                justify-content: space-between; 
-                font-size: 11px; 
-                border-bottom: 1px solid #e2e8f0; 
-                color: #1e293b; 
-                flex-wrap: wrap;
-                gap: 10px;
-            }
-            .section-title {
-                background: #ea580c;
-                color: white;
-                padding: 12px 25px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 0;
-            }
-            .campaign-details {
-                padding: 20px 25px;
-            }
-            .details-grid {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 16px;
-                margin-bottom: 20px;
-            }
-            .detail-card {
-                background: #f8fafc;
-                border-radius: 12px;
-                padding: 12px 16px;
-                border: 1px solid #e2e8f0;
-            }
-            .detail-card .label {
-                font-size: 10px;
-                font-weight: 600;
-                color: #64748b;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 6px;
-            }
-            .detail-card .value {
-                font-size: 14px;
-                font-weight: 700;
-            }
-            .detail-card .status-badge {
-                display: inline-block;
-                padding: 4px 12px;
-                border-radius: 20px;
-                font-size: 11px;
-                font-weight: 500;
-                background: ${statusBg};
-                color: ${statusColor};
-            }
-            .progress-bar-container {
-                background: #e2e8f0;
-                border-radius: 8px;
-                height: 8px;
-                margin-top: 8px;
-                overflow: hidden;
-            }
-            .progress-bar {
-                width: ${Math.min(campaignUsagePercent, 100)}%;
-                background: ${campaignUsagePercent < 50 ? '#10b981' : (campaignUsagePercent < 80 ? '#f59e0b' : '#ef4444')};
-                height: 100%;
-                border-radius: 8px;
-            }
-            .financial-summary {
-                display: flex;
-                gap: 15px;
-                padding: 15px 25px;
-                background: #f9fafb;
-                border-top: 1px solid #e2e8f0;
-                border-bottom: 1px solid #e2e8f0;
-                flex-wrap: wrap;
-            }
-            .summary-card {
-                flex: 1;
-                background: white;
-                border-radius: 10px;
-                padding: 12px;
-                text-align: center;
-                border: 1px solid #e2e8f0;
-                min-width: 130px;
-            }
-            .summary-card .label {
-                font-size: 10px;
-                font-weight: 600;
-                color: #64748b;
-                text-transform: uppercase;
-                margin-bottom: 6px;
-            }
-            .summary-card .value {
-                font-size: 14px;
-                font-weight: 800;
-                font-family: monospace;
-            }
-            .summary-card.budget .value { color: #059669; }
-            .summary-card.spent .value { color: #ea580c; }
-            .summary-card.remaining .value { color: #3b82f6; }
-            .summary-card.usage .value { color: #8b5cf6; }
-            
-            .daily-table-container {
-                padding: 20px 25px;
-                overflow-x: auto;
-            }
-            .daily-table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 11px;
-                margin-top: 10px;
-            }
-            .daily-table th {
-                background: #ea580c;
-                color: white;
-                padding: 12px 10px;
-                font-weight: 700;
-                text-align: left;
-                border: 1px solid #c2410c;
-                font-size: 11px;
-            }
-            .daily-table td {
-                padding: 10px 10px;
-                border: 1px solid #e2e8f0;
-                vertical-align: middle;
-            }
-            .daily-table td:nth-child(3),
-            .daily-table td:nth-child(4) {
-                text-align: right;
-                font-family: monospace;
-                white-space: nowrap;
-            }
-            .daily-table td:nth-child(5) {
-                text-align: center;
-            }
-            .daily-summary {
-                display: flex;
-                gap: 15px;
-                padding: 15px 25px;
-                background: #f0fdf4;
-                flex-wrap: wrap;
-            }
-            .daily-summary-card {
-                flex: 1;
-                background: white;
-                border-radius: 10px;
-                padding: 12px;
-                text-align: center;
-                border: 1px solid #d1fae5;
-                min-width: 120px;
-            }
-            .daily-summary-card .label {
-                font-size: 10px;
-                font-weight: 600;
-                color: #64748b;
-                text-transform: uppercase;
-                margin-bottom: 6px;
-            }
-            .daily-summary-card .value {
-                font-size: 14px;
-                font-weight: 800;
-                font-family: monospace;
-            }
-            .footer { 
-                text-align: center; 
-                font-size: 9px; 
-                color: #64748b; 
-                padding: 15px; 
-                border-top: 1px solid #e2e8f0; 
-                background: #f8fafc; 
-            }
-            .print-btn { 
-                text-align: center; 
-                padding: 15px; 
-                background: #f8fafc; 
-                border-top: 1px solid #e2e8f0; 
-            }
-            .print-btn button { 
-                background: #ea580c; 
-                color: white; 
-                border: none; 
-                padding: 10px 28px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-size: 13px; 
-                font-weight: 600; 
-                margin: 0 5px;
-            }
-            .print-btn button:hover {
-                background: #c2410c;
-            }
-            @media print { 
-                .print-btn { display: none; } 
-                body { background: white; padding: 0; } 
-                .report-container { box-shadow: none; border: 1px solid #ea580c; } 
-                .header { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .section-title { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .daily-table th { background: #ea580c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="report-container">
-            <!-- HEADER -->
-            <div class="header">
-                <h1>📢 ${escapeHtml(c.campaign_name || 'Campaign Report')}</h1>
-                <p>Marketing Campaign Report - Generated on ${new Date().toLocaleString()}</p>
-            </div>
-            
-            <!-- INFO BAR -->
-            <div class="info-bar">
-                <span><strong>Campaign ID:</strong> #${c.id}</span>
-                <span><strong>Department:</strong> Sales & Marketing</span>
-                <span><strong>Report Type:</strong> Full Campaign Report</span>
-                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
-            </div>
-            
-            <!-- CAMPAIGN DETAILS SECTION -->
-            <div class="section-title">📋 Campaign Details</div>
-            <div class="campaign-details">
-                <div class="details-grid">
-                    <div class="detail-card">
-                        <div class="label">📌 Campaign Name</div>
-                        <div class="value"><strong>${escapeHtml(c.campaign_name || '-')}</strong></div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="label">🏷️ Campaign Type</div>
-                        <div class="value">${typeText}</div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="label">📊 Status</div>
-                        <div class="value"><span class="status-badge">${statusText}</span></div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="label">🎯 Target Audience</div>
-                        <div class="value">${escapeHtml(c.target_audience || 'Not specified')}</div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="label">📅 Start Date</div>
-                        <div class="value">${c.start_date || 'Not specified'}</div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="label">📅 End Date</div>
-                        <div class="value">${c.end_date || 'Not specified'}</div>
-                    </div>
-                    <div class="detail-card" style="grid-column: span 2;">
-                        <div class="label">📝 Description</div>
-                        <div class="value" style="font-family: inherit;">${escapeHtml(c.description || 'No description')}</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- FINANCIAL SUMMARY SECTION -->
-            <div class="section-title">💰 Financial Summary</div>
-            <div class="financial-summary">
-                <div class="summary-card budget">
-                    <div class="label">Total Budget</div>
-                    <div class="value">${formatMoney(c.budget || 0)}</div>
-                </div>
-                <div class="summary-card spent">
-                    <div class="label">Amount Spent</div>
-                    <div class="value">${formatMoney(c.spent || 0)}</div>
-                </div>
-                <div class="summary-card remaining">
-                    <div class="label">Remaining Budget</div>
-                    <div class="value">${formatMoney(campaignRemaining)}</div>
-                </div>
-                <div class="summary-card usage">
-                    <div class="label">Usage Percentage</div>
-                    <div class="value">${campaignUsagePercent}%</div>
-                </div>
-            </div>
-            <div style="padding: 0 25px 20px 25px;">
-                <div class="progress-bar-container"><div class="progress-bar"></div></div>
-                <div style="font-size: 10px; color: #64748b; margin-top: 5px; text-align: right;">${campaignUsagePercent}% of budget used</div>
-            </div>
-            
-            <!-- CREATION INFO -->
-            <div style="padding: 10px 25px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 10px; color: #64748b;">
-                <i class="fas fa-user-plus"></i> Created by: ${escapeHtml(c.created_by || 'System')} on ${formatDateTime(c.created_at)}
-                ${c.updated_by ? `<br><i class="fas fa-edit"></i> Updated by: ${escapeHtml(c.updated_by)} on ${formatDateTime(c.updated_at)}` : ''}
-            </div>
-            
-            <!-- DAILY WORK SECTION -->
-            <div class="section-title">📅 Daily Work Records</div>
-            
-            ${campaignDailyWork.length > 0 ? `
-            <div class="daily-summary">
-                <div class="daily-summary-card">
-                    <div class="label">💰 Total Budget</div>
-                    <div class="value">${formatMoney(totalBudget)}</div>
-                </div>
-                <div class="daily-summary-card">
-                    <div class="label">💸 Total Spent</div>
-                    <div class="value">${formatMoney(totalAmount)}</div>
-                </div>
-                <div class="daily-summary-card">
-                    <div class="label">📊 Remaining</div>
-                    <div class="value">${formatMoney(dailyRemaining)}</div>
-                </div>
-            </div>
-            ` : ''}
-            
-            <div class="daily-table-container">
-                <table class="daily-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 18%;">Date/Time</th>
-                            <th style="width: 32%;">Description</th>
-                            <th style="width: 15%;" class="text-right">Budget (TZS)</th>
-                            <th style="width: 15%;" class="text-right">Amount (TZS)</th>
-                            <th style="width: 20%;">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${campaignDailyWork.length > 0 ? dailyWorkRows : `<tr><td colspan="5" style="padding: 40px; text-align: center; color: #94a3b8;">No daily work records found for this campaign</td</tr`}
-                    </tbody>
-                </table>
-            </div>
-            
-            <!-- FOOTER -->
-            <div class="footer">
-                GeoTraverse ERP System - Sales & Marketing Department | Official Campaign Report<br>
-                This document is system generated and requires no signature
-            </div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
-                    🖨️ Save as PDF / Print
-                </button>
-                <button onclick="window.close();">
-                    ❌ Close
-                </button>
-            </div>
-        </div>
-    </body>
-    </html>`);
-    
-    printWindow.document.close();
+
+    w.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>' + escapeHtml(c.campaign_name || 'Campaign') + ' - Campaign Report</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #ea580c; }\n' +
+            '.header { background: linear-gradient(135deg, #ea580c, #c2410c); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0 0 5px 0; font-weight: 700; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin: 0; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 11px; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; gap: 10px; }\n' +
+            '.section-title { background: #ea580c; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin-top: 0; }\n' +
+            '.details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; padding: 20px 25px; }\n' +
+            '.detail-card { background: #f8fafc; border-radius: 12px; padding: 12px 16px; border: 1px solid #e2e8f0; }\n' +
+            '.detail-card .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }\n' +
+            '.detail-card .value { font-size: 14px; font-weight: 700; }\n' +
+            '.status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: ' + statusBg + '; color: ' + statusColor + '; }\n' +
+            '.progress-bar-container { background: #e2e8f0; border-radius: 8px; height: 8px; margin-top: 8px; overflow: hidden; }\n' +
+            '.progress-bar { width: ' + Math.min(spentPercent, 100) + '%; background: ' + (spentPercent < 50 ? '#10b981' : (spentPercent < 80 ? '#f59e0b' : '#ef4444')) + '; height: 100%; border-radius: 8px; }\n' +
+            '.financial-summary { display: flex; gap: 15px; padding: 15px 25px; background: #f9fafb; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }\n' +
+            '.summary-card { flex: 1; background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e2e8f0; min-width: 130px; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 6px; }\n' +
+            '.summary-card .value { font-size: 14px; font-weight: 800; font-family: monospace; }\n' +
+            '.summary-card.budget .value { color: #059669; }\n' +
+            '.summary-card.spent .value { color: #ea580c; }\n' +
+            '.summary-card.remaining .value { color: #3b82f6; }\n' +
+            '.summary-card.usage .value { color: #8b5cf6; }\n' +
+            '.daily-table-container { padding: 20px 25px; overflow-x: auto; }\n' +
+            '.daily-table { width: 100%; border-collapse: collapse; font-size: 11px; }\n' +
+            '.daily-table th { background: #ea580c; color: white; padding: 12px 10px; font-weight: 700; text-align: left; border: 1px solid #c2410c; font-size: 11px; }\n' +
+            '.daily-table td { padding: 10px 10px; border: 1px solid #e2e8f0; vertical-align: middle; }\n' +
+            '.daily-table td:nth-child(3), .daily-table td:nth-child(4) { text-align: right; font-family: monospace; white-space: nowrap; }\n' +
+            '.daily-table td:nth-child(5) { text-align: center; }\n' +
+            '.daily-summary { display: flex; gap: 15px; padding: 15px 25px; background: #f0fdf4; flex-wrap: wrap; }\n' +
+            '.daily-summary-card { flex: 1; background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #d1fae5; min-width: 120px; }\n' +
+            '.daily-summary-card .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 6px; }\n' +
+            '.daily-summary-card .value { font-size: 14px; font-weight: 800; font-family: monospace; }\n' +
+            '.footer { text-align: center; font-size: 9px; color: #64748b; padding: 15px; border-top: 1px solid #e2e8f0; background: #f8fafc; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f8fafc; border-top: 1px solid #e2e8f0; }\n' +
+            '.print-btn button { background: #ea580c; color: white; border: none; padding: 10px 28px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 5px; }\n' +
+            '.print-btn button:hover { background: #c2410c; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { box-shadow: none; border: 1px solid #ea580c; } .header { background: #ea580c !important; -webkit-print-color-adjust: exact; } .section-title { background: #ea580c !important; -webkit-print-color-adjust: exact; } .daily-table th { background: #ea580c !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>📢 ' + escapeHtml(c.campaign_name || 'Campaign Report') + '</h1>\n' +
+                '<p>Marketing Campaign Report - Generated on ' + new Date().toLocaleString() + '</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Campaign ID:</strong> #' + c.id + '</span>\n' +
+                '<span><strong>Department:</strong> Sales & Marketing</span>\n' +
+                '<span><strong>Report Type:</strong> Full Campaign Report</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+            '</div>\n' +
+            '<div class="section-title">📋 Campaign Details</div>\n' +
+            '<div class="details-grid">\n' +
+                '<div class="detail-card"><div class="label">📌 Campaign Name</div><div class="value"><strong>' + escapeHtml(c.campaign_name || '-') + '</strong></div></div>\n' +
+                '<div class="detail-card"><div class="label">🏷️ Campaign Type</div><div class="value">' + typeText + '</div></div>\n' +
+                '<div class="detail-card"><div class="label">📊 Status</div><div class="value"><span class="status-badge">' + statusText + '</span></div></div>\n' +
+                '<div class="detail-card"><div class="label">🎯 Target Audience</div><div class="value">' + escapeHtml(c.target_audience || 'Not specified') + '</div></div>\n' +
+                '<div class="detail-card"><div class="label">📅 Start Date</div><div class="value">' + (c.start_date || 'Not specified') + '</div></div>\n' +
+                '<div class="detail-card"><div class="label">📅 End Date</div><div class="value">' + (c.end_date || 'Not specified') + '</div></div>\n' +
+                '<div class="detail-card" style="grid-column: span 2;"><div class="label">📝 Description</div><div class="value" style="font-family: inherit;">' + escapeHtml(c.description || 'No description') + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="section-title">💰 Financial Summary</div>\n' +
+            '<div class="financial-summary">\n' +
+                '<div class="summary-card budget"><div class="label">Total Budget</div><div class="value">' + formatMoney(c.budget || 0) + '</div></div>\n' +
+                '<div class="summary-card spent"><div class="label">Amount Spent</div><div class="value">' + formatMoney(c.spent || 0) + '</div></div>\n' +
+                '<div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value">' + formatMoney(campaignRemaining) + '</div></div>\n' +
+                '<div class="summary-card usage"><div class="label">Usage Percentage</div><div class="value">' + spentPercent + '%</div></div>\n' +
+            '</div>\n' +
+            '<div style="padding: 0 25px 20px 25px;"><div class="progress-bar-container"><div class="progress-bar"></div></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; text-align: right;">' + spentPercent + '% of budget used</div></div>\n' +
+            '<div style="padding: 10px 25px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 10px; color: #64748b;"><i class="fas fa-user-plus"></i> Created by: ' + escapeHtml(c.created_by || 'System') + ' on ' + formatDateTime(c.created_at) + (c.updated_by ? '<br><i class="fas fa-edit"></i> Updated by: ' + escapeHtml(c.updated_by) + ' on ' + formatDateTime(c.updated_at) : '') + '</div>\n' +
+            '<div class="section-title">📅 Daily Work Records</div>\n' +
+            (campaignWork.length > 0 ? '<div class="daily-summary"><div class="daily-summary-card"><div class="label">💰 Total Budget</div><div class="value">' + formatMoney(totalBudget) + '</div></div><div class="daily-summary-card"><div class="label">💸 Total Spent</div><div class="value">' + formatMoney(totalAmount) + '</div></div><div class="daily-summary-card"><div class="label">📊 Remaining</div><div class="value">' + formatMoney(dailyRemaining) + '</div></div></div>' : '') +
+            '<div class="daily-table-container"><table class="daily-table"><thead><tr><th style="width: 18%;">Date/Time</th><th style="width: 32%;">Description</th><th style="width: 15%;" class="text-right">Budget (TZS)</th><th style="width: 15%;" class="text-right">Amount (TZS)</th><th style="width: 20%;">Status</th></tr></thead><tbody>' + (campaignWork.length > 0 ? dailyRows : '<tr><td colspan="5" style="padding: 40px; text-align: center; color: #94a3b8;">No daily work records found</td</tr>') + '</tbody></table></div>\n' +
+            '<div class="footer">GeoTraverse ERP System - Sales & Marketing Department | Official Campaign Report<br>This document is system generated and requires no signature</div>\n' +
+            '<div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button><button onclick="window.close();">❌ Close</button></div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+
+    w.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
 // ==================== CAMPAIGN DOCUMENTS ====================
@@ -2703,8 +2217,116 @@ async function sendReportToDept(reportId, deptId) {
     closeModal('viewReportModal');
 }
 function exportSingleReportExcel(id) { const r = reportsList.find(r=>r.id===id); if(r) { let ws=[['Title','Period','Content','Created','Status','Created By']]; ws.push([r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System']); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ws),'Report'); XLSX.writeFile(wb,`report_${r.id}.xlsx`); showToast('Exported'); } }
-function exportSingleReportPDF(id) { const r = reportsList.find(r=>r.id===id); if(r) { let w = window.open('', '_blank'); w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(r.title)}</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;}.print-btn{text-align:center;margin-top:20px;}</style></head><body><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDateTime(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><div style="border:1px solid #ddd;padding:15px;margin-top:15px;">${escapeHtml(r.content||'No content')}</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); w.document.close(); showToast("PDF preview opened"); } }
 
+function exportSingleReportPDF(id) {
+    const r = reportsList.find(item => item.id === id);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+
+    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+    let content = r.content || 'No content available';
+    let wordCount = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+    let charCount = content.length;
+    let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
+    let updatedDate = r.updated_at ? new Date(r.updated_at).toLocaleString() : null;
+    let createdBy = r.created_by || 'System';
+    let updatedBy = r.updated_by || null;
+
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups", true);
+        return;
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${escapeHtml(r.title)} - Report</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #ea580c; }
+            .header { background: linear-gradient(135deg, #ea580c, #c2410c); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; font-weight: 700; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #fef3c7; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
+            .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; background: ${statusBg}; color: ${statusColor}; }
+            .section-title { background: #ea580c; color: white; padding: 12px 25px; font-size: 14px; font-weight: 700; margin: 20px 0 0 0; }
+            .details-vertical { padding: 20px 25px; }
+            .details-vertical table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .details-vertical tr { border-bottom: 1px solid #e5e7eb; }
+            .details-vertical td:first-child { width: 35%; padding: 12px 16px; background: #fef3c7; font-weight: 600; color: #c2410c; border-right: 1px solid #e5e7eb; }
+            .details-vertical td:last-child { padding: 12px 16px; color: #1e293b; font-weight: 500; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px 25px; background: #fef3c7; border-bottom: 1px solid #e5e7eb; }
+            .stat-item { text-align: center; }
+            .stat-item .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .stat-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; color: #ea580c; }
+            .content-section { padding: 20px 25px; }
+            .content-box { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 200px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #1e293b; max-height: none; overflow-y: visible; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; margin-top: 20px; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #ea580c; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 5px; }
+            .print-btn button:hover { background: #c2410c; }
+            .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+            .print-btn button.close-btn:hover { background: #4b5563; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { border: none; } .header { background: #ea580c !important; -webkit-print-color-adjust: exact; } .content-box { max-height: none; overflow-y: visible; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📄 ${escapeHtml(r.title)}</h1>
+                <p>Official Report - Generated: ${new Date().toLocaleString()}</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Report ID:</strong> #${r.id}</span>
+                <span><strong>Status:</strong> <span class="status-badge">${statusText}</span></span>
+                <span><strong>Period:</strong> ${escapeHtml(r.period || 'Not specified')}</span>
+                <span><strong>Department:</strong> Sales & Marketing</span>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-item"><div class="label">📝 Characters</div><div class="value">${charCount.toLocaleString()}</div></div>
+                <div class="stat-item"><div class="label">📊 Words</div><div class="value">${wordCount.toLocaleString()}</div></div>
+                <div class="stat-item"><div class="label">📅 Created</div><div class="value" style="font-size: 12px;">${createdDate}</div></div>
+                <div class="stat-item"><div class="label">👤 By</div><div class="value" style="font-size: 12px;">${escapeHtml(createdBy)}</div></div>
+            </div>
+            <div class="section-title"><i class="fas fa-info-circle"></i> Report Details</div>
+            <div class="details-vertical">
+                <table>
+                    <tr><td>📌 Title:</td><td><strong>${escapeHtml(r.title)}</strong></td></tr>
+                    <tr><td>📊 Status:</td><td><span class="status-badge">${statusText}</span></td></tr>
+                    <tr><td>📆 Period:</td><td>${escapeHtml(r.period || 'Not specified')}</td></tr>
+                    <tr><td>📅 Created At:</td><td>${createdDate}</td></tr>
+                    <tr><td>👤 Created By:</td><td>${escapeHtml(createdBy)}</td></tr>
+                    ${updatedDate && updatedBy ? `<tr><td>✏️ Updated At:</td><td>${updatedDate}</td></tr><tr><td>✏️ Updated By:</td><td>${escapeHtml(updatedBy)}</td></tr>` : ''}
+                    <tr><td>📝 Word Count:</td><td>${wordCount.toLocaleString()} words</td></tr>
+                    <tr><td>📝 Character Count:</td><td>${charCount.toLocaleString()} characters</td></tr>
+                </table>
+            </div>
+            <div class="section-title"><i class="fas fa-file-alt"></i> Report Content</div>
+            <div class="content-section">
+                <div class="content-box">${escapeHtml(content)}</div>
+            </div>
+            <div class="footer">
+                GeoTraverse ERP System - Sales & Marketing Department | Official Report Document<br>
+                This document is system generated and requires no signature
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button>
+                <button class="close-btn" onclick="window.close();">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+
+    printWindow.document.close();
+    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function exportAllCampaignDocumentsToExcel() {
     let ws = [['Title','File Name','Description','Uploaded By','Uploaded At','File Size']];
     campaignDocuments.forEach(d => { let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; ws.push([d.title, d.file_name, d.description || '-', d.uploaded_by, d.created_at, fileSize]); });
@@ -2721,9 +2343,170 @@ function exportAllReportsToExcel() {
     uploadedReports.forEach(r => ws.push([r.title, r.period, `[Uploaded Document] ${r.file_name}`, r.created_at, 'Uploaded', r.created_by||'System']));
     let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports'); XLSX.writeFile(wb, `all_reports.xlsx`); showToast('Exported');
 }
+
 function exportAllReportsToPDF() {
-    let rows = reportsList.map(r => `<div style="margin-bottom:20px;border-bottom:1px solid #ea580c;"><h3 style="color:#ea580c;">${escapeHtml(r.title)}</h3><p>${r.period} | ${formatDate(r.created_at)}</p><div style="background:#f5f5f5;padding:10px;border-radius:5px;">${escapeHtml(r.content)}</div><p>Created by: ${escapeHtml(r.created_by||'System')}</p></div>`).join('');
-    let win = window.open('', '_blank'); win.document.write(`<!DOCTYPE html><html><head><title>All Reports</title><style>body{font-family:Arial;padding:20px;border:2px solid #ea580c;}h1{color:#ea580c;text-align:center;}.print-btn{text-align:center;margin-top:20px;}</style></head><body><h1>All Reports</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); win.document.close(); showToast("PDF preview opened");
+    if (reportsList.length === 0) {
+        showToast('No reports to export', true);
+        return;
+    }
+
+    // ============ CALCULATE STATISTICS ============
+    let totalReports = reportsList.length;
+    let sentCount = 0, draftCount = 0;
+    let totalChars = 0;
+    let periodCounts = {};
+
+    for (let r of reportsList) {
+        if (r.status === 'sent') sentCount++;
+        else if (r.status === 'draft') draftCount++;
+        if (r.content) totalChars += r.content.length;
+        let period = r.period || 'unknown';
+        periodCounts[period] = (periodCounts[period] || 0) + 1;
+    }
+
+    // ============ BUILD PERIOD SUMMARY ============
+    let periodRows = '';
+    let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+    for (let period of periodOrder) {
+        let count = periodCounts[period] || 0;
+        if (count > 0) {
+            let percentage = ((count / totalReports) * 100).toFixed(1);
+            periodRows += `<tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 10px 12px; text-transform: capitalize;">${escapeHtml(period)}</td>
+                <td style="padding: 10px 12px; text-align: center; font-weight: 600;">${count}</td>
+                <td style="padding: 10px 12px; text-align: center; font-weight: 600; color: #ea580c;">${percentage}%</td>
+            </tr>`;
+        }
+    }
+
+    // ============ BUILD REPORT ROWS - FULL CONTENT ============
+    let rows = '';
+    let reportNumber = 1;
+    for (let r of reportsList) {
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+        let content = r.content || 'No content available';
+        let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
+        let createdBy = r.created_by || 'System';
+        let charCount = content.length;
+        let wordCount = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+
+        rows += `
+            <div style="margin-bottom: 30px; border: 2px solid #ea580c; border-radius: 12px; overflow: hidden; page-break-inside: avoid; background: white;">
+                <div style="background: linear-gradient(135deg, #ea580c, #c2410c); color: white; padding: 15px 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <h3 style="margin: 0; font-size: 17px; font-weight: 700;">#${reportNumber} ${escapeHtml(r.title)}</h3>
+                            <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Report ID: #${r.id} | Period: ${escapeHtml(r.period || 'Not specified')}</p>
+                        </div>
+                        <span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ${statusBg}; color: ${statusColor};">${statusText}</span>
+                    </div>
+                </div>
+                <div style="padding: 12px 20px; background: #fef3c7; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">
+                    <span><strong>📅 Created:</strong> ${createdDate} by ${escapeHtml(createdBy)}</span>
+                    <span><strong>📊 Status:</strong> ${statusText}</span>
+                    <span><strong>📋 Period:</strong> ${escapeHtml(r.period || 'Not specified')}</span>
+                    <span><strong>📝 Characters:</strong> ${charCount.toLocaleString()}</span>
+                    <span><strong>📊 Words:</strong> ${wordCount.toLocaleString()}</span>
+                </div>
+                <div style="padding: 18px 20px; background: white; font-size: 13px; line-height: 1.7; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; max-height: none; overflow-y: visible;">
+                    ${escapeHtml(content)}
+                </div>
+            </div>`;
+        reportNumber++;
+    }
+
+    // ============ CREATE PRINT WINDOW ============
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups", true);
+        return;
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>All Reports - Sales & Marketing Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #ea580c; }
+            .header { background: linear-gradient(135deg, #ea580c, #c2410c); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; font-weight: 700; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #fef3c7; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; padding: 20px 25px; background: #fef3c7; border-bottom: 1px solid #e5e7eb; }
+            .summary-card { background: white; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #e2e8f0; }
+            .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-card .value { font-size: 18px; font-weight: 800; margin-top: 5px; }
+            .summary-card.total .value { color: #ea580c; }
+            .summary-card.sent .value { color: #059669; }
+            .summary-card.draft .value { color: #d97706; }
+            .summary-card.chars .value { color: #3b82f6; font-size: 14px; }
+            .summary-card.words .value { color: #8b5cf6; font-size: 14px; }
+            .period-summary { margin: 0 25px 25px 25px; background: #fef3c7; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }
+            .period-summary h4 { background: #ea580c; color: white; padding: 12px 18px; font-size: 14px; font-weight: 700; margin: 0; }
+            .period-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .period-table th { background: #fef3c7; padding: 10px 16px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #475569; }
+            .period-table td { padding: 10px 16px; border-bottom: 1px solid #e2e8f0; color: #334155; }
+            .period-table tr:last-child td { border-bottom: none; }
+            .reports-section { padding: 0 25px 25px 25px; }
+            .reports-title { margin: 25px 0 18px 0; font-size: 16px; font-weight: 700; color: #ea580c; border-bottom: 3px solid #ea580c; padding-bottom: 10px; display: inline-block; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #ea580c; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 5px; }
+            .print-btn button:hover { background: #c2410c; }
+            .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+            .print-btn button.close-btn:hover { background: #4b5563; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #ea580c !important; -webkit-print-color-adjust: exact; } .period-summary h4 { background: #ea580c !important; -webkit-print-color-adjust: exact; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 All Reports Report</h1>
+                <p>Sales & Marketing Department - Complete Reports Overview</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                <span><strong>Total Reports:</strong> ${totalReports}</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+            <div class="summary-cards">
+                <div class="summary-card total"><div class="label">📋 Total Reports</div><div class="value">${totalReports}</div></div>
+                <div class="summary-card sent"><div class="label">✅ Sent Reports</div><div class="value">${sentCount}</div></div>
+                <div class="summary-card draft"><div class="label">✏️ Draft Reports</div><div class="value">${draftCount}</div></div>
+                <div class="summary-card chars"><div class="label">📝 Total Characters</div><div class="value">${totalChars.toLocaleString()}</div></div>
+                <div class="summary-card words"><div class="label">📊 Total Words</div><div class="value">${Math.round(totalChars / 5).toLocaleString()}</div></div>
+            </div>
+            <div class="period-summary">
+                <h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>
+                <table class="period-table">
+                    <thead><tr><th style="width: 40%;">Period Type</th><th style="width: 30%; text-align: center;">Count</th><th style="width: 30%; text-align: center;">Percentage</th></tr></thead>
+                    <tbody>${periodRows}</tbody>
+                </table>
+            </div>
+            <div class="reports-section">
+                <div class="reports-title">📄 Reports List (${totalReports} reports)</div>
+                ${rows}
+            </div>
+            <div class="footer">
+                GeoTraverse ERP System - Sales & Marketing Department | Official All Reports Report<br>
+                This document is system generated and requires no signature
+            </div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button>
+                <button class="close-btn" onclick="window.close();">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+
+    printWindow.document.close();
+    showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
 }
 function exportAllUploadedReportsToExcel() {
     let ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']];

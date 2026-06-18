@@ -4,7 +4,6 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
-// Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
@@ -38,7 +37,7 @@ if (!in_array($status, $valid_statuses)) {
     exit;
 }
 
-// Get current request data
+// Check if request exists
 $stmt = $conn->prepare("SELECT * FROM fund_requests WHERE id = ?");
 $stmt->bind_param("i", $request_id);
 $stmt->execute();
@@ -57,7 +56,7 @@ $stmt->bind_param("ssi", $status, $reviewed_by, $request_id);
 
 if ($stmt->execute()) {
     echo json_encode([
-        'success' => true, 
+        'success' => true,
         'message' => 'Request status updated successfully',
         'data' => [
             'id' => $request_id,

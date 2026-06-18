@@ -11,7 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <style>
         * { font-family: 'Inter', sans-serif; }
@@ -2114,6 +2113,227 @@ async function exportProjectToPDF(projectId) {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
+async function exportAllProjectsToPDF() {
+    if (projectsData.length === 0) {
+        showToast('No projects to export', true);
+        return;
+    }
+
+    // Hakikisha dailywork data imeload
+    if (dailyworkData.length === 0) {
+        await fetchDailyWork();
+    }
+
+    // Calculate totals
+    let totalAmount = 0;
+    let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
+    let projectsWithDaily = [];
+
+    for (let p of projectsData) {
+        totalAmount += parseFloat(p.amount) || 0;
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+
+        const projectWork = dailyworkData.filter(function(w) {
+            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
+            if (w.project_name && w.project_name === p.name) return true;
+            return false;
+        });
+
+        projectsWithDaily.push({ project: p, dailyWork: projectWork });
+        totalDailyRecords += projectWork.length;
+        
+        for (let w of projectWork) {
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            totalExpensesAll += (expensesValue + amountSpent);
+        }
+    }
+    let totalRemainingAll = totalBudgetAll - totalExpensesAll;
+
+    // Build each project card
+    let rows = '';
+    for (let item of projectsWithDaily) {
+        let p = item.project;
+        let projectWork = item.dailyWork;
+        
+        let imageUrl = getFullImageUrl(p.image);
+        let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i));
+        let statusClass = getProjectStatusClass(p.status);
+        let statusText = getProjectStatusText(p.status);
+
+        let projBudget = 0, projExpenses = 0;
+        for (let w of projectWork) {
+            projBudget += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            projExpenses += (expensesValue + amountSpent);
+        }
+        let projRemaining = projBudget - projExpenses;
+        let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+
+        // Build daily work table rows
+        let dailyRows = '';
+        if (projectWork.length > 0) {
+            for (let w of projectWork) {
+                let budget = parseFloat(w.budget) || 0;
+                let expensesValue = parseFloat(w.expenses) || 0;
+                let amountSpent = parseFloat(w.amount) || 0;
+                let totalExpenseForRecord = expensesValue + amountSpent;
+                
+                let statusBg = w.status === 'completed' ? '#d1fae5' : 
+                              w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+                let statusColor = w.status === 'completed' ? '#059669' : 
+                                 w.status === 'partial' ? '#d97706' : '#dc2626';
+                let statusTextDW = w.status === 'completed' ? 'Completed' : 
+                                  w.status === 'partial' ? 'Partial' : 'Pending';
+                let description = (w.work_description || '-').replace(/\n/g, '<br>');
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                
+                dailyRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; white-space: nowrap;">' + recordDate + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word;">' + escapeHtml(description) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; white-space: nowrap;">' + formatCurrency(budget) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; white-space: nowrap;">' + formatCurrency(totalExpenseForRecord) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusTextDW + '</span></td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;">' + escapeHtml(w.created_by || 'System') + '</td>' +
+                    '</tr>';
+            }
+        } else {
+            dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records found</td></tr>';
+        }
+
+        // Build project card
+        rows += '<div style="margin-bottom: 40px; border: 2px solid #0d9488; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            '<div style="background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 15px 20px;">' +
+            '<h3 style="margin: 0; font-size: 18px; font-weight: 700;">' + escapeHtml(p.name) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #' + p.id + ' | Client: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + ' | Total Records: ' + projectWork.length + '</p>' +
+            '</div>' +
+            '<div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">' +
+            (imageUrl && isImage ? '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\'>No Image</div>\'">' : '<div style="color:#999;padding:10px;">No Image Available</div>') +
+            '</div>' +
+            '<div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">' +
+            '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #0d9488;">📌 Amount:</td><td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">' + formatCurrency(p.amount) + '</span></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📊 Status:</td><td style="padding: 8px 12px;"><span class="status-badge ' + statusClass + '">' + statusText + '</span></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📈 Progress:</td><td style="padding: 8px 12px;">' + (p.progress || 0) + '%<div style="background:#e2e8f0; border-radius:10px; margin-top:6px; height:6px; max-width:200px;"><div style="width:' + (p.progress||0) + '%; background:#0d9488; border-radius:10px; height:6px;"></div></div></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📍 Location:</td><td style="padding: 8px 12px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📅 Start Date:</td><td style="padding: 8px 12px;">' + (p.start_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📅 End Date:</td><td style="padding: 8px 12px;">' + (p.end_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📝 Description:</td><td style="padding: 8px 12px;">' + escapeHtml(p.description || 'No description') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">👤 Created By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>' +
+            (p.updated_by ? '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">✏️ Updated By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>' : '') +
+            '</table></div>' +
+            '<div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #0d9488;">' +
+            '<h4 style="margin: 0 0 12px 0; font-size: 14px; color: #0d9488;"><i class="fas fa-calendar-day"></i> Daily Work Records (' + projectWork.length + ')</h4>' +
+            (projectWork.length > 0 ? 
+            '<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;"><div style="font-size: 10px; color: #166534;">💰 Total Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669;">' + formatCurrency(projBudget) + '</div></div>' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;"><div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c;">' + formatCurrency(projExpenses) + '</div></div>' +
+            '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;"><div style="font-size: 10px; color: #1e40af;">📊 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ' + projRemainingColor + ';">' + formatCurrency(projRemaining) + '</div></div>' +
+            '</div>' : '') +
+            '<div style="overflow-x: auto;">' +
+            '<table style="width: 100%; border-collapse: collapse; font-size: 11px;">' +
+            '<thead><tr style="background: #0d9488; color: white;">' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 16%;">Date/Time</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 30%;">Description</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: right;">Budget (TZS)</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: right;">Expenses (TZS)</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: center;">Status</th>' +
+            '<th style="padding: 10px 8px; border: 1px solid #0f766e; width: 18%; text-align: center;">Created By</th>' +
+            '</tr></thead><tbody>' +
+            dailyRows +
+            (projectWork.length > 0 ? 
+            '<tfoot><tr style="background: #fef3c7; font-weight: bold;">' +
+            '<td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>' +
+            '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>' + formatCurrency(projBudget) + '</strong></td>' +
+            '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>' + formatCurrency(projExpenses) + '</strong></td>' +
+            '<td colspan="2" style="border: 1px solid #cbd5e1;"></td></tr></tfoot>' : '') +
+            '</tbody></table></div></div></div>';
+    }
+
+    // Create print window
+    let w = window.open('', '_blank');
+    if (!w) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+
+    w.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Projects Report - Survey Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }\n' +
+            '.header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }\n' +
+            '.summary-card.total .value { color: #0d9488; }\n' +
+            '.summary-card.amount .value { color: #059669; }\n' +
+            '.summary-card.budget .value { color: #3b82f6; }\n' +
+            '.summary-card.expenses .value { color: #dc2626; }\n' +
+            '.summary-card.records .value { color: #8b5cf6; }\n' +
+            '.summary-card.remaining .value { color: #f59e0b; }\n' +
+            '.projects-section { padding: 20px 25px; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button:hover { background: #0f766e; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>📊 All Projects Report</h1>\n' +
+                '<p>Survey Department - Complete Project Overview with Daily Work Records</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Projects:</strong> ' + projectsData.length + '</span>\n' +
+                '<span><strong>Total Daily Records:</strong> ' + totalDailyRecords + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">Total Projects</div><div class="value">' + projectsData.length + '</div></div>\n' +
+                '<div class="summary-card amount"><div class="label">Total Amount</div><div class="value">' + formatCurrency(totalAmount) + '</div></div>\n' +
+                '<div class="summary-card budget"><div class="label">Total Budget</div><div class="value">' + formatCurrency(totalBudgetAll) + '</div></div>\n' +
+                '<div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">' + formatCurrency(totalExpensesAll) + '</div></div>\n' +
+                '<div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value" style="color: ' + (totalRemainingAll >= 0 ? '#059669' : '#dc2626') + ';">' + formatCurrency(totalRemainingAll) + '</div></div>\n' +
+                '<div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">' + totalDailyRecords + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="projects-section">\n' +
+                rows +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button class="close-btn" onclick="window.close();">\n' +
+                    '❌ Close\n' +
+                '</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+
+    w.document.close();
+    showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function exportSingleProjectExcel(id) { 
     const p = projectsData.find(p=>p.id===id); 
     if(p) { 
@@ -2943,92 +3163,173 @@ function exportAllRequestsToExcel() {
 }
 
 function exportAllRequestsToPDF() {
-    if (requestsData.length === 0) { showToast('No requests to export', true); return; }
-    
+    if (requestsData.length === 0) {
+        showToast('No requests to export', true);
+        return;
+    }
+
+    // Calculate totals
     let totalIncome = 0, totalExpense = 0, totalAmount = 0;
     let pendingCount = 0, approvedCount = 0, cancelledCount = 0;
-    
+    let incomeCount = 0, expenseCount = 0;
+
     for (let r of requestsData) {
         let amount = parseFloat(r.amount) || 0;
         totalAmount += amount;
-        if (r.type === 'income') totalIncome += amount;
-        else totalExpense += amount;
+        if (r.type === 'income') {
+            totalIncome += amount;
+            incomeCount++;
+        } else {
+            totalExpense += amount;
+            expenseCount++;
+        }
         if (r.status === 'pending') pendingCount++;
         else if (r.status === 'approved') approvedCount++;
         else cancelledCount++;
     }
     let netProfit = totalIncome - totalExpense;
-    
-    let tableRows = '';
-    for (let r of requestsData) {
-        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        let typeText = r.type === 'income' ? 'Income' : 'Expense';
-        let amount = parseFloat(r.amount) || 0;
-        let description = r.description || '-';
-        
-        tableRows += `
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${formatDate(r.transaction_date)}</td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;"><span style="background: ${r.type === 'income' ? '#d1fae5' : '#fee2e2'}; color: ${r.type === 'income' ? '#059669' : '#dc2626'}; padding: 4px 10px; border-radius: 20px; font-size: 11px;">${typeText}</span></td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${escapeHtml(r.source)}</td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb; text-align: right; font-weight: bold; color: #ea580c;">${formatNumberWithCommas(amount)}</td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${escapeHtml(description.length > 50 ? description.substring(0, 50) + '...' : description)}</td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;"><span style="background: ${r.status === 'approved' ? '#d1fae5' : r.status === 'cancelled' ? '#fee2e2' : '#fef3c7'}; color: ${r.status === 'approved' ? '#059669' : r.status === 'cancelled' ? '#dc2626' : '#d97706'}; padding: 4px 10px; border-radius: 20px; font-size: 11px;">${statusText}</span></td
-                <td style="padding: 10px 8px; border: 1px solid #e5e7eb;">${escapeHtml(r.created_by || CURRENT_USER)}</td
-            </tr>`;
-    }
-    
-    let printWindow = window.open('', '_blank');
-    if (!printWindow) { showToast("Please allow popups to generate PDF", true); return; }
-    
-    printWindow.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>Survey Department - Fund Requests Report</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
-        .container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }
-        .header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }
-        .header h1 { font-size: 22px; margin: 0; }
-        .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
-        .summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-        .summary-card { background: white; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
-        .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }
-        .summary-card .value { font-size: 14px; font-weight: 800; margin-top: 5px; font-family: monospace; }
-        .summary-card.income .value { color: #10b981; }
-        .summary-card.expense .value { color: #ef4444; }
-        .summary-card.profit .value { color: #3b82f6; }
-        .table-container { overflow-x: auto; padding: 20px 25px; }
-        .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        .data-table th { background: #0d9488; color: white; padding: 12px 8px; font-weight: 700; border: 1px solid #0f766e; }
-        .data-table td { padding: 10px 8px; border: 1px solid #e5e7eb; vertical-align: top; }
-        .footer { text-align: center; font-size: 9px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-        .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
-        .print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-        @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; } .data-table th { background: #0d9488 !important; } }
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>Survey Department - Fund Requests Report</h1><p>Generated: ${new Date().toLocaleString()}</p></div>
-            <div class="info-bar"><span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span><span><strong>Total Requests:</strong> ${requestsData.length}</span><span><strong>Generated By:</strong> ${CURRENT_USER}</span></div>
-            <div class="summary-cards">
-                <div class="summary-card income"><div class="label">Total Income</div><div class="value">${formatNumberWithCommas(totalIncome)} TZS</div></div>
-                <div class="summary-card expense"><div class="label">Total Expenses</div><div class="value">${formatNumberWithCommas(totalExpense)} TZS</div></div>
-                <div class="summary-card profit"><div class="label">Net Profit</div><div class="value">${formatNumberWithCommas(netProfit)} TZS</div></div>
-                <div class="summary-card"><div class="label">Total Amount</div><div class="value">${formatNumberWithCommas(totalAmount)} TZS</div></div>
-                <div class="summary-card"><div class="label">Pending</div><div class="value">${pendingCount}</div></div>
-            </div>
-            <div class="table-container"><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th><th>Status</th><th>Created By</th></tr></thead><tbody>${tableRows}</tbody></td></div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Official Fund Requests Report</div>
-            <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1000);">🖨️ Save as PDF / Print</button></div>
-        </div>
-    </body>
-    </html>`);
-    printWindow.document.close();
-    showToast("PDF preview opened - Click Print/Save to download");
-}
+    let netProfitColor = netProfit >= 0 ? '#059669' : '#dc2626';
 
+    // Build table rows
+    let tableRows = '';
+    let rowNumber = 1;
+    for (let r of requestsData) {
+        let amount = parseFloat(r.amount) || 0;
+        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
+        let statusColor = r.status === 'approved' ? '#059669' : r.status === 'cancelled' ? '#dc2626' : '#d97706';
+        let statusBg = r.status === 'approved' ? '#d1fae5' : r.status === 'cancelled' ? '#fee2e2' : '#fef3c7';
+        let typeText = r.type === 'income' ? 'Income' : 'Expense';
+        let typeColor = r.type === 'income' ? '#059669' : '#dc2626';
+        let typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+        let description = r.description || '-';
+        let shortDesc = description.length > 60 ? description.substring(0, 60) + '...' : description;
+        let fullDesc = description;
+        let recordDate = r.transaction_date ? new Date(r.transaction_date).toLocaleString() : 'N/A';
+        let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
+
+        tableRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 500; white-space: nowrap;">' + rowNumber + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; white-space: nowrap;">' + recordDate + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: ' + typeBg + '; color: ' + typeColor + ';">' + typeText + '</span></td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; font-weight: 500; word-break: break-word;">' + escapeHtml(r.source) + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap; font-family: monospace;">' + formatCurrency(amount) + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; word-break: break-word;" title="' + escapeHtml(fullDesc) + '">' + escapeHtml(shortDesc) + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span></td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; white-space: nowrap;">' + escapeHtml(r.created_by || 'System') + '</td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; white-space: nowrap; font-size: 10px; color: #6b7280;">' + createdDate + '</td>' +
+            '</tr>';
+        rowNumber++;
+    }
+
+    // Create print window
+    let w = window.open('', '_blank');
+    if (!w) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+
+    w.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Fund Requests Report - Survey Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }\n' +
+            '.header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; font-family: monospace; }\n' +
+            '.summary-card.total .value { color: #0d9488; }\n' +
+            '.summary-card.income .value { color: #059669; }\n' +
+            '.summary-card.expense .value { color: #dc2626; }\n' +
+            '.summary-card.profit .value { color: #3b82f6; }\n' +
+            '.summary-card.pending .value { color: #d97706; }\n' +
+            '.summary-card.approved .value { color: #059669; }\n' +
+            '.table-container { overflow-x: auto; padding: 20px 25px; }\n' +
+            '.requests-table { width: 100%; border-collapse: collapse; font-size: 11px; }\n' +
+            '.requests-table th { background: #0d9488; color: white; padding: 12px 8px; font-weight: 700; text-align: left; border: 1px solid #0f766e; font-size: 11px; }\n' +
+            '.requests-table td { padding: 10px 8px; border: 1px solid #cbd5e1; vertical-align: middle; }\n' +
+            '.requests-table tr:hover { background: #f8fafc; }\n' +
+            '.requests-table .text-right { text-align: right; }\n' +
+            '.requests-table .text-center { text-align: center; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } .summary-cards { background: #f9fafb !important; -webkit-print-color-adjust: exact; } .requests-table th { background: #0d9488 !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>📋 All Fund Requests Report</h1>\n' +
+                '<p>Survey Department - Complete Fund Requests Overview</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Requests:</strong> ' + requestsData.length + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">📊 Total Requests</div><div class="value">' + requestsData.length + '</div></div>\n' +
+                '<div class="summary-card income"><div class="label">💰 Total Income</div><div class="value">' + formatCurrency(totalIncome) + '</div></div>\n' +
+                '<div class="summary-card expense"><div class="label">💸 Total Expenses</div><div class="value">' + formatCurrency(totalExpense) + '</div></div>\n' +
+                '<div class="summary-card profit"><div class="label">📈 Net Profit</div><div class="value" style="color: ' + netProfitColor + ';">' + formatCurrency(netProfit) + '</div></div>\n' +
+                '<div class="summary-card pending"><div class="label">⏳ Pending</div><div class="value">' + pendingCount + '</div></div>\n' +
+                '<div class="summary-card approved"><div class="label">✅ Approved</div><div class="value">' + approvedCount + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="table-container">\n' +
+                '<table class="requests-table">\n' +
+                    '<thead>\n' +
+                        '<tr>\n' +
+                            '<th style="width: 5%; text-align: center;">#</th>\n' +
+                            '<th style="width: 12%;">Date</th>\n' +
+                            '<th style="width: 8%; text-align: center;">Type</th>\n' +
+                            '<th style="width: 15%;">Source</th>\n' +
+                            '<th style="width: 12%; text-align: right;">Amount (TZS)</th>\n' +
+                            '<th style="width: 20%;">Description</th>\n' +
+                            '<th style="width: 10%; text-align: center;">Status</th>\n' +
+                            '<th style="width: 10%; text-align: center;">Created By</th>\n' +
+                            '<th style="width: 8%; text-align: center;">Created At</th>\n' +
+                        '</tr>\n' +
+                    '</thead>\n' +
+                    '<tbody>\n' +
+                        tableRows +
+                    '</tbody>\n' +
+                    '<tfoot>\n' +
+                        '<tr style="background: #fef3c7; font-weight: bold;">\n' +
+                            '<td colspan="4" style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>\n' +
+                            '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;"><strong>' + formatCurrency(totalAmount) + '</strong></td>\n' +
+                            '<td colspan="4" style="padding: 10px 8px; border: 1px solid #cbd5e1;"></td>\n' +
+                        '</tr>\n' +
+                    '</tfoot>\n' +
+                '</table>\n' +
+            '</div>\n' +
+            '<div class="footer">\n' +
+                'GeoTraverse ERP System - Survey Department | Official Fund Requests Report\n' +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button class="close-btn" onclick="window.close();" style="margin-left: 10px;">\n' +
+                    '❌ Close\n' +
+                '</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+
+    w.document.close();
+    showToast("📄 All Requests PDF preview opened - Click 'Save as PDF' to download", false);
+}
 // ==================== REPORTS SECTION ====================
 async function loadReports(highlightId = null) {
     await Promise.all([fetchReports(), fetchUploadedReports()]);
@@ -3353,47 +3654,121 @@ function exportSingleReportExcel(id) {
     } 
 }
 
-function exportSingleReportPDF(id) { 
-    const r = reportsData.find(r=>r.id===id); 
-    if(r) { 
-        let w = window.open('', '_blank'); 
-        if(!w) { showToast("Please allow popups", true); return; }
-        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
-        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
-        w.document.write(`<!DOCTYPE html>
-        <html>
-        <head><title>${escapeHtml(r.title)} - Report</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Inter', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
-            .report-container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #8b5cf6; }
-            .header { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; padding: 25px; text-align: center; }
-            .header h1 { font-size: 24px; margin: 0; }
-            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
-            .info-bar { background: #f3e8ff; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; }
-            .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; background: ${statusBg}; color: ${statusColor}; }
-            .report-content { padding: 25px; white-space: pre-wrap; line-height: 1.6; min-height: 300px; background: #f9fafb; margin: 0 25px 25px 25px; border-radius: 8px; }
-            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
-            .print-btn button { background: #8b5cf6; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #8b5cf6 !important; } }
-        </style>
-        </head>
-        <body>
-            <div class="report-container">
-                <div class="header"><h1>${escapeHtml(r.title)}</h1><p>Official Report - GeoTraverse ERP System</p></div>
-                <div class="info-bar"><span><strong>Period:</strong> ${r.period}</span><span><strong>Status:</strong> <span class="status-badge">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></span><span><strong>Generated:</strong> ${new Date().toLocaleString()}</span></div>
-                <div class="report-content">${escapeHtml(r.content || 'No content available')}</div>
-                <div class="footer">GeoTraverse Enterprise Resource Planning System - Survey Department</div>
-                <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Print / Save as PDF</button></div>
-            </div>
-        </body>
-        </html>`);
-        w.document.close(); 
-        showToast("PDF preview opened - Click Print to save"); 
-    } 
-}
+function exportSingleReportPDF(id) {
+    const r = reportsData.find(item => item.id === id);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
 
+    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+    let periodText = r.period || 'Not specified';
+    let periodLabel = periodText.charAt(0).toUpperCase() + periodText.slice(1);
+    
+    // FULL CONTENT - NO TRUNCATION
+    let fullContent = r.content || 'No content available';
+    let wordCount = fullContent.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+    let charCount = fullContent.length;
+    let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
+    let updatedDate = r.updated_at ? new Date(r.updated_at).toLocaleString() : null;
+    let createdBy = r.created_by || 'System';
+    let updatedBy = r.updated_by || null;
+
+    let w = window.open('', '_blank');
+    if (!w) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+
+    w.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>' + escapeHtml(r.title) + ' - Report</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }\n' +
+            '.header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f0fdfa; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; background: ' + statusBg + '; color: ' + statusColor + '; }\n' +
+            '.section-title { background: #0d9488; color: white; padding: 12px 25px; font-size: 14px; font-weight: 700; margin: 20px 0 0 0; }\n' +
+            '.details-vertical { padding: 20px 25px; }\n' +
+            '.details-vertical table { width: 100%; border-collapse: collapse; font-size: 13px; }\n' +
+            '.details-vertical tr { border-bottom: 1px solid #e5e7eb; }\n' +
+            '.details-vertical td:first-child { width: 35%; padding: 12px 16px; background: #f8fafc; font-weight: 600; color: #0d9488; border-right: 1px solid #e5e7eb; }\n' +
+            '.details-vertical td:last-child { padding: 12px 16px; color: #1e293b; font-weight: 500; }\n' +
+            '.content-section { padding: 20px 25px; }\n' +
+            '.content-box { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 200px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #1e293b; max-height: none; overflow-y: visible; }\n' +
+            '.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.stat-item { text-align: center; }\n' +
+            '.stat-item .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }\n' +
+            '.stat-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; color: #0d9488; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; margin-top: 20px; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } .content-box { max-height: none; overflow-y: visible; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>' + escapeHtml(r.title) + '</h1>\n' +
+                '<p>Official Report - Generated: ' + new Date().toLocaleString() + '</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Report ID:</strong> #' + r.id + '</span>\n' +
+                '<span><strong>Status:</strong> <span class="status-badge">' + statusText + '</span></span>\n' +
+                '<span><strong>Period:</strong> ' + periodLabel + '</span>\n' +
+                '<span><strong>Department:</strong> Survey</span>\n' +
+            '</div>\n' +
+            '<div class="stats-grid">\n' +
+                '<div class="stat-item"><div class="label">📝 Characters</div><div class="value">' + charCount.toLocaleString() + '</div></div>\n' +
+                '<div class="stat-item"><div class="label">📊 Words</div><div class="value">' + wordCount.toLocaleString() + '</div></div>\n' +
+                '<div class="stat-item"><div class="label">📅 Created</div><div class="value" style="font-size: 12px;">' + createdDate + '</div></div>\n' +
+                '<div class="stat-item"><div class="label">👤 By</div><div class="value" style="font-size: 12px;">' + escapeHtml(createdBy) + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="section-title"><i class="fas fa-info-circle"></i> Report Details</div>\n' +
+            '<div class="details-vertical">\n' +
+                '<table>\n' +
+                    '<tr><td>📌 Title:</td><td><strong>' + escapeHtml(r.title) + '</strong></td></tr>\n' +
+                    '<tr><td>📊 Status:</td><td><span class="status-badge">' + statusText + '</span></td></tr>\n' +
+                    '<tr><td>📆 Period:</td><td>' + periodLabel + '</td></tr>\n' +
+                    '<tr><td>📅 Created At:</td><td>' + createdDate + '</td></tr>\n' +
+                    '<tr><td>👤 Created By:</td><td>' + escapeHtml(createdBy) + '</td></tr>\n' +
+                    (updatedDate && updatedBy ? '<tr><td>✏️ Updated At:</td><td>' + updatedDate + '</td></tr>\n' +
+                    '<tr><td>✏️ Updated By:</td><td>' + escapeHtml(updatedBy) + '</td></tr>' : '') +
+                    '<tr><td>📝 Word Count:</td><td>' + wordCount.toLocaleString() + ' words</td></tr>\n' +
+                    '<tr><td>📝 Character Count:</td><td>' + charCount.toLocaleString() + ' characters</td></tr>\n' +
+                '</table>\n' +
+            '</div>\n' +
+            '<div class="section-title"><i class="fas fa-file-alt"></i> Report Content</div>\n' +
+            '<div class="content-section">\n' +
+                '<div class="content-box">' + escapeHtml(fullContent) + '</div>\n' +
+            '</div>\n' +
+            '<div class="footer">\n' +
+                'GeoTraverse ERP System - Survey Department | Official Report Document\n' +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button class="close-btn" onclick="window.close();">\n' +
+                    '❌ Close\n' +
+                '</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+
+    w.document.close();
+    showToast("📄 Report PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function exportAllReportsToExcel() { 
     let ws = [['ID','Title','Period','Content','Created','Status','Created By','Updated By']]; 
     reportsData.forEach(r => ws.push([
@@ -3407,14 +3782,181 @@ function exportAllReportsToExcel() {
     showToast('Exported'); 
 }
 
-function exportAllReportsToPDF() { 
-    let rows = reportsData.map(r => `<div style="margin-bottom:20px;"><h3 style="color:#8b5cf6;">${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period} | <strong>Created:</strong> ${formatDate(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><div style="background:#f5f5f5; padding:10px; border-radius:5px;">${escapeHtml(r.content)}</div><hr/></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Reports - Survey Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;}</style></head><body><h1>All Reports - Survey Department</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
-}
+function exportAllReportsToPDF() {
+    if (reportsData.length === 0) {
+        showToast('No reports to export', true);
+        return;
+    }
 
+    // Calculate totals
+    let totalReports = reportsData.length;
+    let sentCount = 0, draftCount = 0;
+    let totalChars = 0;
+    let periodCounts = {};
+
+    for (let r of reportsData) {
+        if (r.status === 'sent') sentCount++;
+        else if (r.status === 'draft') draftCount++;
+        if (r.content) totalChars += r.content.length;
+        let period = r.period || 'unknown';
+        periodCounts[period] = (periodCounts[period] || 0) + 1;
+    }
+
+    // Build period summary
+    let periodRows = '';
+    let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+    for (let period of periodOrder) {
+        let count = periodCounts[period] || 0;
+        if (count > 0) {
+            let percentage = ((count / totalReports) * 100).toFixed(1);
+            periodRows +=
+                '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                '<td style="padding: 10px 12px; text-transform: capitalize;">' + escapeHtml(period) + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; font-weight: 600;">' + count + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; color: #0d9488; font-weight: 600;">' + percentage + '%</td>' +
+                '</tr>';
+        }
+    }
+
+    // Build report rows - FULL CONTENT, NO TRUNCATION
+    let rows = '';
+    let reportNumber = 1;
+    for (let r of reportsData) {
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+        let fullContent = r.content || 'No content available';
+        let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
+        let updatedDate = r.updated_at ? new Date(r.updated_at).toLocaleString() : null;
+        let createdBy = r.created_by || 'System';
+        let updatedBy = r.updated_by || null;
+        let wordCount = fullContent.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+        let charCount = fullContent.length;
+
+        rows +=
+            '<div style="margin-bottom: 30px; border: 2px solid #0d9488; border-radius: 12px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            '<div style="background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 15px 20px;">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">' +
+            '<div><h3 style="margin: 0; font-size: 17px; font-weight: 700;">#' + reportNumber + ' ' + escapeHtml(r.title) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Report ID: #' + r.id + ' | Period: ' + r.period + '</p></div>' +
+            '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>' +
+            '</div></div>' +
+            '<div style="padding: 12px 20px; background: #f0fdfa; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">' +
+            '<span><strong>📅 Created:</strong> ' + createdDate + ' by ' + escapeHtml(createdBy) + '</span>' +
+            (updatedDate && updatedBy ? '<span><strong>✏️ Updated:</strong> ' + updatedDate + ' by ' + escapeHtml(updatedBy) + '</span>' : '') +
+            '<span><strong>📊 Status:</strong> ' + statusText + '</span>' +
+            '<span><strong>📋 Period:</strong> ' + r.period + '</span>' +
+            '<span><strong>📝 Words:</strong> ' + wordCount.toLocaleString() + ' | <strong>Chars:</strong> ' + charCount.toLocaleString() + '</span>' +
+            '</div>' +
+            // FULL CONTENT - HAKUNA KUKATIZWA
+            '<div style="padding: 18px 20px; background: white; font-size: 13px; line-height: 1.7; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; max-height: none; overflow-y: visible;">' +
+            escapeHtml(fullContent) +
+            '</div>' +
+            '<div style="padding: 8px 20px; background: #f8fafc; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: right;">' +
+            'Report #' + r.id + ' | Generated: ' + new Date().toLocaleString() +
+            '</div></div>';
+        reportNumber++;
+    }
+
+    // Calculate averages
+    let avgChars = totalReports > 0 ? Math.round(totalChars / totalReports).toLocaleString() : '0';
+    let avgWords = totalReports > 0 ? Math.round((totalChars / totalReports) / 5).toLocaleString() : '0';
+
+    // Create print window
+    let w = window.open('', '_blank');
+    if (!w) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+
+    w.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Reports Report - Survey Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d9488; }\n' +
+            '.header { background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }\n' +
+            '.summary-card.total .value { color: #0d9488; }\n' +
+            '.summary-card.sent .value { color: #059669; }\n' +
+            '.summary-card.draft .value { color: #d97706; }\n' +
+            '.summary-card.chars .value { color: #3b82f6; font-size: 14px; }\n' +
+            '.summary-card.periods .value { color: #8b5cf6; }\n' +
+            '.summary-card.avg .value { color: #06b6d4; }\n' +
+            '.period-summary { margin: 0 25px 25px 25px; background: #f9fafb; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }\n' +
+            '.period-summary h4 { background: #f1f5f9; padding: 12px 18px; font-size: 14px; font-weight: 700; margin: 0; border-bottom: 1px solid #e2e8f0; color: #1e293b; }\n' +
+            '.period-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n' +
+            '.period-table th { background: #f8fafc; padding: 10px 16px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #475569; }\n' +
+            '.period-table td { padding: 10px 16px; border-bottom: 1px solid #e2e8f0; color: #334155; }\n' +
+            '.reports-section { padding: 0 25px 25px 25px; }\n' +
+            '.reports-title { margin: 25px 0 18px 0; font-size: 16px; font-weight: 700; color: #0d9488; border-bottom: 3px solid #0d9488; padding-bottom: 10px; display: inline-block; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #0d9488; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } .summary-cards { background: #f9fafb !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>📊 All Reports Report</h1>\n' +
+                '<p>Survey Department - Complete Reports Overview</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Reports:</strong> ' + totalReports + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">📋 Total Reports</div><div class="value">' + totalReports + '</div></div>\n' +
+                '<div class="summary-card sent"><div class="label">✅ Sent Reports</div><div class="value">' + sentCount + '</div></div>\n' +
+                '<div class="summary-card draft"><div class="label">✏️ Draft Reports</div><div class="value">' + draftCount + '</div></div>\n' +
+                '<div class="summary-card chars"><div class="label">📝 Total Characters</div><div class="value">' + totalChars.toLocaleString() + '</div></div>\n' +
+                '<div class="summary-card periods"><div class="label">📆 Period Types</div><div class="value">' + Object.keys(periodCounts).length + '</div></div>\n' +
+                '<div class="summary-card avg"><div class="label">📊 Avg Characters</div><div class="value">' + avgChars + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="period-summary">\n' +
+                '<h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>\n' +
+                '<table class="period-table">\n' +
+                    '<thead><tr><th style="width: 40%;">Period Type</th><th style="width: 30%; text-align: center;">Count</th><th style="width: 30%; text-align: center;">Percentage</th></tr></thead>\n' +
+                    '<tbody>\n' +
+                        periodRows +
+                    '</tbody>\n' +
+                '</table>\n' +
+            '</div>\n' +
+            '<div class="reports-section">\n' +
+                '<div class="reports-title">📄 Reports List (' + totalReports + ' reports)</div>\n' +
+                rows +
+            '</div>\n' +
+            '<div class="footer">\n' +
+                'GeoTraverse ERP System - Survey Department | Official All Reports Report\n' +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button class="close-btn" onclick="window.close();" style="margin-left: 10px;">\n' +
+                    '❌ Close\n' +
+                '</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+
+    w.document.close();
+    showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function openGenerateReportModal() { 
     document.getElementById('genReportTitle').value = ''; 
     document.getElementById('genPeriodType').value = 'daily'; 
@@ -3487,17 +4029,19 @@ async function loadDashboard() {
     let completed = projectsData.filter(p => p.status === 'completed').length;
     let approved = projectsData.filter(p => p.status === 'approved').length;
     let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
+    let totalRequestsAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     
     let html = `<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Survey Dashboard</h2><p class="text-xs text-gray-500">Project & Financial Management</p></div>
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
             <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #e0f2fe, #bae6fd);" onclick="showSection('projects')"><div class="stat-icon"><i class="fas fa-tasks text-lg"></i></div><p class="stat-label">Projects</p><p class="stat-number text-teal-700">${projectsData.length}</p>${unviewedProjectsCount > 0 ? `<p class="text-[10px] text-red-500 mt-1">${unviewedProjectsCount} new</p>` : ''}</div>
             <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #dcfce7, #bbf7d0);" onclick="showSection('reports')"><div class="stat-icon"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Reports</p><p class="stat-number text-purple-700">${reportsData.length + uploadedReportsData.length}</p>${unviewedReportsCount > 0 ? `<p class="text-[10px] text-red-500 mt-1">${unviewedReportsCount} new</p>` : ''}</div>
             <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #fef3c7, #fde68a);" onclick="showSection('requests')"><div class="stat-icon"><i class="fas fa-hand-holding-usd text-lg"></i></div><p class="stat-label">Requests</p><p class="stat-number text-orange-700">${requestsData.length}</p><p class="text-[10px] text-gray-500 mt-1">Pending: ${pendingRequests}</p></div>
-            <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #fce7f3, #fbcfe8);" onclick="showSection('reports')"><div class="stat-icon"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Net Profit</p><p class="stat-number text-green-700">${formatNumberWithCommas(totalIncome - totalExpense)} TZS</p></div>
+            <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #fce7f3, #fbcfe8);" onclick="showSection('requests')"><div class="stat-icon"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Total Requested</p><p class="stat-number text-green-700">${formatNumberWithCommas(totalRequestsAmount)} TZS</p></div>
+            <div class="stat-card cursor-pointer" style="background: linear-gradient(135deg, #fff7ed, #fed7aa);" onclick="showSection('requests')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending Requests</p><p class="stat-number text-orange-700">${pendingRequests}</p></div>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-teal-600 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas></div>
-            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-bar text-green-600 mr-2"></i>Financial Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Income</p><p class="text-lg font-bold text-green-600">${formatNumberWithCommas(totalIncome)} TZS</p></div><div class="bg-red-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Expenses</p><p class="text-lg font-bold text-red-600">${formatNumberWithCommas(totalExpense)} TZS</p></div></div></div>
+            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-bar text-green-600 mr-2"></i>Request Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Income Requests</p><p class="text-lg font-bold text-green-600">${requestsData.filter(r => r.type === 'income').length}</p></div><div class="bg-red-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Expense Requests</p><p class="text-lg font-bold text-red-600">${requestsData.filter(r => r.type === 'expense').length}</p></div></div></div>
         </div>
         <div class="grid grid-cols-3 gap-3">
             <button onclick="showSection('projects')" class="btn-primary text-sm py-2"><i class="fas fa-plus-circle mr-2"></i>Add Project</button>

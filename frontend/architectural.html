@@ -228,6 +228,22 @@
         
         .recycle-bin-item { background: white; border-radius: 12px; padding: 12px; margin-bottom: 8px; border-left: 4px solid #f59e0b; display: flex; justify-content: space-between; align-items: center; }
         body.dark-mode .recycle-bin-item { background: #1e293b; }
+        
+        /* Sent from badge */
+        .sent-from-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 8px;
+            font-weight: 600;
+            background: #fef3c7;
+            color: #d97706;
+            margin-left: 6px;
+        }
+        body.dark-mode .sent-from-badge {
+            background: #451a03;
+            color: #fbbf24;
+        }
     </style>
 </head>
 <body>
@@ -591,15 +607,26 @@ async function emptyRecycleBin() {
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // Tumia sent_to_dept (si sent_to_department)
         projectsData = res.data.filter(p => 
             (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
             (!p.deleted_by_admin || p.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id); 
+        ).sort((a,b) => {
+            // SORT: RECEIVED PROJECTS FIRST (unviewed)
+            const aIsNew = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID && 
+                           a.sent_to_dept === DEPARTMENT_ID && 
+                           (a.is_viewed_by_department == 0 || a.is_viewed_by_department === null);
+            const bIsNew = b.sent_from_dept && b.sent_from_dept != DEPARTMENT_ID && 
+                           b.sent_to_dept === DEPARTMENT_ID && 
+                           (b.is_viewed_by_department == 0 || b.is_viewed_by_department === null);
+            if (aIsNew && !bIsNew) return -1;
+            if (!aIsNew && bIsNew) return 1;
+            return b.id - a.id;
+        }); 
         
         unviewedProjectsCount = projectsData.filter(p => 
-            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+            p.sent_from_dept && 
+            p.sent_from_dept != DEPARTMENT_ID && 
             p.sent_to_dept === DEPARTMENT_ID && 
             (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
             !viewedProjectIds.includes(p.id)
@@ -617,7 +644,17 @@ async function fetchReports() {
             (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
             (!r.deleted_by_department || r.deleted_by_department != 1) && 
             (!r.deleted_by_admin || r.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id); 
+        ).sort((a,b) => {
+            const aIsNew = a.sent_from_department && a.sent_from_department != DEPARTMENT_ID && 
+                           a.sent_to_department === DEPARTMENT_ID && 
+                           (a.is_viewed_by_department == 0 || a.is_viewed_by_department === null);
+            const bIsNew = b.sent_from_department && b.sent_from_department != DEPARTMENT_ID && 
+                           b.sent_to_department === DEPARTMENT_ID && 
+                           (b.is_viewed_by_department == 0 || b.is_viewed_by_department === null);
+            if (aIsNew && !bIsNew) return -1;
+            if (!aIsNew && bIsNew) return 1;
+            return b.id - a.id;
+        }); 
         unviewedReportsCount = reportsData.filter(r => 
             r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
             r.sent_to_department === DEPARTMENT_ID && 
@@ -804,6 +841,9 @@ async function loadDashboard() {
     let inProgress = projectsData.filter(p => p.status === 'in_progress').length;
     let completed = projectsData.filter(p => p.status === 'completed').length;
     let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
+    let approvedRequests = requestsData.filter(r => r.status === 'approved' || r.status === 'paid').length;
+    let totalRequests = requestsData.length;
+    let totalRequestAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     
     document.getElementById('dashboardPage').innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -813,7 +853,14 @@ async function loadDashboard() {
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-pink-600 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas><div class="flex justify-center gap-3 mt-3 text-xs"><span class="text-yellow-600">Pending: ${pending}</span><span class="text-blue-600">Progress: ${inProgress}</span><span class="text-green-600">Complete: ${completed}</span></div></div>
-            <div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-bar text-green-600 mr-2"></i>Financial Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Income</p><p class="text-lg font-bold text-green-600">${formatMoney(totalIncome)}</p></div><div class="bg-red-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Expenses</p><p class="text-lg font-bold text-red-600">${formatMoney(totalExpense)}</p></div></div></div>
+            <div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-list-check text-purple-600 mr-2"></i>Request Summaries</h3>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="p-3 bg-purple-50 rounded-xl"><p class="text-xs text-gray-500">Total Requests</p><p class="text-xl font-bold text-purple-600">${totalRequests}</p></div>
+                    <div class="p-3 bg-yellow-50 rounded-xl"><p class="text-xs text-gray-500">Pending</p><p class="text-xl font-bold text-yellow-600">${pendingRequests}</p></div>
+                    <div class="p-3 bg-green-50 rounded-xl"><p class="text-xs text-gray-500">Approved/Paid</p><p class="text-xl font-bold text-green-600">${approvedRequests}</p></div>
+                    <div class="p-3 bg-blue-50 rounded-xl"><p class="text-xs text-gray-500">Total Amount</p><p class="text-xl font-bold text-blue-600">${formatMoney(totalRequestAmount)}</p></div>
+                </div>
+            </div>
         </div>
         <div class="grid grid-cols-2 gap-3 mb-5">
             <button onclick="openAddProjectModal()" class="bg-pink-600 text-white py-2 rounded-lg text-sm">+ Add Project</button>
@@ -855,12 +902,19 @@ async function loadProjects(highlightId = null) {
         
         let projectsHtml = '';
         for (let p of projectsData) {
-            let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedProjectIds.includes(p.id);
+            let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_dept === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedProjectIds.includes(p.id);
             let fileUrl = getFullImageUrl(p.image);
             let isImage = fileUrl && isImageFile(fileUrl);
             let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
             let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
             let isHighlighted = highlightId && p.id === highlightId;
+            
+            // Sent from badge
+            let sentFromBadge = '';
+            if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+                const deptName = departmentNames[p.sent_from_dept] || 'Unknown';
+                sentFromBadge = `<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
             
             let imageHtml = '';
             if (fileUrl && isImage) {
@@ -874,7 +928,10 @@ async function loadProjects(highlightId = null) {
             projectsHtml += `
                 <div class="project-card ${isHighlighted ? 'search-highlight' : ''}" id="proj-card-${p.id}">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>
+                    <div class="card-header">
+                        <h4>${escapeHtml(p.name)}</h4>
+                        <p>ID: #${p.id} ${sentFromBadge}</p>
+                    </div>
                     ${imageHtml}
                     <div class="p-3">
                         <div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span></div>
@@ -1068,16 +1125,18 @@ async function viewProjectDetails(id) {
 
 // ==================== DAILY WORK ====================
 async function loadDailyWorkForProject(projectId) {
+    console.log('Loading daily work for project:', projectId);
     await fetchDailyWork();
     
     const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
     const tbody = document.getElementById('dailyWorkTableBody');
-    if (!tbody) return;
-    
-    console.log('Loading daily work for project:', projectId, 'Records found:', projectDailyWork.length);
+    if (!tbody) {
+        console.log('Daily work table body not found');
+        return;
+    }
     
     if (projectDailyWork.length === 0) { 
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td</tr'; 
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>'; 
         return; 
     }
     
@@ -1099,23 +1158,23 @@ async function loadDailyWorkForProject(projectId) {
         }
         
         html += `<tr id="daily-row-${w.id}">
-            <td class="p-2 text-xs">${escapeHtml(recordDate)}</td
-            <td class="p-2 text-xs">${escapeHtml(workDesc)}</td
-            <td class="p-2 text-xs text-right">${formatMoney(budgetValue)}</td
-            <td class="p-2 text-xs text-right">${formatMoney(amountValue)}</td
-            <td class="p-2 text-center"><span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></td
+            <td class="p-2 text-xs">${escapeHtml(recordDate)}</td>
+            <td class="p-2 text-xs">${escapeHtml(workDesc)}</td>
+            <td class="p-2 text-xs text-right">${formatMoney(budgetValue)}</td>
+            <td class="p-2 text-xs text-right">${formatMoney(amountValue)}</td>
+            <td class="p-2 text-center"><span class="status-badge ${statusClass}">${escapeHtml(statusText)}</span></td>
             <td class="p-2 text-center">
                 <div class="flex gap-1 justify-center">
                     <button onclick="viewDailyWork(${w.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
                     <button onclick="editDailyWork(${w.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
                     <button onclick="deleteDailyWork(${w.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
                 </div>
-            </td
+            </td>
         </tr>`;
     }
     tbody.innerHTML = html;
+    updateDailyWorkSummary();
 }
-
 function updateDailyWorkSummary() { 
     const project = projectsData.find(p => p.id === currentProjectId); 
     if(!project) return; 
@@ -1347,14 +1406,14 @@ async function exportDailyWorkToPDF() {
         
         rows += `
             <tr>
-                <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${new Date(w.date).toLocaleString()}</td
-                <td style="border: 1px solid #be123c; padding: 8px; text-align: left;">${escapeHtml(w.work_description || '-')}</td
-                <td style="border: 1px solid #be123c; padding: 8px; text-align: right;">${formatMoney(budget)}</td
-                <td style="border: 1px solid #be123c; padding: 8px; text-align: right;">${formatMoney(expenses)}</td
+                <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${new Date(w.date).toLocaleString()}</td>
+                <td style="border: 1px solid #be123c; padding: 8px; text-align: left;">${escapeHtml(w.work_description || '-')}</td>
+                <td style="border: 1px solid #be123c; padding: 8px; text-align: right;">${formatMoney(budget)}</td>
+                <td style="border: 1px solid #be123c; padding: 8px; text-align: right;">${formatMoney(expenses)}</td>
                 <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">
                     <span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px;">${statusText}</span>
-                </td
-                <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td
+                </td>
+                <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
             </tr>
         `;
     }
@@ -1425,16 +1484,76 @@ async function exportDailyWorkToPDF() {
     printWindow.document.close();
     showToast("📄 Daily Work PDF preview opened - Click Print/Save to download", false);
 }
-
-function sendProjectToDept(projectId, deptId) { 
+// ==================== FIXED SEND PROJECT ====================
+async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p=>p.id===projectId); 
-    if(!p) return; 
-    if(deptId===DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; } 
+    if(!p) { 
+        showToast('Project not found', true); 
+        return; 
+    }
+    if(deptId===DEPARTMENT_ID) { 
+        showToast('Cannot send to your own department', true); 
+        return; 
+    }
+    
     const dept = allDepartmentsForSend.find(d=>d.id==deptId);
     const deptName = dept ? dept.name : 'Department';
-    showToast(`✅ Project "${p.name}" sent to ${deptName}`, false); 
-    toggleSendDropdown(`projSendDropdown-${projectId}`);
-    closeModal('viewProjModal');
+    
+    // Show loading
+    const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        // Get daily work for this project
+        const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
+        
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            project_data: {
+                ...p,
+                daily_work: projectDailyWork,
+                sent_count: (p.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_project.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`, false);
+            addLog(`Project sent: "${p.name}" to ${deptName}`);
+            
+            // Update local data
+            p.sent_to_dept = deptId;
+            p.sent_from_dept = DEPARTMENT_ID;
+            p.is_viewed_by_department = 0;
+            p.sent_count = (p.sent_count || 0) + 1;
+            p.is_sent = 1;
+            
+            // Reload projects
+            await fetchProjects();
+            await fetchDailyWork();
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send project', true);
+        }
+    } catch(e) {
+        console.error('Send project error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        closeModal('viewProjModal');
+    }
 }
 
 function exportSingleProjectExcel(id) { 
@@ -1459,12 +1578,205 @@ function exportAllProjectsToExcel() {
 }
 
 function exportAllProjectsToPDF() { 
-    let rows = projectsData.map(p => `<div style="margin-bottom:20px;border-bottom:1px solid #be123c;"><h3 style="color:#be123c;">${escapeHtml(p.name)}</h3><p><strong>Client:</strong> ${escapeHtml(p.client_name||'-')}</p><p><strong>Amount:</strong> ${formatMoney(p.amount)}</p><p><strong>Status:</strong> ${p.status}</p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Created by:</strong> ${escapeHtml(p.created_by||'System')}</p></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    if(!w) { showToast("Please allow popups", true); return; }
-    w.document.write(`<!DOCTYPE html><html><head><title>All Projects - Architectural Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;border-radius:10px;}h1{color:#be123c;text-align:center;}.footer{text-align:center;font-size:10px;margin-top:20px;padding-top:10px;border-top:1px solid #ddd;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#be123c;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>All Projects - Architectural Department</h1><p>Generated: ${new Date().toLocaleString()}</p><hr/>${rows}<div class="footer">GeoTraverse ERP System - Architectural Department</div><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Save as PDF / Print</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
+    if (projectsData.length === 0) { 
+        showToast('No projects to export', true); 
+        return; 
+    }
+    
+    // Calculate summary statistics
+    let totalAmount = 0;
+    let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
+    
+    for (let p of projectsData) {
+        totalAmount += parseFloat(p.amount) || 0;
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+        
+        const projectWork = dailyworkData.filter(w => w.project_id == p.id || w.project_name === p.name);
+        totalDailyRecords += projectWork.length;
+        for (let w of projectWork) {
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            totalExpensesAll += (expensesValue + amountSpent);
+        }
+    }
+    let totalRemainingAll = totalBudgetAll - totalExpensesAll;
+    
+    let rows = '';
+    for (let p of projectsData) {
+        let fileUrl = getFullImageUrl(p.image);
+        let isImage = fileUrl && isImageFile(fileUrl);
+        let statusBadgeClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
+        let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+        
+        const projectWork = dailyworkData.filter(w => w.project_id == p.id || w.project_name === p.name);
+        let projBudget = 0, projExpenses = 0;
+        for (let w of projectWork) {
+            projBudget += parseFloat(w.budget) || 0;
+            let expensesValue = parseFloat(w.expenses) || 0;
+            let amountSpent = parseFloat(w.amount) || 0;
+            projExpenses += (expensesValue + amountSpent);
+        }
+        let projRemaining = projBudget - projExpenses;
+        let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+        
+        let dailyRows = '';
+        if (projectWork.length > 0) {
+            for (let w of projectWork) {
+                let budget = parseFloat(w.budget) || 0;
+                let expensesValue = parseFloat(w.expenses) || 0;
+                let amountSpent = parseFloat(w.amount) || 0;
+                let totalExpenseForRecord = expensesValue + amountSpent;
+                
+                let statusBg = w.status === 'completed' ? '#d1fae5' : 
+                              w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+                let statusColor = w.status === 'completed' ? '#059669' : 
+                                 w.status === 'partial' ? '#d97706' : '#dc2626';
+                let statusTextDW = w.status === 'completed' ? 'Completed' : 
+                                  w.status === 'partial' ? 'Partial' : 'Pending';
+                let description = (w.work_description || '-').replace(/\n/g, '<br>');
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                
+                dailyRows += `<tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1;">${recordDate}</td>
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word;">${escapeHtml(description)}</td>
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">${formatMoney(budget)}</td>
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">${formatMoney(totalExpenseForRecord)}</td>
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; background: ${statusBg}; color: ${statusColor};">${statusTextDW}</span></td>
+                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
+                </tr>`;
+            }
+        } else {
+            dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records</td></tr>';
+        }
+        
+        rows += `<div style="margin-bottom: 40px; border: 2px solid #be123c; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">
+            <div style="background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 15px 20px;">
+                <h3 style="margin: 0; font-size: 18px; font-weight: 700;">${escapeHtml(p.name)}</h3>
+                <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #${p.id} | Client: ${escapeHtml(p.client_name || 'N/A')} | Status: ${statusText}</p>
+            </div>
+            <div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                ${fileUrl && isImage ? `<img src="${fileUrl}?t=${Date.now()}" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\'color:#999;padding:10px;\'>No Image</div>'">` : '<div style="color:#999;padding:10px;">No Image Available</div>'}
+            </div>
+            <div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #be123c;">📌 Amount:</td><td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">${formatMoney(p.amount)}</span></td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📊 Status:</td><td style="padding: 8px 12px;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; background: ${p.status === 'pending' ? '#fef3c7' : p.status === 'in_progress' ? '#dbeafe' : p.status === 'completed' ? '#d1fae5' : '#e9d5ff'}; color: ${p.status === 'pending' ? '#d97706' : p.status === 'in_progress' ? '#2563eb' : p.status === 'completed' ? '#059669' : '#7e22ce'};">${statusText}</span></td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📈 Progress:</td><td style="padding: 8px 12px;">${p.progress || 0}%<div style="background:#e2e8f0; border-radius:10px; margin-top:6px; height:6px; max-width:200px;"><div style="width:${p.progress||0}%; background:#be123c; border-radius:10px; height:6px;"></div></div></td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📍 Location:</td><td style="padding: 8px 12px;">${escapeHtml(p.location || 'N/A')}</td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📅 Start Date:</td><td style="padding: 8px 12px;">${p.start_date || 'Not specified'}</td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📅 End Date:</td><td style="padding: 8px 12px;">${p.end_date || 'Not specified'}</td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">📝 Description:</td><td style="padding: 8px 12px;">${escapeHtml(p.description || 'No description')}</td></tr>
+                    <tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #be123c;">👤 Created By:</td><td style="padding: 8px 12px;">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td></tr>
+                </table>
+            </div>
+            <div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #be123c;">
+                <h4 style="margin: 0 0 12px 0; font-size: 14px; color: #be123c;"><i class="fas fa-calendar-day"></i> Daily Work Records (${projectWork.length})</h4>
+                ${projectWork.length > 0 ? `
+                <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;"><div style="font-size: 10px; color: #166534;">💰 Total Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669;">${formatMoney(projBudget)}</div></div>
+                    <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;"><div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c;">${formatMoney(projExpenses)}</div></div>
+                    <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;"><div style="font-size: 10px; color: #1e40af;">📊 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ${projRemainingColor};">${formatMoney(projRemaining)}</div></div>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                        <thead>
+                            <tr style="background: #be123c; color: white;">
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 16%;">Date/Time</th>
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 30%;">Description</th>
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 12%; text-align: right;">Budget (TZS)</th>
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 12%; text-align: right;">Expenses (TZS)</th>
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 12%; text-align: center;">Status</th>
+                                <th style="padding: 10px 8px; border: 1px solid #9d174d; width: 18%; text-align: center;">Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>${dailyRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>
+                                <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>${formatMoney(projBudget)}</strong></td>
+                                <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>${formatMoney(projExpenses)}</strong></td>
+                                <td colspan="2" style="border: 1px solid #cbd5e1;"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                ` : '<div style="text-align:center; padding: 20px; color: #94a3b8;">No daily work records</div>'}
+            </div>
+        </div>`;
+    }
+    
+    let win = window.open('', '_blank');
+    if (!win) { showToast("Please allow popups to generate PDF", true); return; }
+    
+    win.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>All Projects - Architectural Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #be123c; }
+            .header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
+            .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }
+            .summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }
+            .summary-card.total .value { color: #be123c; }
+            .summary-card.amount .value { color: #059669; }
+            .summary-card.budget .value { color: #3b82f6; }
+            .summary-card.expenses .value { color: #dc2626; }
+            .summary-card.records .value { color: #8b5cf6; }
+            .summary-card.remaining .value { color: #f59e0b; }
+            .projects-section { padding: 20px 25px; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #be123c; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #9d174d; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #be123c !important; -webkit-print-color-adjust: exact; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🏛️ All Projects Report</h1>
+                <p>Architectural Department - Complete Projects Overview with Daily Work Records</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                <span><strong>Total Projects:</strong> ${projectsData.length}</span>
+                <span><strong>Total Daily Records:</strong> ${totalDailyRecords}</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+            <div class="summary-cards">
+                <div class="summary-card total"><div class="label">Total Projects</div><div class="value">${projectsData.length}</div></div>
+                <div class="summary-card amount"><div class="label">Total Amount</div><div class="value">${formatMoney(totalAmount)}</div></div>
+                <div class="summary-card budget"><div class="label">Total Budget</div><div class="value">${formatMoney(totalBudgetAll)}</div></div>
+                <div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">${formatMoney(totalExpensesAll)}</div></div>
+                <div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value" style="color: ${totalRemainingAll >= 0 ? '#059669' : '#dc2626'};">${formatMoney(totalRemainingAll)}</div></div>
+                <div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">${totalDailyRecords}</div></div>
+            </div>
+            <div class="projects-section">${rows}</div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                    🖨️ Save as PDF / Print
+                </button>
+                <button onclick="window.close();" style="background: #6b7280; margin-left: 10px;">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+    
+    win.document.close();
+    showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 async function exportProjectToPDF(projectId) {
@@ -1496,14 +1808,14 @@ async function exportProjectToPDF(projectId) {
             
             dailyRows += `
                 <tr>
-                    <td style="border: 1px solid #be123c; padding: 8px; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td
-                    <td style="border: 1px solid #be123c; padding: 8px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td
-                    <td style="border: 1px solid #be123c; padding: 8px; text-align: right; white-space: nowrap;">${formatMoney(budget)}</td
-                    <td style="border: 1px solid #be123c; padding: 8px; text-align: right; white-space: nowrap;">${formatMoney(expenses)}</td
+                    <td style="border: 1px solid #be123c; padding: 8px; white-space: nowrap;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="border: 1px solid #be123c; padding: 8px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
+                    <td style="border: 1px solid #be123c; padding: 8px; text-align: right; white-space: nowrap;">${formatMoney(budget)}</td>
+                    <td style="border: 1px solid #be123c; padding: 8px; text-align: right; white-space: nowrap;">${formatMoney(expenses)}</td>
                     <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">
                         <span style="display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 10px; background: ${statusBg}; color: ${statusColor};">${statusTextDW}</span>
-                    </td
-                    <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td
+                    </td>
+                    <td style="border: 1px solid #be123c; padding: 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
                 </tr>
             `;
         }
@@ -1599,7 +1911,6 @@ async function exportProjectToPDF(projectId) {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
-
 function exportAllProjectDocsToExcel() { 
     if(projectDocuments.length===0) { showToast('No documents', true); return; } 
     let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
@@ -1721,11 +2032,67 @@ function viewUploadedDocumentInfo(docId) {
     }
 }
 
-function sendDocumentToDept(docId, deptId) { 
-    const deptName = allDepartmentsForSend.find(d=>d.id==deptId)?.name || 'Department';
-    showToast(`✅ Document sent to ${deptName}`, false);
-    toggleSendDropdown(`docSendDropdown-${docId}`);
-    closeModal('documentInfoModal');
+// ==================== FIXED SEND DOCUMENT ====================
+async function sendDocumentToDept(docId, deptId) { 
+    const doc = projectDocuments.find(d => d.id === docId);
+    if (!doc) { 
+        showToast('Document not found', true); 
+        return; 
+    }
+    if (deptId == DEPARTMENT_ID) { 
+        showToast('Cannot send to your own department', true); 
+        return; 
+    }
+    
+    const dept = allDepartmentsForSend.find(d=>d.id==deptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#docSendDropdown-${docId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            document_id: parseInt(docId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            doc_type: 'project',
+            doc_data: {
+                ...doc,
+                sent_count: (doc.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_document.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Document sent: "${doc.title}" to ${deptName}`);
+            
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            
+            closeModal('documentInfoModal');
+            await loadProjects();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    } catch(e) {
+        console.error('Send document error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`docSendDropdown-${docId}`);
+    }
 }
 
 // ==================== REQUESTS SECTION ====================
@@ -1762,7 +2129,7 @@ async function loadRequests(highlightId = null) {
     document.getElementById('requestsPage').innerHTML = html;
     
     if (requestsData.length === 0) {
-        document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.</td</tr';
+        document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found. Click "Add Request" to create one.</td></tr>';
         return;
     }
     
@@ -1778,19 +2145,19 @@ async function loadRequests(highlightId = null) {
         
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td
-                <td style="padding: 12px 10px;"><span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${r.type}</span></td
-                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td
-                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatMoney(amount)}</td
-                <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml(descriptionText)}</td
-                <td style="padding: 12px 10px;"><span class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${statusText}</span></td
+                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td>
+                <td style="padding: 12px 10px;"><span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${r.type}</span></td>
+                <td style="padding: 12px 10px; font-weight: 500; word-break: break-word;">${escapeHtml(r.source)}</td>
+                <td style="padding: 12px 10px; text-align: right; font-weight: 700; color: #ea580c; white-space: nowrap;">${formatMoney(amount)}</td>
+                <td style="padding: 12px 10px; word-break: break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml(descriptionText)}</td>
+                <td style="padding: 12px 10px;"><span class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px;">${statusText}</span></td>
                 <td style="padding: 12px 10px; text-align: center;">
                     <div class="flex gap-1 justify-center">
                         <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
                         <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
                         <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
-                </td
+                </td>
             </tr>
         `;
     }
@@ -2003,13 +2370,13 @@ function exportAllRequestsToPDF() {
         
         tableRows += `
             <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 10px 8px; border: 1px solid #be123c;">${formatDate(r.transaction_date)}</td
-                <td style="padding: 10px 8px; border: 1px solid #be123c;"><span style="background: ${typeBg}; padding: 4px 10px; border-radius: 20px; font-size: 11px; color: ${typeColor};">${typeText}</span></td
-                <td style="padding: 10px 8px; border: 1px solid #be123c; font-weight: 500;">${escapeHtml(r.source)}</td
-                <td style="padding: 10px 8px; border: 1px solid #be123c; text-align: right; font-weight: 700; color: #ea580c;">${formatMoney(amount)}</td
-                <td style="padding: 10px 8px; border: 1px solid #be123c;">${escapeHtml(shortDesc)}</td
-                <td style="padding: 10px 8px; border: 1px solid #be123c;"><span style="background: ${statusBg}; padding: 4px 10px; border-radius: 20px; font-size: 11px; color: ${statusColor};">${statusText}</span></td
-                <td style="padding: 10px 8px; border: 1px solid #be123c;">${escapeHtml(r.created_by || 'System')}</td
+                <td style="padding: 10px 8px; border: 1px solid #be123c;">${formatDate(r.transaction_date)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c;"><span style="background: ${typeBg}; padding: 4px 10px; border-radius: 20px; font-size: 11px; color: ${typeColor};">${typeText}</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c; font-weight: 500;">${escapeHtml(r.source)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c; text-align: right; font-weight: 700; color: #ea580c;">${formatMoney(amount)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c;">${escapeHtml(shortDesc)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c;"><span style="background: ${statusBg}; padding: 4px 10px; border-radius: 20px; font-size: 11px; color: ${statusColor};">${statusText}</span></td>
+                <td style="padding: 10px 8px; border: 1px solid #be123c;">${escapeHtml(r.created_by || 'System')}</td>
             </tr>
         `;
     }
@@ -2077,7 +2444,6 @@ function exportAllRequestsToPDF() {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
-
 // ==================== REPORTS SECTION ====================
 async function loadReports(highlightId = null) {
     await Promise.all([fetchReports(), fetchUploadedReports()]);
@@ -2115,9 +2481,17 @@ async function loadReports(highlightId = null) {
             let isHighlighted = highlightId && r.id === highlightId;
             let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
             let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
+            
+            // Sent from badge
+            let sentFromBadge = '';
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[r.sent_from_department] || 'Unknown';
+                sentFromBadge = `<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
+            
             gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetailsModal(${r.id})">
                 ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report</p></div>
+                <div class="card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report ${sentFromBadge}</p></div>
                 <div class="p-4"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${formatDateTime(r.created_at)}</span><span class="status-badge ${statusClass}">${r.status==='sent'?'Sent':'Draft'}</span></div>
                 <p class="text-sm text-gray-600 mt-2 line-clamp-3">${escapeHtml(shortContent)}</p>
                 <div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewReportDetailsModal(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
@@ -2148,8 +2522,13 @@ async function loadReports(highlightId = null) {
         let gridHtml = '';
         for (let doc of uploadedReportsData) {
             let isHighlighted = highlightId && doc.id === highlightId;
+            let sentFromBadge = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                sentFromBadge = `<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
             gridHtml += `<div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}" onclick="viewUploadedReportDetail(${doc.id})">
-                <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
+                <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'} ${sentFromBadge}</p></div>
                 <div class="p-4"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span></div>
                 <p class="text-sm text-gray-600 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
                 <div class="flex gap-2 mt-3 pt-2 border-t"><button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
@@ -2179,8 +2558,16 @@ async function viewUploadedReportDetail(id) {
             previewHtml = `<div class="text-center py-8"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">Preview not available for this file type.</p><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary mt-3">Download File</button></div>`;
         }
         
+        // Sent from info
+        let sentFromInfo = '';
+        if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+            const deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+            sentFromInfo = `<div class="text-xs text-yellow-600 dark:text-yellow-400 mt-2"><i class="fas fa-paper-plane mr-1"></i> Received from: <strong>${deptName}</strong></div>`;
+        }
+        
         document.getElementById('viewReportContent').innerHTML = `
             <div class="bg-pink-800 p-3 rounded text-white"><strong>${escapeHtml(doc.title)}</strong><span class="float-right">${doc.period || 'Monthly'}</span></div>
+            ${sentFromInfo}
             <div class="space-y-2 text-sm mt-3 mb-3">
                 <p><strong>File Name:</strong> ${escapeHtml(doc.file_name)}</p>
                 <p><strong>Description:</strong> ${escapeHtml(doc.description || 'No description')}</p>
@@ -2204,6 +2591,68 @@ async function viewUploadedReportDetail(id) {
             <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
         `;
         openModal('viewReportModal');
+    }
+}
+
+// ==================== FIXED SEND UPLOADED REPORT ====================
+async function sendUploadedReportToDept(reportId, deptId) {
+    const doc = uploadedReportsData.find(d => d.id === reportId);
+    if (!doc) { 
+        showToast('Report not found', true); 
+        return; 
+    }
+    if (deptId == DEPARTMENT_ID) { 
+        showToast('Cannot send to your own department', true); 
+        return; 
+    }
+    
+    const deptName = allDepartmentsForSend.find(d => d.id == deptId)?.name || 'Department';
+    
+    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            document_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            doc_type: 'uploaded_report',
+            doc_data: {
+                ...doc,
+                sent_count: (doc.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_document.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Uploaded report sent: "${doc.title}" to ${deptName}`);
+            
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            
+            closeModal('viewReportModal');
+            await loadReports();
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        console.error('Send uploaded report error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
     }
 }
 
@@ -2253,15 +2702,6 @@ function exportAllUploadedReportsToPDF() {
     showToast("PDF preview opened - Click Print to save");
 }
 
-async function sendUploadedReportToDept(reportId, deptId) {
-    const doc = uploadedReportsData.find(d => d.id === reportId);
-    if (!doc) return;
-    const deptName = allDepartmentsForSend.find(d=>d.id==deptId)?.name || 'Department';
-    showToast(`✅ Report "${doc.title}" sent to ${deptName}`, false);
-    toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
-    closeModal('viewReportModal');
-}
-
 async function deleteUploadedReport(docId) {
     if(confirm('Delete this uploaded report?')) {
         const doc = uploadedReportsData.find(d => d.id === docId);
@@ -2305,14 +2745,66 @@ function viewReportDetailsModal(id) {
     } 
 }
 
+// ==================== FIXED SEND REPORT ====================
 async function sendReportToDeptModal(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
-    if (!r) return; 
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; } 
+    if (!r) { 
+        showToast('Report not found', true); 
+        return; 
+    }
+    if (deptId == DEPARTMENT_ID) { 
+        showToast('Cannot send to your own department', true); 
+        return; 
+    }
+    
     const deptName = allDepartmentsForSend.find(d=>d.id==deptId)?.name || 'Department';
-    showToast(`✅ Report "${r.title}" sent to ${deptName}`, false); 
-    toggleSendDropdown(`reportSendDropdown-${reportId}`);
-    closeModal('viewReportModal');
+    
+    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            report_data: {
+                ...r,
+                sent_count: (r.sent_count || 0) + 1
+            }
+        };
+        
+        const res = await apiCall('send_report.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+            addLog(`Report sent: "${r.title}" to ${deptName}`);
+            
+            r.sent_to_department = deptId;
+            r.sent_from_department = DEPARTMENT_ID;
+            r.is_viewed_by_department = 0;
+            r.sent_count = (r.sent_count || 0) + 1;
+            r.is_sent = 1;
+            
+            await fetchReports();
+            await loadReports();
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        console.error('Send report error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        closeModal('viewReportModal');
+    }
 }
 
 function exportSingleReportExcel(id) { 
@@ -2328,14 +2820,98 @@ function exportSingleReportExcel(id) {
 }
 
 function exportSingleReportPDFNewWindow(id) { 
-    const r = reportsData.find(r=>r.id===id); 
-    if(r) { 
-        let w = window.open('', '_blank'); 
-        if(!w) { showToast("Please allow popups", true); return; }
-        w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(r.title)} - Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;border-radius:10px;}h1{color:#8b5cf6;}</style></head><body><h1>${escapeHtml(r.title)}</h1><p><strong>Period:</strong> ${r.period}</p><p><strong>Created:</strong> ${formatDateTime(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><hr/><div class="content">${escapeHtml(r.content)}</div><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-        w.document.close(); 
-        showToast("PDF preview opened - Click Print to save"); 
-    } 
+    const r = reportsData.find(r => r.id === id); 
+    if(!r) { 
+        showToast("Report not found", true); 
+        return; 
+    }
+    
+    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+    let periodLabel = r.period ? r.period.charAt(0).toUpperCase() + r.period.slice(1) : 'Not specified';
+    let content = r.content || 'No content available';
+    let wordCount = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+    let charCount = content.length;
+    
+    let w = window.open('', '_blank'); 
+    if(!w) { showToast("Please allow popups", true); return; }
+    
+    w.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${escapeHtml(r.title)} - Report</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .report-container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #8b5cf6; }
+            .header { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f3e8ff; padding: 12px 25px; display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }
+            .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; background: ${statusBg}; color: ${statusColor}; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .stat-item { text-align: center; }
+            .stat-item .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; }
+            .stat-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; color: #8b5cf6; }
+            .details-vertical { padding: 20px 25px; }
+            .details-vertical table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .details-vertical tr { border-bottom: 1px solid #e5e7eb; }
+            .details-vertical td:first-child { width: 35%; padding: 12px 16px; background: #f8fafc; font-weight: 600; color: #8b5cf6; border-right: 1px solid #e5e7eb; }
+            .details-vertical td:last-child { padding: 12px 16px; color: #1e293b; font-weight: 500; }
+            .content-section { padding: 20px 25px; }
+            .content-box { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 200px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #1e293b; max-height: 500px; overflow-y: auto; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #8b5cf6; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #7c3aed; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #8b5cf6 !important; -webkit-print-color-adjust: exact; } .content-box { max-height: none; overflow-y: visible; } }
+        </style>
+    </head>
+    <body>
+        <div class="report-container">
+            <div class="header"><h1>${escapeHtml(r.title)}</h1><p>Official Report - Generated: ${new Date().toLocaleString()}</p></div>
+            <div class="info-bar">
+                <span><strong>Report ID:</strong> #${r.id}</span>
+                <span><strong>Status:</strong> <span class="status-badge">${statusText}</span></span>
+                <span><strong>Period:</strong> ${periodLabel}</span>
+                <span><strong>Department:</strong> Architectural</span>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-item"><div class="label">📝 Characters</div><div class="value">${charCount.toLocaleString()}</div></div>
+                <div class="stat-item"><div class="label">📊 Words</div><div class="value">${wordCount.toLocaleString()}</div></div>
+                <div class="stat-item"><div class="label">📅 Created</div><div class="value" style="font-size: 12px;">${formatDateTime(r.created_at)}</div></div>
+                <div class="stat-item"><div class="label">👤 By</div><div class="value" style="font-size: 12px;">${escapeHtml(r.created_by || 'System')}</div></div>
+            </div>
+            <div class="details-vertical">
+                <table>
+                    <tr><td>📌 Title:</td><td><strong>${escapeHtml(r.title)}</strong></td></tr>
+                    <tr><td>📊 Status:</td><td><span class="status-badge">${statusText}</span></td></tr>
+                    <tr><td>📆 Period:</td><td>${periodLabel}</td></tr>
+                    <tr><td>📅 Created At:</td><td>${formatDateTime(r.created_at)}</td></tr>
+                    <tr><td>👤 Created By:</td><td>${escapeHtml(r.created_by || 'System')}</td></tr>
+                    ${r.updated_by ? `<tr><td>✏️ Updated At:</td><td>${formatDateTime(r.updated_at)}</td></tr><tr><td>✏️ Updated By:</td><td>${escapeHtml(r.updated_by)}</td></tr>` : ''}
+                    <tr><td>📝 Word Count:</td><td>${wordCount.toLocaleString()} words</td></tr>
+                    <tr><td>📝 Character Count:</td><td>${charCount.toLocaleString()} characters</td></tr>
+                </table>
+            </div>
+            <div class="content-section">
+                <div class="content-box">${escapeHtml(content)}</div>
+            </div>
+            <div class="footer">GeoTraverse ERP System - Architectural Department | Official Report Document</div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                    🖨️ Save as PDF / Print
+                </button>
+                <button onclick="window.close();" style="background: #6b7280; margin-left: 10px;">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+    
+    w.document.close();
+    showToast("📄 Report PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 function exportAllReportsToExcel() { 
@@ -2348,11 +2924,173 @@ function exportAllReportsToExcel() {
 }
 
 function exportAllReportsToPDF() { 
-    let rows = reportsData.map(r => `<div style="margin-bottom:20px;"><h3 style="color:#8b5cf6;">${escapeHtml(r.title)}</h3><p><strong>Period:</strong> ${r.period} | <strong>Created:</strong> ${formatDate(r.created_at)}</p><p><strong>Created by:</strong> ${escapeHtml(r.created_by||'System')}</p><div style="background:#f5f5f5; padding:10px; border-radius:5px;">${escapeHtml(r.content)}</div><hr/></div>`).join(''); 
-    let w = window.open('', '_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Reports - Architectural Department</title><style>body{font-family:Arial;padding:20px;border:2px solid #8b5cf6;}</style></head><body><h1>All Reports - Architectural Department</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
+    if (reportsData.length === 0) { 
+        showToast('No reports to export', true); 
+        return; 
+    }
+    
+    // ============ CALCULATE SUMMARY STATISTICS ============
+    let totalReports = reportsData.length;
+    let sentCount = 0;
+    let draftCount = 0;
+    let totalChars = 0;
+    let totalWords = 0;
+    let periodCounts = {};
+    
+    for (let r of reportsData) {
+        if (r.status === 'sent') sentCount++;
+        else if (r.status === 'draft') draftCount++;
+        if (r.content) {
+            totalChars += r.content.length;
+            totalWords += r.content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+        }
+        let period = r.period || 'unknown';
+        periodCounts[period] = (periodCounts[period] || 0) + 1;
+    }
+    
+    // ============ BUILD PERIOD SUMMARY TABLE ============
+    let periodRows = '';
+    let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+    for (let period of periodOrder) {
+        let count = periodCounts[period] || 0;
+        if (count > 0) {
+            let percentage = ((count / totalReports) * 100).toFixed(1);
+            periodRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                '<td style="padding: 10px 12px; text-transform: capitalize;">' + escapeHtml(period) + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; font-weight: 600;">' + count + '</td>' +
+                '<td style="padding: 10px 12px; text-align: center; color: #be123c; font-weight: 600;">' + percentage + '%</td>' +
+                '</tr>';
+        }
+    }
+    
+    // ============ BUILD REPORT ROWS - FULL CONTENT (HAIKATI) ============
+    let rows = '';
+    for (let r of reportsData) {
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+        let content = r.content || 'No content available';
+        
+        // FULL CONTENT - NO TRUNCATION
+        let fullContent = escapeHtml(content);
+        
+        rows += '<div style="margin-bottom: 30px; border: 2px solid #be123c; border-radius: 12px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            '<div style="background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 15px 20px;">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">' +
+            '<div><h3 style="margin: 0; font-size: 17px; font-weight: 700;">' + escapeHtml(r.title) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Report ID: #' + r.id + ' | Period: ' + r.period + '</p></div>' +
+            '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>' +
+            '</div></div>' +
+            '<div style="padding: 12px 20px; background: #fdf2f8; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">' +
+            '<span><strong>📅 Created:</strong> ' + formatDateTime(r.created_at) + ' by ' + escapeHtml(r.created_by || 'System') + '</span>' +
+            (r.updated_by ? '<span><strong>✏️ Updated:</strong> ' + formatDateTime(r.updated_at) + ' by ' + escapeHtml(r.updated_by) + '</span>' : '') +
+            '<span><strong>📊 Status:</strong> ' + statusText + '</span>' +
+            '<span><strong>📋 Period:</strong> ' + r.period + '</span>' +
+            '<span><strong>📝 Characters:</strong> ' + (r.content ? r.content.length : 0).toLocaleString() + '</span>' +
+            '<span><strong>📝 Words:</strong> ' + (r.content ? r.content.split(/\s+/).filter(function(w) { return w.length > 0; }).length : 0).toLocaleString() + '</span>' +
+            '</div>' +
+            // FULL CONTENT - HAKUNA KUKATWA
+            '<div style="padding: 18px 20px; background: white; font-size: 13px; line-height: 1.8; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; min-height: 100px; max-height: none; overflow: visible;">' +
+            fullContent +
+            '</div>' +
+            '<div style="padding: 8px 20px; background: #fdf2f8; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: right;">' +
+            'Report #' + r.id + ' | Generated: ' + new Date().toLocaleString() +
+            '</div></div>';
+    }
+    
+    // ============ CREATE PRINT WINDOW ============
+    let win = window.open('', '_blank');
+    if (!win) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+    
+    win.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Reports - Architectural Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #be123c; }\n' +
+            '.header { background: linear-gradient(135deg, #be123c, #9d174d); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #fdf2f8; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; color: #be123c; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; padding: 20px 25px; background: #fdf2f8; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #be123c; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; color: #be123c; }\n' +
+            '.summary-card.total .value { color: #be123c; }\n' +
+            '.summary-card.sent .value { color: #059669; }\n' +
+            '.summary-card.draft .value { color: #d97706; }\n' +
+            '.summary-card.chars .value { color: #3b82f6; }\n' +
+            '.summary-card.words .value { color: #8b5cf6; }\n' +
+            '.period-summary { margin: 0 25px 25px 25px; background: #fdf2f8; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }\n' +
+            '.period-summary h4 { background: #fef2f2; padding: 12px 18px; font-size: 14px; font-weight: 700; margin: 0; border-bottom: 1px solid #e2e8f0; color: #be123c; }\n' +
+            '.period-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n' +
+            '.period-table th { background: #f8fafc; padding: 10px 16px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #475569; }\n' +
+            '.period-table td { padding: 10px 16px; border-bottom: 1px solid #e2e8f0; color: #334155; }\n' +
+            '.reports-section { padding: 0 25px 25px 25px; }\n' +
+            '.reports-title { margin: 25px 0 18px 0; font-size: 16px; font-weight: 700; color: #be123c; border-bottom: 3px solid #be123c; padding-bottom: 10px; display: inline-block; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #fdf2f8; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #fdf2f8; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #be123c; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button:hover { background: #9d174d; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '.print-btn button.close-btn:hover { background: #4b5563; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #be123c !important; -webkit-print-color-adjust: exact; } .summary-cards { background: #fdf2f8 !important; -webkit-print-color-adjust: exact; } .info-bar { background: #fdf2f8 !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header">\n' +
+                '<h1>📊 All Reports Report</h1>\n' +
+                '<p>Architectural Department - Complete Reports Overview</p>\n' +
+            '</div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Reports:</strong> ' + totalReports + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">📋 Total Reports</div><div class="value">' + totalReports + '</div></div>\n' +
+                '<div class="summary-card sent"><div class="label">✅ Sent Reports</div><div class="value">' + sentCount + '</div></div>\n' +
+                '<div class="summary-card draft"><div class="label">✏️ Draft Reports</div><div class="value">' + draftCount + '</div></div>\n' +
+                '<div class="summary-card chars"><div class="label">📝 Total Characters</div><div class="value">' + totalChars.toLocaleString() + '</div></div>\n' +
+                '<div class="summary-card words"><div class="label">📊 Total Words</div><div class="value">' + totalWords.toLocaleString() + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="period-summary">\n' +
+                '<h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>\n' +
+                '<table class="period-table">\n' +
+                    '<thead><tr><th style="width: 40%;">Period Type</th><th style="width: 30%; text-align: center;">Count</th><th style="width: 30%; text-align: center;">Percentage</th></tr></thead>\n' +
+                    '<tbody>\n' + periodRows + '</tbody>\n' +
+                '</table>\n' +
+            '</div>\n' +
+            '<div class="reports-section">\n' +
+                '<div class="reports-title">📄 Reports List (' + totalReports + ' reports)</div>\n' +
+                rows +
+            '</div>\n' +
+            '<div class="footer">\n' +
+                'GeoTraverse ERP System - Architectural Department | Official All Reports Report<br>\n' +
+                'This document is system generated and requires no signature\n' +
+            '</div>\n' +
+            '<div class="print-btn">\n' +
+                '<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n' +
+                    '🖨️ Save as PDF / Print\n' +
+                '</button>\n' +
+                '<button class="close-btn" onclick="window.close();">\n' +
+                    '❌ Close\n' +
+                '</button>\n' +
+            '</div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+    
+    win.document.close();
+    showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 function openUploadReportModal() { 
@@ -2814,6 +3552,10 @@ window.createBackup = createBackup;
 window.restoreBackup = restoreBackup;
 window.clearLogs = clearLogs;
 window.changePassword = changePassword;
+window.sendReportToDeptModal = sendReportToDeptModal;
+window.sendUploadedReportToDept = sendUploadedReportToDept;
+window.sendDocumentToDept = sendDocumentToDept;
+window.sendProjectToDept = sendProjectToDept;
 
 init();
 </script>
