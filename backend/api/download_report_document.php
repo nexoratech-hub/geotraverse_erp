@@ -1,5 +1,5 @@
 <?php
-// backend/api/download_document.php
+// backend/api/download_report_document.php
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, OPTIONS');
@@ -12,11 +12,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // Get parameters
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
-$type = isset($_GET['type']) ? $_GET['type'] : 'project';
 
 if (!$id) {
     http_response_code(400);
-    die('Document ID is required');
+    die('Report ID is required');
 }
 
 // Database connection
@@ -34,51 +33,30 @@ try {
 }
 
 try {
-    // Determine table
-    if ($type === 'project') {
-        $table = 'project_documents';
-    } elseif ($type === 'uploaded_report') {
-        $table = 'uploaded_reports';
-    } else {
-        http_response_code(400);
-        die('Invalid document type');
-    }
-    
-    // Get document details
-    $sql = "SELECT file_name, file_path FROM $table WHERE id = :id AND is_deleted = 0";
+    // Get report details
+    $sql = "SELECT file_name, file_path FROM uploaded_reports WHERE id = :id AND is_deleted = 0";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':id' => $id]);
     $doc = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$doc) {
         http_response_code(404);
-        die('Document not found');
+        die('Report not found');
     }
     
     $fileName = $doc['file_name'];
     $filePath = $doc['file_path'];
     
-    // Determine full path - try multiple locations
-    $possiblePaths = [];
+    // Try multiple paths
+    $possiblePaths = [
+        __DIR__ . '/../../' . $filePath,
+        __DIR__ . '/../../frontend/assets/uploads/reports/' . basename($filePath),
+        __DIR__ . '/../../assets/uploads/reports/' . basename($filePath),
+        __DIR__ . '/../' . $filePath,
+        __DIR__ . '/../../../' . $filePath
+    ];
     
-    // 1. Using the stored path directly
-    $possiblePaths[] = __DIR__ . '/../../' . $filePath;
-    
-    // 2. Using filename only in projects folder
-    $possiblePaths[] = __DIR__ . '/../../frontend/assets/uploads/projects/' . basename($filePath);
-    
-    // 3. Using filename only in reports folder
-    $possiblePaths[] = __DIR__ . '/../../frontend/assets/uploads/reports/' . basename($filePath);
-    
-    // 4. Using the path with assets prefix
-    $possiblePaths[] = __DIR__ . '/../../assets/uploads/projects/' . basename($filePath);
-    $possiblePaths[] = __DIR__ . '/../../assets/uploads/reports/' . basename($filePath);
-    
-    // 5. Using the path without any prefix
-    $possiblePaths[] = __DIR__ . '/../' . $filePath;
-    $possiblePaths[] = __DIR__ . '/../../../' . $filePath;
-    
-    // 6. Search recursively in uploads directory
+    // Search recursively
     $searchDir = __DIR__ . '/../../frontend/assets/uploads/';
     if (is_dir($searchDir)) {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($searchDir));
@@ -89,7 +67,6 @@ try {
         }
     }
     
-    // Find the first existing file
     $fullPath = null;
     foreach ($possiblePaths as $path) {
         if (file_exists($path) && is_file($path)) {
@@ -100,13 +77,12 @@ try {
     
     if (!$fullPath) {
         http_response_code(404);
-        die('File not found on server. Tried: ' . implode(', ', array_slice($possiblePaths, 0, 5)));
+        die('File not found on server');
     }
     
-    // Get file size
     $fileSize = filesize($fullPath);
     
-    // Send file with proper headers
+    // Send file
     header('Content-Type: application/octet-stream');
     header('Content-Disposition: attachment; filename="' . $fileName . '"');
     header('Content-Length: ' . $fileSize);
@@ -115,19 +91,14 @@ try {
     header('Pragma: public');
     header('Accept-Ranges: bytes');
     
-    // Clear output buffer
     while (ob_get_level()) {
         ob_end_clean();
     }
     
-    // Read and output file
     readfile($fullPath);
     exit;
     
 } catch (PDOException $e) {
     http_response_code(500);
     die('Database error: ' . $e->getMessage());
-} catch (Exception $e) {
-    http_response_code(500);
-    die('Error: ' . $e->getMessage());
 }

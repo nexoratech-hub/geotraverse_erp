@@ -365,7 +365,51 @@
 
 <div id="reportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-chart-line mr-2"></i>Add Report</h3><button onclick="closeModal('reportModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="reportId"><div class="form-group"><label>Title *</label><input type="text" id="reportTitle" required></div><div class="form-group"><label>Period</label><select id="reportPeriod"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></div><div class="form-group"><label>Content</label><textarea id="reportContent" rows="5"></textarea></div><div class="flex gap-3"><button onclick="saveReport()" class="flex-1 btn-primary py-1.5 rounded">Save</button><button onclick="closeModal('reportModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button></div></div></div></div>
 
-<div id="uploadReportModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-upload mr-2"></i>Upload Report Document</h3><button onclick="closeModal('uploadReportModal')">&times;</button></div><div class="modal-body"><div class="form-group"><label>Title *</label><input type="text" id="uploadReportTitle" required></div><div class="form-group"><label>Period</label><select id="uploadReportPeriod"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></div><div class="form-group"><div class="file-upload-area" onclick="document.getElementById('reportFileInput').click()"><i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i><p>Click to upload document (PDF, DOC, XLS, Images) - Max 10MB</p></div><input type="file" id="reportFileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="hidden"></div><div id="uploadedFilePreview" class="hidden mt-2"><div class="flex justify-between items-center p-2 bg-gray-100 rounded"><span id="fileNameDisplay"></span><div class="flex gap-2"><button onclick="previewUploadedFile()" class="action-btn preview text-[9px]">Preview</button><button onclick="removeUploadedFile()" class="action-btn delete text-[9px]">Remove</button></div></div></div><div class="flex gap-3"><button onclick="saveUploadedReport()" class="flex-1 btn-primary py-1.5 rounded">Save Report</button><button onclick="closeModal('uploadReportModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button></div></div></div></div>
+<!-- Upload Report Modal - FIXED -->
+<div id="uploadReportModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-upload mr-2"></i>Upload Report Document</h3>
+            <button onclick="closeModal('uploadReportModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Title *</label>
+                <input type="text" id="uploadReportTitle" required>
+            </div>
+            <div class="form-group">
+                <label>Period</label>
+                <select id="uploadReportPeriod">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <div class="file-upload-area" onclick="document.getElementById('reportFileInput').click()">
+                    <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i>
+                    <p>Click to upload document (PDF, DOC, XLS, Images) - Max 10MB</p>
+                </div>
+                <input type="file" id="reportFileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="hidden">
+            </div>
+            <div id="uploadedFilePreview" class="hidden mt-2">
+                <div class="flex justify-between items-center p-2 bg-gray-100 rounded">
+                    <span id="fileNameDisplay"></span>
+                    <div class="flex gap-2">
+                        <button onclick="previewUploadedFile()" class="action-btn preview text-[9px]">Preview</button>
+                        <button onclick="removeUploadedFile()" class="action-btn delete text-[9px]">Remove</button>
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-3">
+                <button onclick="saveUploadedReport()" class="flex-1 btn-primary py-1.5 rounded">Save Report</button>
+                <button onclick="closeModal('uploadReportModal')" class="flex-1 bg-gray-200 py-1.5 rounded">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="reportViewModal" class="modal"><div class="modal-content" style="max-width: 800px;"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Report Details</h3><button onclick="closeModal('reportViewModal')">&times;</button></div><div class="modal-body">
     <div id="reportViewContent" class="report-content-preview"></div>
@@ -570,7 +614,6 @@ async function fetchEmployees() {
     try {
         const res = await apiCall('get_employees.php'); 
         if (res.success && res.data) {
-            // FIXED: Sort by id DESC (newest first) AND filter out deleted
             employeesData = res.data
                 .filter(e => !e.is_deleted || e.is_deleted != 1)
                 .sort((a,b) => b.id - a.id);
@@ -648,11 +691,24 @@ async function fetchReports() {
     } 
 }
 
+// ==================== FETCH UPLOADED REPORTS - FIXED ====================
 async function fetchUploadedReports() { 
-    const res = await apiCall('get_uploaded_reports.php?department_id=1'); 
-    uploadedReportsData = (res.success && res.data) ? 
-        res.data.sort((a,b) => b.id - a.id) : 
-        []; 
+    try {
+        const res = await apiCall('get_uploaded_reports.php?department_id=1'); 
+        if (res.success && res.data) { 
+            uploadedReportsData = res.data.sort((a,b) => b.id - a.id); 
+            console.log('Uploaded reports loaded:', uploadedReportsData.length);
+            if (uploadedReportsData.length > 0) {
+                console.log('First uploaded report:', uploadedReportsData[0]);
+            }
+        } else { 
+            uploadedReportsData = []; 
+            console.log('No uploaded reports found');
+        }
+    } catch(e) {
+        console.error('Fetch uploaded reports error:', e);
+        uploadedReportsData = [];
+    }
 }
 
 async function fetchBudgetRequests() {
@@ -890,8 +946,8 @@ async function deleteProjectDocument(docId) {
     }
 }
 
-// ==================== SEND FUNCTIONS - WITH DUPLICATE SEND SUPPORT ====================
-
+// ==================== SEND FUNCTIONS ====================
+// ==================== SEND DOCUMENT - WITH ADVANCED TRACKING ====================
 async function sendDocumentToDept(docId, deptId, type) { 
     const doc = projectDocuments.find(d => d.id === docId);
     if (!doc) { 
@@ -922,12 +978,15 @@ async function sendDocumentToDept(docId, deptId, type) {
             document_title: doc.title,
             document_file: doc.file_name,
             description: doc.description || '',
+            doc_type: type || 'project',
+            sent_by: currentUserFullName || 'Super Admin',
             duplicate_send: true
         };
         
         console.log('Sending document payload:', payload);
         
-        const res = await apiCall('send_document.php', 'POST', payload);
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_document_advanced.php', 'POST', payload);
         
         console.log('Send document response:', res);
         
@@ -956,7 +1015,6 @@ async function sendDocumentToDept(docId, deptId, type) {
         closeModal('documentInfoModal');
     }
 }
-
 function exportAllProjectDocsToExcel() { 
     if(projectDocuments.length===0) { showToast('No documents', true); return; } 
     let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
@@ -992,7 +1050,6 @@ async function addToRecycleBin(itemId, itemType, itemName) {
 }
 
 async function restoreFromRecycleBin(recycleId) { 
-    // Check if item is employee - use specialized restore
     const item = recycleBinData.find(i => i.id === recycleId);
     if (item && item.item_type === 'employee') {
         await restoreEmployeeFromRecycleBin(recycleId);
@@ -1011,41 +1068,32 @@ async function restoreFromRecycleBin(recycleId) {
     } else showToast(res.message||'Failed', true); 
 }
 
-// ==================== EMPLOYEE RESTORE - FIXED ====================
 async function restoreEmployeeFromRecycleBin(recycleId) {
     if (!confirm('Restore this employee?')) return;
     
     showToast('Restoring employee...', false);
     
     try {
-        // First restore from recycle bin
         const res = await apiCall('restore_from_recycle_bin.php', 'POST', { recycle_id: recycleId });
         
         if (res && res.success) {
             showToast('✅ Employee restored successfully', false);
             addLog('Employee restored from recycle bin');
             
-            // ========== CRITICAL: Force refresh employees ==========
             await fetchEmployees();
             
-            // Re-render employees page if active
             const activeNav = document.querySelector('.nav-item.active');
             if (activeNav && activeNav.getAttribute('data-page') === 'employees') {
                 await loadEmployees();
             }
             
-            // ========== UPDATE DASHBOARD ==========
             await loadDashboard();
-            
-            // Update recycle bin
             await loadRecycleBinFromDB();
             renderRecycleBin();
             
-            // Update badges
             updateProjectBadge();
             updateRequestBadge();
             
-            // Update employees count in sidebar if visible
             const empCount = document.querySelector('#employeesPage .text-lg.font-bold');
             if (empCount) {
                 empCount.innerHTML = `<i class="fas fa-users text-blue-600 mr-2"></i>Employees (${employeesData.length})`;
@@ -1060,7 +1108,6 @@ async function restoreEmployeeFromRecycleBin(recycleId) {
     }
 }
 
-// ==================== EMPLOYEE DELETE - FIXED ====================
 async function deleteEmployee(id) { 
     if(confirm('Delete this employee? It will be moved to recycle bin.')) { 
         const e = employeesData.find(emp => emp.id === id);
@@ -1073,20 +1120,16 @@ async function deleteEmployee(id) {
                 showToast('Employee moved to recycle bin', false); 
                 addLog(`Employee deleted: ${e?.name}`);
                 
-                // ========== FORCE REMOVE FROM LOCAL DATA ==========
                 employeesData = employeesData.filter(emp => emp.id !== id);
                 
-                // Remove row from DOM
                 const row = document.getElementById(`emp-row-${id}`);
                 if (row) row.remove();
                 
-                // Update dashboard count
                 const dashboardStat = document.querySelector('.stat-card[onclick="showPage(\'employees\')"] .stat-number');
                 if (dashboardStat) {
                     dashboardStat.innerText = employeesData.length;
                 }
                 
-                // Update employees count in header
                 const countHeader = document.querySelector('#employeesPage .text-lg.font-bold');
                 if (countHeader) {
                     countHeader.innerHTML = `<i class="fas fa-users text-blue-600 mr-2"></i>Employees (${employeesData.length})`;
@@ -1142,7 +1185,6 @@ function renderRecycleBin() {
                     item.item_type === 'budget_request' ? 'fa-hand-holding-usd' : 
                     item.item_type === 'project_document' ? 'fa-file-alt' : 'fa-file-alt';
         
-        // Determine restore function based on item type
         let restoreFunc = `restoreFromRecycleBin(${item.id})`;
         if (item.item_type === 'employee') {
             restoreFunc = `restoreEmployeeFromRecycleBin(${item.id})`;
@@ -1184,7 +1226,6 @@ async function loadDashboard() {
         loadRecycleBinFromDB()
     ]);
     
-    // FETCH TRANSACTIONS FROM FINANCE DEPARTMENT
     let transactionsData = [];
     let totalIncome = 0;
     let totalExpense = 0;
@@ -1372,7 +1413,6 @@ async function exportEmployeesToPDF() {
         return;
     }
 
-    // Calculate summary statistics
     let totalSalary = 0;
     let deptCounts = {};
     let roleCounts = {};
@@ -1386,12 +1426,10 @@ async function exportEmployeesToPDF() {
         roleCounts[role] = (roleCounts[role] || 0) + 1;
     }
 
-    // Build employee rows
     let rows = '';
     for (let e of employeesData) {
         let deptName = departmentNames[e.department_id] || 'Unknown';
         let role = e.role || 'Staff';
-        let roleClass = role === 'Super Administrator' ? 'super-admin' : role === 'Administrator' ? 'admin' : role === 'Manager' ? 'manager' : 'staff';
         let roleColor = role === 'Super Administrator' ? '#8b5cf6' : role === 'Administrator' ? '#3b82f6' : role === 'Manager' ? '#f59e0b' : '#6b7280';
         let roleBg = role === 'Super Administrator' ? '#ede9fe' : role === 'Administrator' ? '#dbeafe' : role === 'Manager' ? '#fef3c7' : '#f3f4f6';
         
@@ -1408,7 +1446,6 @@ async function exportEmployeesToPDF() {
             </tr>`;
     }
 
-    // Build department summary rows
     let deptSummaryRows = '';
     let sortedDepts = Object.keys(deptCounts).sort();
     for (let dept of sortedDepts) {
@@ -1422,7 +1459,6 @@ async function exportEmployeesToPDF() {
             </tr>`;
     }
 
-    // Build role summary rows
     let roleSummaryRows = '';
     let sortedRoles = Object.keys(roleCounts).sort();
     for (let role of sortedRoles) {
@@ -1449,72 +1485,16 @@ async function exportEmployeesToPDF() {
         <title>Employees Report - Super Admin</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
-                background: #f0f2f5; 
-                padding: 30px; 
-            }
-            .container { 
-                max-width: 1300px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 16px; 
-                overflow: hidden; 
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                border: 2px solid #0f74ba; 
-            }
-            .header { 
-                background: linear-gradient(135deg, #0f74ba, #0a5a8e); 
-                color: white; 
-                padding: 25px; 
-                text-align: center; 
-            }
-            .header h1 { 
-                font-size: 24px; 
-                margin: 0; 
-            }
-            .header p { 
-                font-size: 12px; 
-                opacity: 0.85; 
-                margin-top: 6px; 
-            }
-            .info-bar { 
-                background: #f8fafc; 
-                padding: 12px 25px; 
-                display: flex; 
-                justify-content: space-between; 
-                border-bottom: 1px solid #e5e7eb; 
-                flex-wrap: wrap; 
-                gap: 10px; 
-                font-size: 12px; 
-            }
-            .summary-cards { 
-                display: grid; 
-                grid-template-columns: repeat(4, 1fr); 
-                gap: 15px; 
-                padding: 20px 25px; 
-                background: #f9fafb; 
-                border-bottom: 1px solid #e5e7eb; 
-            }
-            .summary-card { 
-                background: white; 
-                border-radius: 10px; 
-                padding: 12px; 
-                text-align: center; 
-                border: 1px solid #e5e7eb; 
-            }
-            .summary-card .label { 
-                font-size: 10px; 
-                font-weight: 600; 
-                color: #6b7280; 
-                text-transform: uppercase; 
-                letter-spacing: 0.5px; 
-            }
-            .summary-card .value { 
-                font-size: 16px; 
-                font-weight: 800; 
-                margin-top: 5px; 
-            }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0f74ba; }
+            .header { background: linear-gradient(135deg, #0f74ba, #0a5a8e); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
+            .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }
             .summary-card.employees .value { color: #0f74ba; }
             .summary-card.salary .value { color: #059669; }
             .summary-card.depts .value { color: #8b5cf6; }
@@ -1571,71 +1551,19 @@ async function exportEmployeesToPDF() {
                 text-align: center;
             }
             
-            .table-container { 
-                overflow-x: auto; 
-                padding: 20px 25px; 
-            }
-            .employees-table { 
-                width: 100%; 
-                border-collapse: collapse; 
-                font-size: 11px; 
-            }
-            .employees-table th { 
-                background: #0f74ba; 
-                color: white; 
-                padding: 10px 8px; 
-                font-weight: 700; 
-                text-align: left; 
-                border: 1px solid #0a5a8e; 
-                font-size: 11px; 
-            }
-            .employees-table td { 
-                padding: 10px 8px; 
-                border: 1px solid #cbd5e1; 
-                vertical-align: middle; 
-            }
+            .table-container { overflow-x: auto; padding: 20px 25px; }
+            .employees-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            .employees-table th { background: #0f74ba; color: white; padding: 10px 8px; font-weight: 700; text-align: left; border: 1px solid #0a5a8e; font-size: 11px; }
+            .employees-table td { padding: 10px 8px; border: 1px solid #cbd5e1; vertical-align: middle; }
             .employees-table .text-right { text-align: right; }
             .employees-table .text-center { text-align: center; }
-            .footer { 
-                text-align: center; 
-                font-size: 10px; 
-                color: #6b7280; 
-                padding: 15px; 
-                border-top: 1px solid #e5e7eb; 
-                background: #f9fafb; 
-            }
-            .print-btn { 
-                text-align: center; 
-                padding: 15px; 
-                background: #f9fafb; 
-                border-top: 1px solid #e5e7eb; 
-            }
-            .print-btn button { 
-                background: #0f74ba; 
-                color: white; 
-                border: none; 
-                padding: 10px 24px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-size: 13px; 
-                font-weight: 600; 
-            }
-            .print-btn button:hover { 
-                background: #0a5a8e; 
-            }
-            .print-btn button.close-btn {
-                background: #6b7280;
-                margin-left: 10px;
-            }
-            .print-btn button.close-btn:hover {
-                background: #4b5563;
-            }
-            @media print { 
-                .print-btn { display: none; } 
-                body { background: white; padding: 0; } 
-                .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } 
-                .employees-table th { background: #0f74ba !important; -webkit-print-color-adjust: exact; } 
-            }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #0f74ba; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #0a5a8e; }
+            .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+            .print-btn button.close-btn:hover { background: #4b5563; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } .employees-table th { background: #0f74ba !important; -webkit-print-color-adjust: exact; } }
         </style>
     </head>
     <body>
@@ -1770,7 +1698,6 @@ async function loadProjects() {
             let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
             let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
             
-            // ========== GET SOURCE DEPARTMENT NAME ==========
             let sourceDeptName = 'System';
             if (p.sent_from_dept) {
                 sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
@@ -1794,7 +1721,6 @@ async function loadProjects() {
                     </div>
                     <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
                     
-                    <!-- ========== SOURCE DEPARTMENT ========== -->
                     <div class="mt-1 text-[10px]">
                         <span class="text-gray-400">Source: </span>
                         <span class="${isSentFromOtherDept ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
@@ -1819,7 +1745,6 @@ async function loadProjects() {
         }
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
     } else {
-        // UPLOADED DOCUMENTS TAB - with source department
         html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Project Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
         <div class="section-card-body"><div id="uploadedDocsGrid" class="documents-grid"></div></div></div>`;
         document.getElementById('projectsPage').innerHTML = html;
@@ -1838,7 +1763,6 @@ async function loadProjects() {
             else if (fileExt === 'doc' || fileExt === 'docx') fileIcon = 'fa-file-word';
             else if (fileExt === 'xls' || fileExt === 'xlsx') fileIcon = 'fa-file-excel';
             
-            // Get source department for document
             let docSourceDept = 'System';
             if (doc.sent_from_department) {
                 docSourceDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
@@ -1854,7 +1778,6 @@ async function loadProjects() {
                         <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
                         <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
                     </div>
-                    <!-- Source Department -->
                     <div class="text-[10px] mb-2">
                         <span class="text-gray-400">Source: </span>
                         <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
@@ -2091,7 +2014,8 @@ function exportAllProjectsToExcel() {
     showToast('Exported'); 
 }
 
-// ==================== SEND PROJECT - WITH DUPLICATE SEND AND SOURCE DEPARTMENT ====================
+// ==================== SEND PROJECT ====================
+// ==================== SEND PROJECT - WITH ADVANCED TRACKING ====================
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { 
@@ -2114,6 +2038,9 @@ async function sendProjectToDept(projectId, deptId) {
     }
     
     try {
+        // GET DAILY WORK DATA
+        const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
+        
         const payload = { 
             project_id: parseInt(projectId), 
             to_department_id: parseInt(deptId), 
@@ -2129,17 +2056,26 @@ async function sendProjectToDept(projectId, deptId) {
             image: p.image || '',
             start_date: p.start_date || '',
             end_date: p.end_date || '',
+            daily_work: projectDailyWork.map(w => ({
+                date: w.date,
+                work_description: w.work_description || '',
+                budget: parseFloat(w.budget) || 0,
+                amount: parseFloat(w.amount) || 0,
+                status: w.status || 'pending'
+            })),
+            sent_by: currentUserFullName || 'Super Admin',
             duplicate_send: true
         };
         
         console.log('Sending project payload:', payload);
         
-        const res = await apiCall('send_project.php', 'POST', payload);
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_project_advanced.php', 'POST', payload);
         
         console.log('Send project response:', res);
         
         if (res && res.success) {
-            showToast(`✅ Project "${p.name}" sent to ${deptName}`, false);
+            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records`, false);
             addLog(`Project "${p.name}" sent to ${deptName}`);
             
             p.sent_to_dept = deptId;
@@ -2165,8 +2101,8 @@ async function sendProjectToDept(projectId, deptId) {
         closeModal('viewProjModal');
     }
 }
-
-// ==================== SEND REPORT - WITH DUPLICATE SEND ====================
+// ==================== SEND REPORT ====================
+// ==================== SEND REPORT - WITH ADVANCED TRACKING ====================
 async function sendReportToDeptModal(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
     if (!r) { 
@@ -2197,12 +2133,14 @@ async function sendReportToDeptModal(reportId, deptId) {
             report_title: r.title,
             report_period: r.period,
             report_content: r.content,
+            sent_by: currentUserFullName || 'Super Admin',
             duplicate_send: true
         };
         
         console.log('Sending report payload:', payload);
         
-        const res = await apiCall('send_report.php', 'POST', payload);
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_report_advanced.php', 'POST', payload);
         
         console.log('Send report response:', res);
         
@@ -2231,8 +2169,8 @@ async function sendReportToDeptModal(reportId, deptId) {
         closeModal('reportViewModal');
     }
 }
-
-// ==================== SEND UPLOADED REPORT - WITH DUPLICATE SEND ====================
+// ==================== SEND UPLOADED REPORT ====================
+// ==================== SEND UPLOADED REPORT - WITH ADVANCED TRACKING ====================
 async function sendUploadedReportToDept(reportId, deptId) { 
     const doc = uploadedReportsData.find(d => d.id === reportId); 
     if (!doc) { 
@@ -2264,12 +2202,14 @@ async function sendUploadedReportToDept(reportId, deptId) {
             report_period: doc.period,
             report_file: doc.file_name,
             report_description: doc.description || '',
+            sent_by: currentUserFullName || 'Super Admin',
             duplicate_send: true
         };
         
         console.log('Sending uploaded report payload:', payload);
         
-        const res = await apiCall('send_uploaded_report.php', 'POST', payload);
+        // USE ADVANCED ENDPOINT (au send_document_advanced)
+        const res = await apiCall('send_document_advanced.php', 'POST', payload);
         
         console.log('Send uploaded report response:', res);
         
@@ -2298,7 +2238,6 @@ async function sendUploadedReportToDept(reportId, deptId) {
         closeModal('reportViewModal');
     }
 }
-
 // ==================== VIEW PROJECT DETAILS ====================
 async function viewProjectDetails(id) {
     const p = projectsData.find(p => p.id === id);
@@ -2322,7 +2261,6 @@ async function viewProjectDetails(id) {
         if (p.updated_by && p.updated_by !== p.created_by) actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(p.updated_by)} | ${formatDateTimeFull(p.updated_at)}</div>`;
         document.getElementById('projActionHistory').innerHTML = actionHtml || '<div>No history available</div>';
         
-        // Get source department for project
         let sourceDeptName = 'System';
         if (p.sent_from_dept) {
             sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
@@ -2904,18 +2842,18 @@ async function exportProjectToPDFNewWindow(projectId) {
     printWindow.document.close();
     showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
+
+// ==================== EXPORT ALL PROJECTS TO PDF ====================
 async function exportAllProjectsToPDF() {
     if (projectsData.length === 0) {
         showToast('No projects to export', true);
         return;
     }
 
-    // ============ LOAD DAILY WORK DATA ============
     if (dailyworkData.length === 0) {
         await fetchDailyWork();
     }
 
-    // Calculate summary statistics
     let totalAmount = 0;
     let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
     let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
@@ -2938,7 +2876,6 @@ async function exportAllProjectsToPDF() {
     }
     let totalRemainingAll = totalBudgetAll - totalExpensesAll;
 
-    // Build each project card
     let rows = '';
     for (let p of projectsData) {
         let imageUrl = getFullImageUrl(p.image);
@@ -2970,7 +2907,6 @@ async function exportAllProjectsToPDF() {
             statusColor = '#7e22ce';
         }
         
-        // Get daily work for this project
         const projectWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(p.id));
         
         let projBudget = 0, projExpenses = 0;
@@ -2983,7 +2919,6 @@ async function exportAllProjectsToPDF() {
         let projRemaining = projBudget - projExpenses;
         let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
         
-        // Build DAILY WORK TABLE ROWS
         let dailyRows = '';
         if (projectWork.length > 0) {
             for (let w of projectWork) {
@@ -3015,7 +2950,6 @@ async function exportAllProjectsToPDF() {
             dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records</td></tr>';
         }
         
-        // PROJECT CARD
         let sourceDeptName = 'System';
         if (p.sent_from_dept) {
             sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
@@ -3179,6 +3113,7 @@ async function exportAllProjectsToPDF() {
     printWindow.document.close();
     showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 // ==================== BUDGET REQUESTS SECTION ====================
 async function loadRequests() {
     await fetchBudgetRequests();
@@ -3348,7 +3283,6 @@ function exportAllRequestsToPDF() {
     let netProfit = totalIncome - totalExpense;
     let netProfitColor = netProfit >= 0 ? '#059669' : '#dc2626';
 
-    // Build table rows
     let rows = '';
     let rowNumber = 1;
     for (let r of budgetRequests) {
@@ -3383,7 +3317,6 @@ function exportAllRequestsToPDF() {
         rowNumber++;
     }
 
-    // Build department summary
     let deptSummaryRows = '';
     let sortedDepts = Object.keys(departmentCounts).sort();
     for (let dept of sortedDepts) {
@@ -3540,7 +3473,6 @@ async function loadReports() {
         if (reportsData.length === 0) { document.getElementById('reportsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No reports found.</div>'; return; }
         let reportsHtml = '';
         for (let r of reportsData) {
-            // Get source department for report
             let sourceDeptName = 'System';
             if (r.sent_from_department) {
                 sourceDeptName = departmentNames[r.sent_from_department] || 'Unknown Department';
@@ -3556,7 +3488,6 @@ async function loadReports() {
                         <span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span>
                         <span class="status-badge ${r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">${r.status === 'sent' ? 'Sent' : 'Draft'}</span>
                     </div>
-                    <!-- Source Department -->
                     <div class="text-[10px] mb-1">
                         <span class="text-gray-400">Source: </span>
                         <span class="${isReportSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
@@ -3576,17 +3507,44 @@ async function loadReports() {
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
     } else {
-        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Reports</h3><div class="flex gap-2"><button onclick="openUploadReportModal()" class="btn-warning text-sm">Upload Report</button><button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm">Excel All</button><button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm">PDF All</button></div></div>
-        <div class="section-card-body"><div id="uploadedReportsGrid" class="reports-grid"></div></div></div>`;
+        // ============ UPLOADED REPORTS - FIXED ============
+        html += `
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Reports (${uploadedReportsData.length})</h3>
+                    <div class="flex gap-2">
+                        <button onclick="openUploadReportModal()" class="btn-warning text-sm">
+                            <i class="fas fa-upload mr-1"></i> Upload Report
+                        </button>
+                        <button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i> Excel All
+                        </button>
+                        <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> PDF All
+                        </button>
+                    </div>
+                </div>
+                <div class="section-card-body">
+                    <div id="uploadedReportsGrid" class="reports-grid"></div>
+                </div>
+            </div>
+        `;
         document.getElementById('reportsPage').innerHTML = html;
-        if (uploadedReportsData.length === 0) { document.getElementById('uploadedReportsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No uploaded reports.</div>'; return; }
+        
+        if (uploadedReportsData.length === 0) {
+            document.getElementById('uploadedReportsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded reports. Click "Upload Report" to add one.</div>';
+            return;
+        }
+        
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
-            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
             let fileIcon = 'fa-file-alt';
-            if (fileExt === 'pdf') fileIcon = 'fa-file-pdf';
+            if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
+            else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
+            else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
+            else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
             
-            // Get source department for uploaded report
             let sourceDeptName = 'System';
             if (doc.sent_from_department) {
                 sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown Department';
@@ -3595,29 +3553,36 @@ async function loadReports() {
             }
             let isDocSent = doc.sent_from_department && doc.sent_from_department != 1;
             
-            reportsHtml += `<div class="uploaded-report-card" id="uploaded-report-card-${doc.id}">
-                <div class="card-header"><h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
-                <div class="p-3">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                        <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
+            reportsHtml += `
+                <div class="uploaded-report-card" id="uploaded-report-card-${doc.id}" onclick="viewUploadedReportDocument(${doc.id})" style="cursor:pointer;">
+                    <div class="card-header" style="padding: 10px 14px;">
+                        <h4 style="font-size:13px;">
+                            <i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title || 'Untitled')}
+                        </h4>
+                        <p style="font-size:9px;">${doc.file_name || 'Document'}</p>
                     </div>
-                    <!-- Source Department -->
-                    <div class="text-[10px] mb-2">
-                        <span class="text-gray-400">Source: </span>
-                        <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                            <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                            ${escapeHtml(sourceDeptName)}
-                        </span>
+                    <div class="p-3" style="padding: 10px 14px;">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                        </div>
+                        <div class="text-[10px] mb-2">
+                            <span class="text-gray-400">Source: </span>
+                            <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                                <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                                ${escapeHtml(sourceDeptName)}
+                            </span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                            <button onclick="event.stopPropagation(); viewUploadedReportDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
+                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
+                        </div>
                     </div>
-                    <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
-                    <div class="flex gap-2 mt-2 pt-1 border-t">
-                        <button onclick="viewUploadedReportDocument(${doc.id})" class="action-btn view">View</button>
-                        <button onclick="deleteUploadedReport(${doc.id})" class="action-btn delete">Delete</button>
-                    </div>
-                    <div class="user-info-line">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
-                </div>
-            </div>`;
+                </div>`;
         }
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
     }
@@ -3665,7 +3630,6 @@ function exportSingleReportPDFNewWindow(id) {
     let periodText = r.period || 'Not specified';
     let periodLabel = periodText.charAt(0).toUpperCase() + periodText.slice(1);
     
-    // FULL CONTENT - NO TRUNCATION
     let fullContent = r.content || 'No content available';
     let wordCount = fullContent.split(/\s+/).filter(w => w.length > 0).length;
     let charCount = fullContent.length;
@@ -3687,169 +3651,32 @@ function exportSingleReportPDFNewWindow(id) {
         <title>${escapeHtml(r.title)} - Report</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
-                background: #f0f2f5; 
-                padding: 30px; 
-            }
-            .container { 
-                max-width: 1000px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 16px; 
-                overflow: hidden; 
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                border: 2px solid #0f74ba; 
-            }
-            .header { 
-                background: linear-gradient(135deg, #0f74ba, #0a5a8e); 
-                color: white; 
-                padding: 25px; 
-                text-align: center; 
-            }
-            .header h1 { 
-                font-size: 24px; 
-                margin: 0; 
-            }
-            .header p { 
-                font-size: 12px; 
-                opacity: 0.85; 
-                margin-top: 6px; 
-            }
-            .info-bar { 
-                background: #eff6ff; 
-                padding: 12px 25px; 
-                display: flex; 
-                justify-content: space-between; 
-                border-bottom: 1px solid #e5e7eb; 
-                flex-wrap: wrap; 
-                gap: 10px; 
-                font-size: 12px; 
-            }
-            .status-badge { 
-                display: inline-block; 
-                padding: 4px 14px; 
-                border-radius: 20px; 
-                font-size: 12px; 
-                font-weight: 500; 
-                background: ${statusBg}; 
-                color: ${statusColor}; 
-            }
-            .stats-grid { 
-                display: grid; 
-                grid-template-columns: repeat(4, 1fr); 
-                gap: 15px; 
-                padding: 15px 25px; 
-                background: #f9fafb; 
-                border-bottom: 1px solid #e5e7eb; 
-            }
-            .stat-item { 
-                text-align: center; 
-            }
-            .stat-item .label { 
-                font-size: 10px; 
-                font-weight: 600; 
-                color: #64748b; 
-                text-transform: uppercase; 
-                letter-spacing: 0.5px; 
-            }
-            .stat-item .value { 
-                font-size: 16px; 
-                font-weight: 800; 
-                margin-top: 4px; 
-                color: #0f74ba; 
-            }
-            .section-title { 
-                background: #0f74ba; 
-                color: white; 
-                padding: 12px 25px; 
-                font-size: 14px; 
-                font-weight: 700; 
-                margin: 20px 0 0 0; 
-            }
-            .details-vertical { 
-                padding: 20px 25px; 
-            }
-            .details-vertical table { 
-                width: 100%; 
-                border-collapse: collapse; 
-                font-size: 13px; 
-            }
-            .details-vertical tr { 
-                border-bottom: 1px solid #e5e7eb; 
-            }
-            .details-vertical td:first-child { 
-                width: 35%; 
-                padding: 12px 16px; 
-                background: #f8fafc; 
-                font-weight: 600; 
-                color: #0f74ba; 
-                border-right: 1px solid #e5e7eb; 
-            }
-            .details-vertical td:last-child { 
-                padding: 12px 16px; 
-                color: #1e293b; 
-                font-weight: 500; 
-            }
-            .content-section { 
-                padding: 20px 25px; 
-            }
-            .content-box { 
-                background: #f8fafc; 
-                padding: 20px; 
-                border-radius: 12px; 
-                border: 1px solid #e2e8f0; 
-                min-height: 200px; 
-                white-space: pre-wrap; 
-                line-height: 1.8; 
-                font-size: 14px; 
-                color: #1e293b; 
-                max-height: none; 
-                overflow-y: visible; 
-            }
-            .footer { 
-                text-align: center; 
-                font-size: 10px; 
-                color: #6b7280; 
-                padding: 15px; 
-                border-top: 1px solid #e5e7eb; 
-                background: #f9fafb; 
-                margin-top: 20px; 
-            }
-            .print-btn { 
-                text-align: center; 
-                padding: 15px; 
-                background: #f9fafb; 
-                border-top: 1px solid #e5e7eb; 
-            }
-            .print-btn button { 
-                background: #0f74ba; 
-                color: white; 
-                border: none; 
-                padding: 10px 24px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-size: 13px; 
-                font-weight: 600; 
-            }
-            .print-btn button:hover { 
-                background: #0a5a8e; 
-            }
-            .print-btn button.close-btn { 
-                background: #6b7280; 
-                margin-left: 10px; 
-            }
-            .print-btn button.close-btn:hover { 
-                background: #4b5563; 
-            }
-            @media print { 
-                .print-btn { display: none; } 
-                body { background: white; padding: 0; } 
-                .container { border: none; box-shadow: none; } 
-                .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } 
-                .section-title { background: #0f74ba !important; -webkit-print-color-adjust: exact; } 
-                .content-box { max-height: none; overflow-y: visible; } 
-            }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0f74ba; }
+            .header { background: linear-gradient(135deg, #0f74ba, #0a5a8e); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #eff6ff; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; background: ${statusBg}; color: ${statusColor}; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .stat-item { text-align: center; }
+            .stat-item .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .stat-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; color: #0f74ba; }
+            .section-title { background: #0f74ba; color: white; padding: 12px 25px; font-size: 14px; font-weight: 700; margin: 20px 0 0 0; }
+            .details-vertical { padding: 20px 25px; }
+            .details-vertical table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .details-vertical tr { border-bottom: 1px solid #e5e7eb; }
+            .details-vertical td:first-child { width: 35%; padding: 12px 16px; background: #f8fafc; font-weight: 600; color: #0f74ba; border-right: 1px solid #e5e7eb; }
+            .details-vertical td:last-child { padding: 12px 16px; color: #1e293b; font-weight: 500; }
+            .content-section { padding: 20px 25px; }
+            .content-box { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 200px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #1e293b; max-height: none; overflow-y: visible; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; margin-top: 20px; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #0f74ba; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #0a5a8e; }
+            .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+            .print-btn button.close-btn:hover { background: #4b5563; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { border: none; box-shadow: none; } .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } .section-title { background: #0f74ba !important; -webkit-print-color-adjust: exact; } .content-box { max-height: none; overflow-y: visible; } }
         </style>
     </head>
     <body>
@@ -3916,7 +3743,6 @@ function exportAllReportsToPDF() {
         return;
     }
 
-    // Calculate statistics
     let totalReports = reportsData.length;
     let sentCount = 0, draftCount = 0;
     let totalChars = 0;
@@ -3937,7 +3763,6 @@ function exportAllReportsToPDF() {
         departmentCounts[deptName] = (departmentCounts[deptName] || 0) + 1;
     }
 
-    // Period summary rows
     let periodRows = '';
     let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
     for (let period of periodOrder) {
@@ -3953,7 +3778,6 @@ function exportAllReportsToPDF() {
         }
     }
 
-    // Department summary rows
     let deptRows = '';
     let sortedDepts = Object.keys(departmentCounts).sort();
     for (let dept of sortedDepts) {
@@ -3967,7 +3791,6 @@ function exportAllReportsToPDF() {
             </tr>`;
     }
 
-    // Build report rows - FULL CONTENT, NO TRUNCATION
     let rows = '';
     for (let r of reportsData) {
         let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
@@ -4005,7 +3828,6 @@ function exportAllReportsToPDF() {
                     <span><strong>📊 Status:</strong> ${statusText}</span>
                     <span><strong>📝 Words:</strong> ${wordCount.toLocaleString()} | <strong>Chars:</strong> ${charCount.toLocaleString()}</span>
                 </div>
-                <!-- FULL CONTENT - HAKUNA KUKATIZWA -->
                 <div style="padding: 16px 18px; background: white; font-size: 13px; line-height: 1.7; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; max-height: none; overflow-y: visible;">
                     ${escapeHtml(fullContent)}
                 </div>
@@ -4015,7 +3837,6 @@ function exportAllReportsToPDF() {
             </div>`;
     }
 
-    // Calculate averages
     let avgChars = totalReports > 0 ? Math.round(totalChars / totalReports).toLocaleString() : '0';
     let avgWords = totalReports > 0 ? Math.round((totalChars / totalReports) / 5).toLocaleString() : '0';
 
@@ -4032,71 +3853,16 @@ function exportAllReportsToPDF() {
         <title>All Reports Report - Super Admin</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
-                background: #f0f2f5; 
-                padding: 30px; 
-            }
-            .container { 
-                max-width: 1200px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 16px; 
-                overflow: hidden; 
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                border: 2px solid #0f74ba; 
-            }
-            .header { 
-                background: linear-gradient(135deg, #0f74ba, #0a5a8e); 
-                color: white; 
-                padding: 25px; 
-                text-align: center; 
-            }
-            .header h1 { 
-                font-size: 24px; 
-                margin: 0; 
-            }
-            .header p { 
-                font-size: 12px; 
-                opacity: 0.85; 
-                margin-top: 6px; 
-            }
-            .info-bar { 
-                background: #f8fafc; 
-                padding: 12px 25px; 
-                display: flex; 
-                justify-content: space-between; 
-                border-bottom: 1px solid #e5e7eb; 
-                flex-wrap: wrap; 
-                gap: 10px; 
-                font-size: 12px; 
-            }
-            .summary-cards { 
-                display: grid; 
-                grid-template-columns: repeat(5, 1fr); 
-                gap: 15px; 
-                padding: 20px 25px; 
-                background: #f9fafb; 
-                border-bottom: 1px solid #e5e7eb; 
-            }
-            .summary-card { 
-                background: white; 
-                border-radius: 10px; 
-                padding: 12px; 
-                text-align: center; 
-                border: 1px solid #e5e7eb; 
-            }
-            .summary-card .label { 
-                font-size: 10px; 
-                font-weight: 600; 
-                color: #6b7280; 
-                text-transform: uppercase; 
-            }
-            .summary-card .value { 
-                font-size: 16px; 
-                font-weight: 800; 
-                margin-top: 5px; 
-            }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0f74ba; }
+            .header { background: linear-gradient(135deg, #0f74ba, #0a5a8e); color: white; padding: 25px; text-align: center; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+            .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+            .summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+            .summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
+            .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }
+            .summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }
             .summary-card.total .value { color: #0f74ba; }
             .summary-card.sent .value { color: #059669; }
             .summary-card.draft .value { color: #d97706; }
@@ -4149,54 +3915,14 @@ function exportAllReportsToPDF() {
             .summary-table th:nth-child(3), .summary-table td:nth-child(3) { text-align: center; }
             
             .reports-section { padding: 0 25px 25px 25px; }
-            .reports-title { 
-                margin: 25px 0 18px 0; 
-                font-size: 16px; 
-                font-weight: 700; 
-                color: #0f74ba; 
-                border-bottom: 3px solid #0f74ba; 
-                padding-bottom: 10px; 
-                display: inline-block; 
-            }
-            .footer { 
-                text-align: center; 
-                font-size: 10px; 
-                color: #6b7280; 
-                padding: 15px; 
-                border-top: 1px solid #e5e7eb; 
-                background: #f9fafb; 
-            }
-            .print-btn { 
-                text-align: center; 
-                padding: 15px; 
-                background: #f9fafb; 
-                border-top: 1px solid #e5e7eb; 
-            }
-            .print-btn button { 
-                background: #0f74ba; 
-                color: white; 
-                border: none; 
-                padding: 10px 24px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-size: 13px; 
-                font-weight: 600; 
-            }
-            .print-btn button:hover { 
-                background: #0a5a8e; 
-            }
-            .print-btn button.close-btn { 
-                background: #6b7280; 
-                margin-left: 10px; 
-            }
-            .print-btn button.close-btn:hover { 
-                background: #4b5563; 
-            }
-            @media print { 
-                .print-btn { display: none; } 
-                body { background: white; padding: 0; } 
-                .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } 
-            }
+            .reports-title { margin: 25px 0 18px 0; font-size: 16px; font-weight: 700; color: #0f74ba; border-bottom: 3px solid #0f74ba; padding-bottom: 10px; display: inline-block; }
+            .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+            .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+            .print-btn button { background: #0f74ba; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+            .print-btn button:hover { background: #0a5a8e; }
+            .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+            .print-btn button.close-btn:hover { background: #4b5563; }
+            @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } }
         </style>
     </head>
     <body>
@@ -4254,6 +3980,8 @@ function exportAllReportsToPDF() {
     printWindow.document.close();
     showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
+// ==================== UPLOADED REPORTS EXPORT ====================
 function exportAllUploadedReportsToExcel() { 
     if(uploadedReportsData.length===0) { showToast('No reports', true); return; } 
     let ws=[['Title','File Name','Description','Period','Uploaded By','Uploaded At']]; 
@@ -4270,79 +3998,225 @@ function exportAllUploadedReportsToPDF() {
     showToast("PDF preview opened - Click Print"); 
 }
 
+// ==================== UPLOAD REPORT - FIXED ====================
 function openUploadReportModal() { 
     document.getElementById('uploadReportTitle').value = ''; 
     document.getElementById('uploadReportPeriod').value = 'monthly'; 
-    document.getElementById('uploadedFilePreview').classList.add('hidden'); 
-    currentUploadedFile = null; 
+    
+    const fileInput = document.getElementById('reportFileInput');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+    
+    const previewContainer = document.getElementById('uploadedFilePreview');
+    if (previewContainer) {
+        previewContainer.classList.add('hidden');
+    }
+    
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (fileNameDisplay) {
+        fileNameDisplay.innerHTML = '';
+    }
+    
+    currentUploadedFile = null;
     openModal('uploadReportModal'); 
 }
 
 function previewUploadedFile() { 
     if(currentUploadedFile) { 
-        if(currentUploadedFile.type.startsWith('image/')) { 
+        if(currentUploadedFile.type && currentUploadedFile.type.startsWith('image/')) { 
             const reader = new FileReader(); 
             reader.onload = ev => showFullImage(ev.target.result); 
             reader.readAsDataURL(currentUploadedFile); 
-        } else { 
-            window.open(URL.createObjectURL(currentUploadedFile), '_blank'); 
+        } else if (currentUploadedFile) { 
+            const url = URL.createObjectURL(currentUploadedFile); 
+            window.open(url, '_blank'); 
+            URL.revokeObjectURL(url); 
         } 
-    } 
+    } else {
+        showToast('No file selected', true);
+    }
 }
 
 function removeUploadedFile() { 
     currentUploadedFile = null; 
-    document.getElementById('reportFileInput').value = ''; 
-    document.getElementById('uploadedFilePreview').classList.add('hidden'); 
+    const fileInput = document.getElementById('reportFileInput');
+    const previewContainer = document.getElementById('uploadedFilePreview');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    
+    if (fileInput) fileInput.value = ''; 
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (fileNameDisplay) fileNameDisplay.innerHTML = '';
+    showToast('File removed', false);
 }
 
+// ==================== SAVE UPLOADED REPORT - FIXED ====================
 async function saveUploadedReport() {
     const title = document.getElementById('uploadReportTitle').value.trim();
     const period = document.getElementById('uploadReportPeriod').value;
-    if (!title) { showToast('Title required', true); return; }
-    if (!currentUploadedFile) { showToast('Please select a file', true); return; }
+    const fileInput = document.getElementById('reportFileInput');
+    
+    if (!title) { 
+        showToast('Report title is required', true); 
+        return; 
+    }
+    
+    let file = null;
+    if (currentUploadedFile) {
+        file = currentUploadedFile;
+    } else if (fileInput && fileInput.files && fileInput.files.length > 0) {
+        file = fileInput.files[0];
+    }
+    
+    if (!file) { 
+        showToast('Please select a file to upload', true); 
+        return; 
+    }
+    
+    if (file.size > 10 * 1024 * 1024) { 
+        showToast('File too large. Max size is 10MB', true); 
+        return; 
+    }
+    
+    const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'txt'];
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!allowedExtensions.includes(ext)) {
+        showToast('File type not allowed. Allowed: ' + allowedExtensions.join(', '), true);
+        return;
+    }
+    
     const formData = new FormData();
     formData.append('title', title);
     formData.append('period', period);
     formData.append('department_id', 1);
-    formData.append('uploaded_by', currentUserFullName);
-    formData.append('report_file', currentUploadedFile);
+    formData.append('uploaded_by', currentUserFullName || 'Super Admin');
+    formData.append('report_file', file);
+    
     const sendBtn = document.querySelector('#uploadReportModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
     sendBtn.disabled = true;
+    
     try {
-        const response = await fetch(API_BASE + 'upload_report_document.php', { method: 'POST', body: formData });
-        const result = await response.json();
-        if (result.success) { showToast('✅ Report uploaded successfully'); closeModal('uploadReportModal'); await loadReports(); await loadDashboard(); }
-        else { showToast('❌ ' + (result.message || 'Upload failed'), true); }
-    } catch (error) { showToast('❌ Network error: ' + error.message, true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
-}
-
-function viewUploadedReportDocument(docId) {
-    const doc = uploadedReportsData.find(d => d.id === docId);
-    if(doc) {
-        let fileUrl = doc.file_path || '';
-        let infoHtml = `<div><strong>Title:</strong> ${escapeHtml(doc.title)}</div><div><strong>File:</strong> ${escapeHtml(doc.file_name)}</div><div><strong>Period:</strong> ${doc.period}</div><div><strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by || 'System')}</div><div><strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}</div><div><strong>Description:</strong> ${escapeHtml(doc.description || 'No description')}</div>`;
-        document.getElementById('reportViewContent').innerHTML = infoHtml;
-        
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { 
-            if (d.id !== 1) {
-                deptOptions += `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
-            }
+        const response = await fetch(API_BASE + 'upload_report_document.php', { 
+            method: 'POST', 
+            body: formData 
         });
         
-        document.getElementById('reportViewActionButtons').innerHTML = `
-            <button onclick="window.open('${fileUrl}', '_blank')" class="small-btn small-btn-primary"><i class="fas fa-download"></i> Download</button>
-            <div class="send-dropdown">
-                <button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send Report</button>
-                <div id="reportSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div>
-            </div>
-        `;
-        openModal('reportViewModal');
+        let result;
+        try {
+            result = await response.json();
+        } catch(e) {
+            const text = await response.text();
+            console.error('Server response:', text);
+            throw new Error('Server returned invalid response');
+        }
+        
+        if (result.success) {
+            showToast('✅ Report uploaded successfully!', false);
+            addLog(`Uploaded report: ${title}`);
+            closeModal('uploadReportModal');
+            
+            document.getElementById('uploadReportTitle').value = '';
+            document.getElementById('uploadReportPeriod').value = 'monthly';
+            document.getElementById('uploadedFilePreview').classList.add('hidden');
+            document.getElementById('reportFileInput').value = '';
+            document.getElementById('fileNameDisplay').innerHTML = '';
+            currentUploadedFile = null;
+            
+            await fetchUploadedReports();
+            await loadReports();
+            await loadDashboard();
+            
+            if (currentReportTab === 'uploaded') {
+                await loadReports();
+            }
+            
+        } else {
+            showToast('❌ ' + (result.message || 'Upload failed. Please try again.'), true);
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        showToast('❌ Network error: ' + error.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
     }
+}
+
+// ==================== VIEW UPLOADED REPORT DOCUMENT - FIXED ====================
+function viewUploadedReportDocument(docId) {
+    const doc = uploadedReportsData.find(d => d.id === docId);
+    if(!doc) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Build file URL
+    let fileUrl = '';
+    let fileName = doc.file_name || 'document.pdf';
+    let fileOnly = doc.file_name_only || doc.file_path || doc.file_name;
+    if (fileOnly && fileOnly.includes('/')) {
+        fileOnly = fileOnly.split('/').pop();
+    }
+    fileUrl = '/geotraverse/frontend/assets/uploads/reports/' + fileOnly;
+    
+    let infoHtml = `
+        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>Title:</strong> ${escapeHtml(doc.title)}
+        </div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>File:</strong> ${escapeHtml(doc.file_name)}
+        </div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>Period:</strong> ${doc.period}
+        </div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by || 'System')}
+        </div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}
+        </div>
+        <div style="padding: 10px 0;">
+            <strong>Description:</strong> ${escapeHtml(doc.description || 'No description')}
+        </div>
+    `;
+    document.getElementById('reportViewContent').innerHTML = infoHtml;
+    
+    let deptOptions = ''; 
+    allDepartmentsForSend.forEach(d => { 
+        if (d.id !== 1) {
+            deptOptions += `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        }
+    });
+    
+    document.getElementById('reportViewActionButtons').innerHTML = `
+        <button onclick="downloadReportFile('${fileUrl}', '${escapeHtml(doc.file_name)}')" class="small-btn small-btn-primary"><i class="fas fa-download"></i> Download</button>
+        <div class="send-dropdown">
+            <button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send Report</button>
+            <div id="reportSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div>
+        </div>
+    `;
+    openModal('reportViewModal');
+}
+
+// ==================== DOWNLOAD REPORT FILE - FIXED ====================
+function downloadReportFile(fileUrl, fileName) {
+    if (!fileUrl) {
+        showToast('File URL not available', true);
+        return;
+    }
+    
+    console.log('Downloading report:', fileUrl);
+    
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.download = fileName;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`Downloading: ${fileName}`, false);
 }
 
 async function deleteUploadedReport(id) {
@@ -4355,9 +4229,18 @@ async function deleteUploadedReport(id) {
     }
 }
 
+// ==================== ADDED REPORTS ====================
 async function saveReport() { 
     let id = document.getElementById('reportId').value; 
-    let data = { title: document.getElementById('reportTitle').value, period: document.getElementById('reportPeriod').value, content: document.getElementById('reportContent').value, department_id: 1, status: 'draft', created_by: currentUserFullName, updated_by: id ? currentUserFullName : null }; 
+    let data = { 
+        title: document.getElementById('reportTitle').value, 
+        period: document.getElementById('reportPeriod').value, 
+        content: document.getElementById('reportContent').value, 
+        department_id: 1, 
+        status: 'draft', 
+        created_by: currentUserFullName, 
+        updated_by: id ? currentUserFullName : null
+    }; 
     if (!data.title) { showToast('Title required', true); return; } 
     let res = id ? await apiCall('update_report.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_report.php','POST',data); 
     if(res.success) { showToast(id ? 'Report updated' : 'Report added'); closeModal('reportModal'); await loadReports(); await loadDashboard(); } 
@@ -4366,7 +4249,13 @@ async function saveReport() {
 
 function editReport(id) { 
     const r = reportsData.find(r => r.id === id); 
-    if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('reportModal'); } 
+    if(r) { 
+        document.getElementById('reportId').value = r.id; 
+        document.getElementById('reportTitle').value = r.title; 
+        document.getElementById('reportPeriod').value = r.period; 
+        document.getElementById('reportContent').value = r.content; 
+        openModal('reportModal'); 
+    } 
 }
 
 async function deleteReport(id) { 
@@ -4568,23 +4457,85 @@ async function logout() {
     } 
 }
 
+// ==================== DOMContentLoaded EVENT LISTENERS ====================
+document.addEventListener('DOMContentLoaded', function() {
+    // Report file input listener
+    const reportFileInput = document.getElementById('reportFileInput');
+    if (reportFileInput) {
+        reportFileInput.addEventListener('change', function(e) {
+            console.log('File selected:', e.target.files);
+            if (e.target.files && e.target.files.length > 0) {
+                const file = e.target.files[0];
+                const fileSize = (file.size / 1024).toFixed(2);
+                const fileNameDisplay = document.getElementById('fileNameDisplay');
+                const previewContainer = document.getElementById('uploadedFilePreview');
+                
+                if (fileNameDisplay) {
+                    fileNameDisplay.innerHTML = `<i class="fas fa-file mr-1"></i> ${file.name} (${fileSize} KB)`;
+                }
+                if (previewContainer) {
+                    previewContainer.classList.remove('hidden');
+                }
+                currentUploadedFile = file;
+                console.log('File ready for upload:', file.name);
+            } else {
+                const previewContainer = document.getElementById('uploadedFilePreview');
+                if (previewContainer) {
+                    previewContainer.classList.add('hidden');
+                }
+                currentUploadedFile = null;
+            }
+        });
+    }
+    
+    // Project document file input listener
+    const projectDocFile = document.getElementById('projectDocFile');
+    if (projectDocFile) {
+        projectDocFile.addEventListener('change', function(e) {
+            if (e.target.files && e.target.files.length > 0) {
+                const file = e.target.files[0];
+                const fileNameDisplay = document.getElementById('projectDocFileName');
+                const previewContainer = document.getElementById('projectDocPreview');
+                
+                if (fileNameDisplay) {
+                    fileNameDisplay.innerText = file.name;
+                }
+                if (previewContainer) {
+                    previewContainer.classList.remove('hidden');
+                }
+                currentProjectDocFile = file;
+            }
+        });
+    }
+});
+
+// ==================== INITIALIZATION ====================
 async function init() {
     setupMoneyInputs();
     await loadDepartmentsForDropdowns();
     await loadRecycleBinFromDB();
     initDarkMode();
+    
     document.querySelectorAll('.nav-item').forEach(item => { 
         item.addEventListener('click', () => showPage(item.getAttribute('data-page'))); 
     });
+    
     document.getElementById('homeBtn')?.addEventListener('click', () => showPage('dashboard'));
     document.getElementById('searchInput')?.addEventListener('input', performGlobalSearch);
+    
     document.getElementById('mobileMenuBtn')?.addEventListener('click', () => { 
         document.getElementById('mainSidebar').classList.add('mobile-open'); 
         document.getElementById('mobileMenuOverlay').classList.remove('hidden'); 
     });
+    
     document.getElementById('logoutBtn')?.addEventListener('click', logout);
+    
     const savedColor = localStorage.getItem('sidebar_color'); 
-    if (savedColor) document.getElementById('mainSidebar').style.background = savedColor;
+    if (savedColor) {
+        const sidebar = document.getElementById('mainSidebar');
+        if (sidebar) sidebar.style.background = savedColor;
+    }
+    
     initScrollTop();
     showPage('dashboard');
 }
