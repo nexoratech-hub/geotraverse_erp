@@ -1,24 +1,5 @@
 <?php
-// backend/api/download_report_document.php
-
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Accept');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit(0);
-}
-
-// Get parameters
-$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
-
-if (!$id) {
-    http_response_code(400);
-    die('Report ID is required');
-}
-
-// Database connection
+// ============ DATABASE CONNECTION ============
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -27,78 +8,59 @@ $password = '';
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    http_response_code(500);
-    die('Database connection failed');
+} catch(PDOException $e) {
+    die('Database connection failed: ' . $e->getMessage());
+}
+
+// ============ GET PARAMETERS ============
+$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+
+if ($id <= 0) {
+    die('Invalid document ID');
 }
 
 try {
-    // Get report details
-    $sql = "SELECT file_name, file_path FROM uploaded_reports WHERE id = :id AND is_deleted = 0";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':id' => $id]);
+    $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ? AND is_deleted = 0");
+    $stmt->execute([$id]);
     $doc = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$doc) {
-        http_response_code(404);
-        die('Report not found');
+        die('Document not found');
     }
     
-    $fileName = $doc['file_name'];
-    $filePath = $doc['file_path'];
+    // ============ GET FILE NAME ============
+    // file_path stores the unique filename
+    $fileName = $doc['file_path'] ?? $doc['file_name'] ?? '';
     
-    // Try multiple paths
-    $possiblePaths = [
-        __DIR__ . '/../../' . $filePath,
-        __DIR__ . '/../../frontend/assets/uploads/reports/' . basename($filePath),
-        __DIR__ . '/../../assets/uploads/reports/' . basename($filePath),
-        __DIR__ . '/../' . $filePath,
-        __DIR__ . '/../../../' . $filePath
-    ];
-    
-    // Search recursively
-    $searchDir = __DIR__ . '/../../frontend/assets/uploads/';
-    if (is_dir($searchDir)) {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($searchDir));
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getFilename() === basename($filePath)) {
-                $possiblePaths[] = $file->getPathname();
-            }
-        }
+    if (empty($fileName)) {
+        die('File name not found in database');
     }
     
-    $fullPath = null;
-    foreach ($possiblePaths as $path) {
-        if (file_exists($path) && is_file($path)) {
-            $fullPath = $path;
-            break;
-        }
+    // ============ BUILD FULL PATH ============
+    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/';
+    $fullPath = $uploadDir . $fileName;
+    
+    // ============ CHECK IF FILE EXISTS ============
+    if (!file_exists($fullPath)) {
+        die('File not found on server: ' . $fileName);
     }
     
-    if (!$fullPath) {
-        http_response_code(404);
-        die('File not found on server');
-    }
+    // ============ GET ORIGINAL NAME ============
+    // Try to get original name from database, fallback to file name
+    $originalName = $doc['original_file_name'] ?? $doc['file_name'] ?? $fileName;
     
-    $fileSize = filesize($fullPath);
-    
-    // Send file
+    // ============ DOWNLOAD FILE ============
+    header('Content-Description: File Transfer');
     header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $fileName . '"');
-    header('Content-Length: ' . $fileSize);
-    header('Content-Transfer-Encoding: binary');
-    header('Cache-Control: private, max-age=0, must-revalidate');
-    header('Pragma: public');
-    header('Accept-Ranges: bytes');
-    
-    while (ob_get_level()) {
-        ob_end_clean();
-    }
+    header('Content-Disposition: attachment; filename="' . $originalName . '"');
+    header('Content-Length: ' . filesize($fullPath));
+    header('Cache-Control: no-cache, must-revalidate');
+    header('Expires: 0');
     
     readfile($fullPath);
     exit;
     
-} catch (PDOException $e) {
-    http_response_code(500);
+} catch(PDOException $e) {
     die('Database error: ' . $e->getMessage());
 }
+?>

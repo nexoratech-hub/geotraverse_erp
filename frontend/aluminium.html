@@ -837,8 +837,8 @@ async function fetchDailyWork() {
     } catch(e) { dailyworkData = []; }
 }
 
+// ==================== REQUESTS - FUND_REQUESTS TABLE ====================
 async function fetchRequests() { 
-    // HAPA BADILISHA: soma kutoka fund_requests table
     const res = await apiCall(`get_fund_requests.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
         requestsData = res.data.filter(t => t.department_id === DEPARTMENT_ID && (t.is_deleted !== 1))
@@ -1054,7 +1054,7 @@ async function loadDashboard() {
     const ctx = document.getElementById('statusChart')?.getContext('2d');
     if (ctx) { new Chart(ctx, { type: 'doughnut', data: { labels: ['Pending', 'In Progress', 'Completed'], datasets: [{ data: [pending, inProgress, completed], backgroundColor: ['#f59e0b', '#3b82f6', '#10b981'], borderWidth: 0 }] }, options: { responsive: true, plugins: { legend: { position: 'bottom' } } } }); }
     let recentHtml = '';
-    requestsData.slice(0,5).forEach(r => { recentHtml += `<div class="border-b pb-2"><div class="flex justify-between"><span class="font-medium">${escapeHtml(r.source)}</span><span class="text-orange-600 font-bold">${formatMoney(r.amount)}</span></div><div class="flex justify-between text-xs"><span>${formatDate(r.transaction_date)}</span><span class="status-badge ${r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending'}">${r.status}</span></div></div>`; });
+    requestsData.slice(0,5).forEach(r => { recentHtml += `<div class="border-b pb-2"><div class="flex justify-between"><span class="font-medium">${escapeHtml(r.source)}</span><span class="text-orange-600 font-bold">${formatMoney(r.amount)}</span></div><div class="flex justify-between text-xs"><span>${formatDate(r.request_date)}</span><span class="status-badge ${r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending'}">${r.status}</span></div></div>`; });
     document.getElementById('recentRequests').innerHTML = recentHtml || '<div class="text-center text-gray-400">No requests yet</div>';
 }
 
@@ -1257,7 +1257,7 @@ function viewDocumentInfo(docId, type) {
             }
         });
         
-        let fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
+        let fileUrl = '/geotraverse/frontend/assets/uploads/projects/projects_documents/' + doc.file_name;
         
         document.getElementById('documentInfoButtons').innerHTML = `
             <button onclick="window.open('${fileUrl}', '_blank')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
@@ -2636,7 +2636,7 @@ async function viewProject(id, type) {
     openModal('viewProjectModal');
 }
 
-// ==================== SEND PROJECT ====================
+// ==================== SEND PROJECT - WITH DAILY WORK ====================
 async function sendProjectToDept(projectId, deptId, type) { 
     const dept = allDepartmentsForSend.find(d => d.id == deptId); 
     const deptName = dept ? dept.name : 'Department'; 
@@ -2655,47 +2655,64 @@ async function sendProjectToDept(projectId, deptId, type) {
     if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
     
     try {
+        // Get daily work records for this project
         const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
         
+        // Build payload with project data and daily work
         const payload = { 
             project_id: parseInt(projectId), 
             to_department_id: parseInt(deptId), 
             from_department_id: DEPARTMENT_ID,
-            project_name: project.name,
-            client_name: project.client_name || '',
-            amount: parseFloat(project.amount) || 0,
-            status: project.status,
-            progress: project.progress || 0,
-            location: project.location || '',
-            description: project.description || '',
-            image: project.image || '',
-            start_date: project.start_date || '',
-            end_date: project.end_date || '',
-            daily_work: projectDailyWork.map(w => ({
-                date: w.date,
-                work_description: w.work_description,
-                quantity_produced: w.quantity_produced || 0,
-                price_per_unit: w.price_per_unit || 0,
-                total_amount: w.total_amount || w.income || 0,
-                expenses: w.expenses || 0,
-                profit: (w.total_amount || w.income || 0) - (w.expenses || 0),
-                status: w.status || 'pending'
-            }))
+            sent_by: CURRENT_USER,
+            project_data: {
+                id: project.id,
+                name: project.name,
+                client_name: project.client_name || '',
+                amount: parseFloat(project.amount) || 0,
+                location: project.location || '',
+                description: project.description || '',
+                status: project.status,
+                progress: project.progress || 0,
+                start_date: project.start_date || '',
+                end_date: project.end_date || '',
+                image: project.image || '',
+                project_type: project.project_type || type,
+                created_by: project.created_by || CURRENT_USER,
+                created_at: project.created_at || new Date().toISOString(),
+                // Include daily work records
+                daily_work: projectDailyWork.map(w => ({
+                    id: w.id,
+                    date: w.date,
+                    work_description: w.work_description || '',
+                    quantity_produced: w.quantity_produced || 0,
+                    price_per_unit: w.price_per_unit || 0,
+                    total_amount: w.total_amount || w.income || 0,
+                    expenses: w.expenses || 0,
+                    profit: (w.total_amount || w.income || 0) - (w.expenses || 0),
+                    status: w.status || 'pending',
+                    created_by: w.created_by || 'System',
+                    created_at: w.created_at
+                }))
+            }
         };
         
-        const res = await apiCall('send_project.php', 'POST', payload);
+        // Use send_project_advanced.php API which handles daily work
+        const res = await apiCall('send_project_advanced.php', 'POST', payload);
         
         if (res && res.success) {
-            showToast(`✅ Project "${project.name}" sent to ${deptName}`, false);
+            showToast(`✅ Project "${project.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records`, false);
             project.sent_to_dept = deptId;
             project.sent_from_dept = DEPARTMENT_ID;
             project.is_viewed_by_department = 0;
+            project.sent_count = (project.sent_count || 0) + 1;
             
             if (type === 'aluminium') {
                 await fetchAluminiumProjects();
             } else {
                 await fetchIronProjects();
             }
+            await loadProjects();
+            await loadDashboard();
         } else {
             showToast(res?.message || 'Failed to send project', true);
         }
@@ -2963,7 +2980,7 @@ async function loadRequests() {
         
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.transaction_date)}</td>
+                <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.request_date || r.created_at)}</td>
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block; white-space: nowrap;">
                         ${r.type}
@@ -3012,7 +3029,7 @@ async function submitRequest() {
     
     if (!source || amount <= 0) { showToast('Source and amount required', true); return; }
     
-    // HAPA BADILISHA: tumia fund_requests table
+    // Use fund_requests table
     let data = { 
         title: source,  // source inakuwa title
         request_date: transaction_date,
@@ -3072,7 +3089,7 @@ function editRequest(id) {
     const r = requestsData.find(r => r.id === id); 
     if (r) { 
         document.getElementById('reqId').value = r.id; 
-        document.getElementById('reqDate').value = r.transaction_date; 
+        document.getElementById('reqDate').value = r.request_date; 
         document.getElementById('reqType').value = r.type; 
         document.getElementById('reqSource').value = r.source; 
         document.getElementById('reqAmount').value = formatNumberWithCommas(r.amount); 
@@ -3100,7 +3117,7 @@ function exportSingleRequestExcel(id) {
     const r = requestsData.find(r => r.id === id); 
     if (r) { 
         let ws = [['Date', 'Type', 'Source', 'Amount', 'Description', 'Status']]; 
-        ws.push([formatDate(r.transaction_date), r.type, r.source, r.amount, r.description || '', r.status]); 
+        ws.push([formatDate(r.request_date), r.type, r.source, r.amount, r.description || '', r.status]); 
         let wb = XLSX.utils.book_new(); 
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Request'); 
         XLSX.writeFile(wb, `request_${r.id}.xlsx`); 
@@ -3112,7 +3129,7 @@ function exportSingleRequestPDF(id) {
     const r = requestsData.find(r => r.id === id); 
     if (r) { 
         let w = window.open('', '_blank'); 
-        w.document.write(`<!DOCTYPE html><html><head><title>Request Details</title><style>body{font-family:Arial;padding:20px;border:2px solid #f59e0b;border-radius:10px;}h1{color:#f59e0b;text-align:center;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#f59e0b;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>Fund Request Details</h1><p><strong>Date:</strong> ${formatDateTime(r.transaction_date)}</p><p><strong>Type:</strong> ${r.type}</p><p><strong>Source:</strong> ${escapeHtml(r.source)}</p><p><strong>Amount:</strong> ${formatMoney(r.amount)}</p><p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p><p><strong>Status:</strong> ${r.status}</p><p><strong>Submitted by:</strong> ${escapeHtml(r.created_by||CURRENT_USER)}</p><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
+        w.document.write(`<!DOCTYPE html><html><head><title>Request Details</title><style>body{font-family:Arial;padding:20px;border:2px solid #f59e0b;border-radius:10px;}h1{color:#f59e0b;text-align:center;}.print-btn{text-align:center;margin-top:20px;}.print-btn button{background:#f59e0b;color:white;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;}@media print{.print-btn{display:none;}}</style></head><body><h1>Fund Request Details</h1><p><strong>Date:</strong> ${formatDateTime(r.request_date)}</p><p><strong>Type:</strong> ${r.type}</p><p><strong>Source:</strong> ${escapeHtml(r.source)}</p><p><strong>Amount:</strong> ${formatMoney(r.amount)}</p><p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p><p><strong>Status:</strong> ${r.status}</p><p><strong>Submitted by:</strong> ${escapeHtml(r.requested_by||r.created_by||CURRENT_USER)}</p><div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
         w.document.close(); 
         showToast("PDF preview opened"); 
     } 
@@ -3120,7 +3137,7 @@ function exportSingleRequestPDF(id) {
 
 function exportAllRequestsToExcel() { 
     let ws = [['ID', 'Date', 'Type', 'Source', 'Amount', 'Description', 'Status']]; 
-    requestsData.forEach(r => ws.push([r.id, formatDate(r.transaction_date), r.type, r.source, r.amount, r.description || '', r.status])); 
+    requestsData.forEach(r => ws.push([r.id, formatDate(r.request_date), r.type, r.source, r.amount, r.description || '', r.status])); 
     let wb = XLSX.utils.book_new(); 
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Requests'); 
     XLSX.writeFile(wb, `all_requests.xlsx`); 
@@ -3162,7 +3179,7 @@ function exportAllRequestsToPDF() {
         
         tableRows += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 10px 8px; border: 1px solid #cbd5e1; white-space: nowrap;">${formatDate(r.transaction_date)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #cbd5e1; white-space: nowrap;">${formatDate(r.request_date)}</td>
                 <td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center;">
                     <span style="background: ${typeBg}; color: ${typeColor}; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; display: inline-block;">
                         ${typeText}
@@ -3176,7 +3193,7 @@ function exportAllRequestsToPDF() {
                         ${statusText}
                     </span>
                 </td>
-                <td style="padding: 10px 8px; border: 1px solid #cbd5e1;">${escapeHtml(r.created_by || CURRENT_USER)}</td>
+                <td style="padding: 10px 8px; border: 1px solid #cbd5e1;">${escapeHtml(r.requested_by || r.created_by || CURRENT_USER)}</td>
             </tr>
         `;
     }
@@ -3697,7 +3714,7 @@ async function generateAndSaveReport() {
     showToast('Generating report...', false); 
     try { 
         await Promise.all([fetchRequests(), fetchDailyWork(), fetchProjects()]); 
-        let filteredRequests = requestsData.filter(t => { let tDate = new Date(t.transaction_date); return tDate >= startDate && tDate <= endDate; }); 
+        let filteredRequests = requestsData.filter(t => { let tDate = new Date(t.request_date); return tDate >= startDate && tDate <= endDate; }); 
         let totalIncome = 0, totalExpense = 0; 
         filteredRequests.forEach(t => { if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0; }); 
         let filteredDailyWork = dailyworkData.filter(w => { let wDate = new Date(w.date); return wDate >= startDate && wDate <= endDate; }); 

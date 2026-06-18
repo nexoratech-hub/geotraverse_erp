@@ -987,9 +987,15 @@ async function fetchReports() {
     updateReportBadge(); 
 }
 
+// 1. FETCH REQUESTS - tumia fund_requests
 async function fetchRequests() { 
-    const res = await apiCall(`get_transactions.php?department_id=${DEPARTMENT_ID}`); 
-    requestsData = (res.success && res.data) ? res.data.filter(t => t.department_id === DEPARTMENT_ID && (!t.is_deleted || t.is_deleted != 1)).sort((a,b) => new Date(b.transaction_date) - new Date(a.transaction_date)) : []; 
+    const res = await apiCall(`get_fund_requests.php?department_id=${DEPARTMENT_ID}`); 
+    if (res.success && res.data) { 
+        requestsData = res.data.filter(t => t.department_id === DEPARTMENT_ID && (!t.is_deleted || t.is_deleted != 1))
+            .sort((a,b) => new Date(b.request_date) - new Date(a.request_date)); 
+    } else { 
+        requestsData = []; 
+    }
     unviewedRequestsCount = requestsData.filter(r => !viewedRequestIds.includes(r.id)).length;
     updateRequestBadge(); 
 }
@@ -1172,14 +1178,22 @@ function removeProjectImage() {
 function showDocumentInfo(doc, type) {
     let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
     let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
     let fileUrl = '';
     if (type === 'project') {
-        fileUrl = API_BASE + 'download_document.php?id=' + doc.id + '&type=project';
+        let fileName = doc.file_name_only || doc.file_path || doc.file_name;
+        if (fileName && fileName.includes('/')) {
+            fileName = fileName.split('/').pop();
+        }
+        fileUrl = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
     } else if (type === 'uploaded_report') {
-        fileUrl = API_BASE + 'download_report_document.php?id=' + doc.id;
-    } else {
-        fileUrl = '/geotraverse/frontend/uploads/project_documents/' + doc.file_name;
+        let fileName = doc.file_name_only || doc.file_path || doc.file_name;
+        if (fileName && fileName.includes('/')) {
+            fileName = fileName.split('/').pop();
+        }
+        fileUrl = '/geotraverse/frontend/assets/uploads/reports/' + fileName;
     }
+    
     let infoHtml = `
         <div class="doc-info-container">
             <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
@@ -1192,10 +1206,14 @@ function showDocumentInfo(doc, type) {
         </div>
     `;
     document.getElementById('documentInfoContent').innerHTML = infoHtml;
+    
     let deptOptions = ''; 
     allDepartmentsForSend.forEach(d => { 
-        deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        }
     });
+    
     document.getElementById('documentInfoButtons').innerHTML = `
         <button onclick="downloadDocumentFile('${fileUrl}', '${escapeHtml(doc.file_name)}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
         <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
@@ -1213,6 +1231,171 @@ function downloadDocumentFile(url, fileName) {
     showToast(`Downloading: ${fileName}`, false);
 }
 
+// ==================== SEND FUNCTIONS - USING ADVANCED SYSTEM ====================
+
+// ==================== SEND PROJECT - USING ADVANCED SYSTEM ====================
+async function sendProjectToDept(projectId, deptId) { 
+    const p = projectsData.find(p => p.id === projectId);
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        // Get daily work for this project
+        const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
+        
+        const payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Town Planning',
+            project_name: p.name,
+            client_name: p.client_name || '',
+            amount: parseFloat(p.amount) || 0,
+            status: p.status,
+            progress: p.progress || 0,
+            location: p.location || '',
+            description: p.description || '',
+            image: p.image || '',
+            start_date: p.start_date || '',
+            end_date: p.end_date || '',
+            daily_work: projectDailyWork.map(w => ({
+                date: w.date,
+                work_description: w.work_description || '',
+                budget: parseFloat(w.budget) || 0,
+                amount: parseFloat(w.amount) || 0,
+                status: w.status || 'pending'
+            })),
+            sent_by: CURRENT_USER || 'Town Planning Manager',
+            duplicate_send: true,
+            include_dailywork: true
+        };
+        
+        console.log('Sending project payload:', payload);
+        
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_project_advanced.php', 'POST', payload);
+        
+        console.log('Send project response:', res);
+        
+        if (res && res.success) {
+            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records`, false);
+            addLog(`Project "${p.name}" sent to ${deptName}`);
+            
+            p.sent_to_dept = deptId;
+            p.sent_from_dept = DEPARTMENT_ID;
+            p.is_viewed_by_department = 0;
+            
+            // Mark daily work as sent
+            for (let w of projectDailyWork) {
+                w.sent_to_dept = deptId;
+                w.sent_from_dept = DEPARTMENT_ID;
+                w.is_viewed_by_department = 0;
+            }
+            
+            await fetchProjects();
+            await fetchDailyWork();
+            await renderProjects();
+            await renderDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send project', true);
+        }
+    } catch(e) {
+        console.error('Send error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`projSendDropdown-${projectId}`);
+        closeModal('viewProjectModal');
+    }
+}
+
+// ==================== SEND REPORT - USING ADVANCED SYSTEM ====================
+async function sendReportToDept(reportId, deptId) {
+    const r = reportsList.find(r => r.id === reportId);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Town Planning',
+            report_title: r.title,
+            report_period: r.period,
+            report_content: r.content,
+            sent_by: CURRENT_USER || 'Town Planning Manager',
+            duplicate_send: true
+        };
+        
+        console.log('Sending report payload:', payload);
+        
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_report_advanced.php', 'POST', payload);
+        
+        console.log('Send report response:', res);
+        
+        if (res && res.success) {
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+            addLog(`Report "${r.title}" sent to ${deptName}`);
+            
+            r.sent_to_department = deptId;
+            r.sent_from_department = DEPARTMENT_ID;
+            r.is_viewed_by_department = 0;
+            
+            await fetchReports();
+            await renderReports();
+            await renderDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    } catch(e) {
+        console.error('Send error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown(`reportSendDropdown-${reportId}`);
+        closeModal('viewReportModal');
+    }
+}
+
+// ==================== SEND DOCUMENT - USING ADVANCED SYSTEM ====================
 async function sendDocumentToDept(docId, deptId, type) { 
     const doc = (type === 'project') ? projectDocuments.find(d => d.id === docId) : uploadedReportsData.find(d => d.id === docId);
     if (!doc) {
@@ -1225,24 +1408,43 @@ async function sendDocumentToDept(docId, deptId, type) {
     }
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
+    
     const btn = document.querySelector(`#docSendDropdown-${docId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
     try {
-        const endpoint = (type === 'project') ? 'send_document.php' : 'send_uploaded_report.php';
         const payload = {
             document_id: parseInt(docId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
-            doc_type: type,
-            send_duplicate: true
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Town Planning',
+            document_title: doc.title,
+            document_file: doc.file_name,
+            description: doc.description || '',
+            doc_type: type || 'project',
+            sent_by: CURRENT_USER || 'Town Planning Manager',
+            duplicate_send: true
         };
-        const res = await apiCall(endpoint, 'POST', payload);
+        
+        console.log('Sending document payload:', payload);
+        
+        // USE ADVANCED ENDPOINT
+        const res = await apiCall('send_document_advanced.php', 'POST', payload);
+        
+        console.log('Send document response:', res);
+        
         if (res && res.success) {
             showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Document "${doc.title}" sent to ${deptName}`);
+            
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
+            
             if (type === 'project') {
                 await fetchProjectDocuments();
                 await renderProjects();
@@ -1257,9 +1459,62 @@ async function sendDocumentToDept(docId, deptId, type) {
         console.error('Send error:', e);
         showToast('Network error: ' + e.message, true);
     } finally {
-        if (btn) btn.innerHTML = originalText;
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
         toggleSendDropdown(`docSendDropdown-${docId}`);
         closeModal('documentInfoModal');
+    }
+}
+
+// ==================== SEND DAILY WORK - USING ADVANCED SYSTEM ====================
+async function sendDailyWorkToDept(dailyworkId, deptId) {
+    const w = dailyworkData.find(w => w.id == dailyworkId);
+    if (!w) {
+        showToast('Daily work record not found', true);
+        return;
+    }
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    try {
+        const payload = {
+            dailywork_id: parseInt(dailyworkId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            sent_by: CURRENT_USER || 'Town Planning Manager',
+            duplicate_send: true
+        };
+        
+        console.log('Sending daily work payload:', payload);
+        
+        const res = await apiCall('send_dailywork_advanced.php', 'POST', payload);
+        
+        console.log('Send daily work response:', res);
+        
+        if (res && res.success) {
+            showToast(`✅ Daily work sent to ${deptName}`, false);
+            addLog(`Daily work sent to ${deptName}`);
+            
+            w.sent_to_dept = deptId;
+            w.sent_from_dept = DEPARTMENT_ID;
+            w.is_viewed_by_department = 0;
+            
+            if (currentProjectId) {
+                await loadDailyWorkTableData();
+            }
+            await renderDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send daily work', true);
+        }
+    } catch(e) {
+        console.error('Send daily work error:', e);
+        showToast('Network error: ' + e.message, true);
     }
 }
 
@@ -1905,59 +2160,6 @@ function exportAllProjectDocsToPDF() {
     showToast("PDF preview opened - Click Print to save"); 
 }
 
-// ==================== SEND PROJECT TO DEPT ====================
-async function sendProjectToDept(projectId, deptId) { 
-    const p = projectsData.find(p => p.id === projectId);
-    if (!p) {
-        showToast('Project not found', true);
-        return;
-    }
-    if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
-        return;
-    }
-    const dept = allDepartmentsForSend.find(d => d.id == deptId);
-    const deptName = dept ? dept.name : 'Department';
-    const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
-    const originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
-    try {
-        const projectDailyWork = dailyworkData.filter(w => w.project_id == projectId);
-        const payload = {
-            project_id: parseInt(projectId),
-            to_department_id: parseInt(deptId),
-            from_department_id: DEPARTMENT_ID,
-            send_duplicate: true,
-            include_dailywork: true
-        };
-        const res = await apiCall('send_project.php', 'POST', payload);
-        if (res && res.success) {
-            showToast(`✅ Project "${p.name}" sent to ${deptName}`, false);
-            p.sent_to_dept = deptId;
-            p.sent_from_dept = DEPARTMENT_ID;
-            p.is_viewed_by_department = 0;
-            for (let w of projectDailyWork) {
-                w.sent_to_dept = deptId;
-                w.sent_from_dept = DEPARTMENT_ID;
-                w.is_viewed_by_department = 0;
-            }
-            await fetchProjects();
-            await fetchDailyWork();
-            await renderProjects();
-            await renderDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send project', true);
-        }
-    } catch(e) {
-        console.error('Send error:', e);
-        showToast('Network error: ' + e.message, true);
-    } finally {
-        if (btn) btn.innerHTML = originalText;
-        toggleSendDropdown(`projSendDropdown-${projectId}`);
-        closeModal('viewProjectModal');
-    }
-}
-
 // ==================== EXPORT PROJECT FUNCTIONS ====================
 function exportSingleProjectExcel(id) { 
     const p = projectsData.find(p=>p.id===id); 
@@ -1986,12 +2188,10 @@ function exportAllProjectsToPDF() {
         return; 
     }
     
-    // ============ STEP 1: LOAD DAILY WORK DATA FIRST ============
     // Hakikisha dailyworkData imeload kabla ya kuendelea
     if (dailyworkData.length === 0) {
         showToast('Loading daily work data...', false);
         fetchDailyWork().then(function() {
-            // Baada ya kuload, endelea na export
             exportAllProjectsToPDFContinue();
         }).catch(function(e) {
             showToast('Failed to load daily work data: ' + e.message, true);
@@ -1999,18 +2199,10 @@ function exportAllProjectsToPDF() {
         return;
     }
     
-    // Ikiwa tayari imeload, endelea moja kwa moja
     exportAllProjectsToPDFContinue();
 }
 
-// ============ STEP 2: CONTINUE FUNCTION ============
 function exportAllProjectsToPDFContinue() {
-    // Debugging - Angalia data
-    console.log('Daily work data count:', dailyworkData.length);
-    console.log('Projects count:', projectsData.length);
-    console.log('Sample daily work:', dailyworkData.slice(0, 3));
-    
-    // Calculate summary statistics
     let totalAmount = 0;
     let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
     let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
@@ -2022,21 +2214,11 @@ function exportAllProjectsToPDFContinue() {
         else if (p.status === 'completed') completedCount++;
         else if (p.status === 'approved') approvedCount++;
         
-        // ============ STEP 3: FIXED FILTERING LOGIC ============
-        // Tumia project_id kwanza, kisha project_name kama fallback
         const projectWork = dailyworkData.filter(function(w) {
-            // Filter by project_id (sahihi zaidi)
-            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) {
-                return true;
-            }
-            // Fallback: Filter by project_name
-            if (w.project_name && w.project_name === p.name) {
-                return true;
-            }
+            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
+            if (w.project_name && w.project_name === p.name) return true;
             return false;
         });
-        
-        console.log('Project "' + p.name + '" (ID: ' + p.id + ') has ' + projectWork.length + ' daily records');
         
         totalDailyRecords += projectWork.length;
         for (let w of projectWork) {
@@ -2048,7 +2230,6 @@ function exportAllProjectsToPDFContinue() {
     }
     let totalRemainingAll = totalBudgetAll - totalExpensesAll;
     
-    // ============ STEP 4: BUILD PROJECT CARDS ============
     let rows = '';
     for (let p of projectsData) {
         let imageUrl = getCleanImageUrl(p.image);
@@ -2056,19 +2237,11 @@ function exportAllProjectsToPDFContinue() {
         let statusBadgeClass = getProjectStatusClass(p.status);
         let statusText = getProjectStatusText(p.status);
         
-        // ============ STEP 5: FILTER DAILY WORK FOR THIS PROJECT ============
         const projectWork = dailyworkData.filter(function(w) {
-            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) {
-                return true;
-            }
-            if (w.project_name && w.project_name === p.name) {
-                return true;
-            }
+            if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
+            if (w.project_name && w.project_name === p.name) return true;
             return false;
         });
-        
-        // Debug log
-        console.log('Building project "' + p.name + '" - Found ' + projectWork.length + ' daily records');
         
         let projBudget = 0, projExpenses = 0;
         for (let w of projectWork) {
@@ -2080,10 +2253,8 @@ function exportAllProjectsToPDFContinue() {
         let projRemaining = projBudget - projExpenses;
         let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
         
-        // ============ STEP 6: BUILD DAILY WORK TABLE ROWS ============
         let dailyRows = '';
         if (projectWork.length > 0) {
-            console.log('Project "' + p.name + '" has ' + projectWork.length + ' records, building table...');
             for (let w of projectWork) {
                 let budget = parseFloat(w.budget) || 0;
                 let expensesValue = parseFloat(w.expenses) || 0;
@@ -2112,21 +2283,14 @@ function exportAllProjectsToPDFContinue() {
             dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records found for this project</td></tr>';
         }
         
-        // ============ STEP 7: BUILD PROJECT CARD ============
         rows += '<div style="margin-bottom: 40px; border: 2px solid #4338ca; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">' +
-            
-            // Header
             '<div style="background: linear-gradient(135deg, #4338ca, #3730a3); color: white; padding: 15px 20px;">' +
             '<h3 style="margin: 0; font-size: 18px; font-weight: 700;">' + escapeHtml(p.name) + '</h3>' +
             '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #' + p.id + ' | Client: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + ' | Total Records: ' + projectWork.length + '</p>' +
             '</div>' +
-            
-            // Image
             '<div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">' +
             (imageUrl && isImage ? '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\'>No Image</div>\'">' : '<div style="color:#999;padding:10px;">No Image Available</div>') +
             '</div>' +
-            
-            // Project Details - VERTICAL TABLE
             '<div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">' +
             '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">' +
             '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #4338ca;">📌 Amount:</td><td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">' + formatMoney(p.amount) + '</span></td></tr>' +
@@ -2139,20 +2303,14 @@ function exportAllProjectsToPDFContinue() {
             '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #4338ca;">👤 Created By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>' +
             (p.updated_by ? '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #4338ca;">✏️ Updated By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>' : '') +
             '</table></div>' +
-            
-            // Daily Work Section
             '<div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #4338ca;">' +
             '<h4 style="margin: 0 0 12px 0; font-size: 14px; color: #4338ca;"><i class="fas fa-calendar-day"></i> Daily Work Records (' + projectWork.length + ')</h4>' +
-            
-            // Summary Cards
             (projectWork.length > 0 ? 
             '<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">' +
             '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;"><div style="font-size: 10px; color: #166534;">💰 Total Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669;">' + formatMoney(projBudget) + '</div></div>' +
             '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;"><div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c;">' + formatMoney(projExpenses) + '</div></div>' +
             '<div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;"><div style="font-size: 10px; color: #1e40af;">📊 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ' + projRemainingColor + ';">' + formatMoney(projRemaining) + '</div></div>' +
             '</div>' : '') +
-            
-            // Daily Work Table - 6 COLUMNS
             '<div style="overflow-x: auto;">' +
             '<table style="width: 100%; border-collapse: collapse; font-size: 11px;">' +
             '<thead>' +
@@ -2177,7 +2335,6 @@ function exportAllProjectsToPDFContinue() {
             '</tbody></table></div></div></div>';
     }
     
-    // ============ STEP 8: CREATE PRINT WINDOW ============
     let w = window.open('', '_blank');
     if (!w) {
         showToast("Please allow popups to generate PDF", true);
@@ -2251,6 +2408,7 @@ function exportAllProjectsToPDFContinue() {
     w.document.close();
     showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 function exportProjectToPDFNewWindow(projectId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) { showToast('Project not found', true); return; }
@@ -2556,6 +2714,15 @@ async function viewDailyWork(id) {
         let actionHtml = '';
         if (w.created_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(w.created_by)} | ${formatDateTime(w.created_at)}</div>`;
         if (w.updated_by && w.updated_by !== w.created_by) actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(w.updated_by)} | ${formatDateTime(w.updated_at)}</div>`;
+        
+        // Build send options
+        let deptOptions = '';
+        allDepartmentsForSend.forEach(d => {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendDailyWorkToDept(${w.id}, ${d.id}); closeModal('viewDailyworkModal')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+            }
+        });
+        
         document.getElementById('viewDailyworkContent').innerHTML = `
             <div class="space-y-3">
                 <div class="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-4 rounded-lg">
@@ -2571,6 +2738,12 @@ async function viewDailyWork(id) {
                     <div><strong>Status:</strong></div><div><span class="status-badge ${w.status === 'completed' ? 'status-completed' : w.status === 'partial' ? 'status-partial' : 'status-pending'}">${w.status === 'completed' ? 'Completed' : w.status === 'partial' ? 'Partial' : 'Pending'}</span></div>
                 </div>
                 ${actionHtml ? `<div class="action-history text-xs text-gray-400 mt-2 pt-2 border-t">${actionHtml}</div>` : ''}
+                <div class="detail-buttons mt-3 pt-2 border-t">
+                    <div class="send-dropdown">
+                        <button class="dropdown-trigger" onclick="toggleSendDropdown('dailyworkSendDropdown-${w.id}')"><i class="fas fa-paper-plane"></i> Send Daily Work</button>
+                        <div id="dailyworkSendDropdown-${w.id}" class="send-dropdown-content">${deptOptions}</div>
+                    </div>
+                </div>
             </div>
         `;
         openModal('viewDailyworkModal');
@@ -2758,9 +2931,11 @@ function exportDailyWorkToPDF() {
 
 // ==================== REQUESTS SECTION ====================
 async function loadRequests(highlightId = null) {
-    await fetchRequests();
+    await fetchRequests(); // inatumia fund_requests
+    
     const requestsSection = document.getElementById('requestsSection');
     if (!requestsSection) return;
+    
     let html = `
         <div class="flex justify-between flex-wrap gap-3 mb-4">
             <h2 class="text-xl font-bold"><i class="fas fa-hand-holding-usd text-orange-600 mr-2"></i>My Fund Requests (${requestsData.length})</h2>
@@ -2788,10 +2963,12 @@ async function loadRequests(highlightId = null) {
         </div>
     `;
     requestsSection.innerHTML = html;
+    
     if (requestsData.length === 0) {
         document.getElementById('requestsTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No requests found.</td></tr>';
         return;
     }
+    
     let tableHtml = '';
     for (let r of requestsData) {
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
@@ -2801,8 +2978,9 @@ async function loadRequests(highlightId = null) {
         let amount = parseFloat(r.amount) || 0;
         let descriptionText = r.description ? (r.description.length > 40 ? r.description.substring(0, 40) + '...' : r.description) : '-';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+        
         tableHtml += `<tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}">
-            <td class="date-cell">${formatDisplayDate(r.transaction_date)}</td>
+            <td class="date-cell">${formatDisplayDate(r.request_date)}</td>
             <td><span class="status-badge ${typeClass}">${r.type}</span></td>
             <td>${escapeHtml(r.source)}</td>
             <td class="text-right font-bold text-orange-600">${formatMoney(amount)}</td>
@@ -2825,21 +3003,39 @@ async function loadRequests(highlightId = null) {
     updateRequestBadge();
 }
 
+// 2. SUBMIT REQUEST - tumia fund_requests
 async function submitRequest() {
     let id = document.getElementById('reqId').value;
-    let transaction_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
+    let request_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
     let type = document.getElementById('reqType').value;
     let source = document.getElementById('reqSource').value.trim();
     let amount = parseMoneyValue(document.getElementById('reqAmount').value);
     let description = document.getElementById('reqDesc').value;
+    
     if(!source || amount <= 0) { showToast('Source and amount required', true); return; }
-    let data = { type, source, amount, paid_amount: 0, transaction_date, status: 'pending', description, department_id: DEPARTMENT_ID, created_by: CURRENT_USER };
+    
+    let data = { 
+        title: source,
+        request_date: request_date,
+        type: type, 
+        source: source, 
+        amount: amount, 
+        description: description, 
+        status: 'pending', 
+        department_id: DEPARTMENT_ID, 
+        requested_by: CURRENT_USER
+    };
+    
     const sendBtn = document.querySelector('#requestModal .btn-primary');
     const originalText = sendBtn.innerHTML;
     sendBtn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
     sendBtn.disabled = true;
+    
     try {
-        let res = id ? await apiCall('update_transaction.php', 'POST', { ...data, id: parseInt(id) }) : await apiCall('add_transaction.php', 'POST', data);
+        let res = id ? 
+            await apiCall('update_fund_request.php', 'POST', { ...data, id: parseInt(id) }) : 
+            await apiCall('add_fund_request.php', 'POST', data);
+            
         if(res && res.success) { 
             showToast(id ? 'Request updated' : 'Request submitted'); 
             addLog(id ? `Fund request updated: ${source}` : `Fund request added: ${source}`);
@@ -2847,10 +3043,15 @@ async function submitRequest() {
             await loadRequests(); 
             await renderDashboard(); 
         } else showToast(res?.message || 'Failed', true);
-    } catch(e) { showToast('Network error: ' + e.message, true); }
-    finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
+    } catch(e) { 
+        showToast('Network error: ' + e.message, true); 
+    } finally { 
+        sendBtn.innerHTML = originalText; 
+        sendBtn.disabled = false; 
+    }
 }
 
+// 3. VIEW REQUEST DETAILS - tumia fund_requests
 async function viewRequestDetails(id) {
     const r = requestsData.find(r => r.id == id);
     if(r) {
@@ -2860,17 +3061,19 @@ async function viewRequestDetails(id) {
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+        
         document.getElementById('viewRequestContent').innerHTML = `
             <div class="space-y-2">
-                <p><strong>Date:</strong> ${formatDisplayDate(r.transaction_date)}</p>
+                <p><strong>Date:</strong> ${formatDisplayDate(r.request_date)}</p>
                 <p><strong>Type:</strong> <span class="status-badge ${typeClass}">${r.type}</span></p>
-                <p><strong>Source:</strong> ${escapeHtml(r.source)}</p>
+                <p><strong>Source/Category:</strong> ${escapeHtml(r.source)}</p>
                 <p><strong>Amount:</strong> <span class="font-bold text-orange-600">${formatMoney(r.amount)}</span></p>
                 <p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p>
                 <p><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></p>
-                <div class="user-info">Submitted by: ${escapeHtml(r.created_by || CURRENT_USER)} on ${formatDateTime(r.created_at)}</div>
+                <div class="user-info">Submitted by: ${escapeHtml(r.requested_by || CURRENT_USER)} on ${formatDateTime(r.created_at)}</div>
             </div>
         `;
+        
         document.getElementById('viewRequestButtons').innerHTML = `
             <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
             <button onclick="exportSingleRequestPDFWindow(${r.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>
@@ -2880,11 +3083,12 @@ async function viewRequestDetails(id) {
     }
 }
 
+// 4. EDIT REQUEST - tumia fund_requests
 function editRequest(id) { 
     const r = requestsData.find(r => r.id == id); 
     if(r) { 
         document.getElementById('reqId').value = r.id; 
-        document.getElementById('reqDate').value = r.transaction_date; 
+        document.getElementById('reqDate').value = r.request_date; 
         document.getElementById('reqType').value = r.type; 
         document.getElementById('reqSource').value = r.source; 
         document.getElementById('reqAmount').value = formatNumberWithCommas(r.amount); 
@@ -2893,11 +3097,12 @@ function editRequest(id) {
     } 
 }
 
+// 5. DELETE REQUEST - tumia fund_requests
 async function deleteRequest(id) { 
     if(confirm('Delete this request? It will be moved to recycle bin.')) { 
         const r = requestsData.find(r=>r.id==id);
-        if(r) await addToRecycleBin(id, 'transaction', r.source);
-        let res = await apiCall('delete_transaction.php', 'POST', { id: parseInt(id), is_deleted: 1 }); 
+        if(r) await addToRecycleBin(id, 'fund_request', r.source);
+        let res = await apiCall('delete_fund_request.php', 'POST', { id: parseInt(id), is_deleted: 1 }); 
         if(res.success) { 
             showToast('Request moved to recycle bin'); 
             addLog(`Fund request deleted: ${r?.source}`);
@@ -2947,7 +3152,6 @@ function exportAllRequestsToPDF() {
         return;
     }
 
-    // ============ CALCULATE TOTALS ============
     let totalIncome = 0;
     let totalExpense = 0;
     let totalAmount = 0;
@@ -2977,14 +3181,12 @@ function exportAllRequestsToPDF() {
     let netProfit = totalIncome - totalExpense;
     let netProfitColor = netProfit >= 0 ? '#059669' : '#dc2626';
 
-    // ============ BUILD TABLE ROWS - ALL REQUESTS ============
     let tableRows = '';
     let rowNumber = 1;
     
     for (let r of requestsData) {
         let amount = parseFloat(r.amount) || 0;
         
-        // Status styling
         let statusText = '';
         let statusColor = '';
         let statusBg = '';
@@ -3002,17 +3204,14 @@ function exportAllRequestsToPDF() {
             statusBg = '#fef3c7';
         }
         
-        // Type styling
         let typeText = r.type === 'income' ? 'Income' : 'Expense';
         let typeColor = r.type === 'income' ? '#059669' : '#dc2626';
         let typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
         
-        // Description - shorten if too long
         let description = r.description || '-';
         let shortDesc = description.length > 60 ? description.substring(0, 60) + '...' : description;
         let fullDesc = description;
         
-        // Format date
         let recordDate = r.transaction_date ? new Date(r.transaction_date).toLocaleString() : 'N/A';
         let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
         
@@ -3031,7 +3230,6 @@ function exportAllRequestsToPDF() {
         rowNumber++;
     }
 
-    // ============ CREATE PRINT WINDOW ============
     let w = window.open('', '_blank');
     if (!w) {
         showToast("Please allow popups to generate PDF", true);
@@ -3150,6 +3348,7 @@ function exportAllRequestsToPDF() {
     w.document.close();
     showToast("📄 All Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 // ==================== REPORTS SECTION ====================
 async function renderReports(highlightId = null) {
     await Promise.all([fetchReports(), fetchUploadedReports()]);
@@ -3269,51 +3468,6 @@ async function renderReports(highlightId = null) {
 
 function switchReportTab(tab) { currentReportTab = tab; renderReports(); }
 
-// ==================== SEND REPORT TO DEPT ====================
-async function sendReportToDept(reportId, deptId) {
-    const r = reportsList.find(r => r.id === reportId);
-    if (!r) {
-        showToast('Report not found', true);
-        return;
-    }
-    if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
-        return;
-    }
-    const dept = allDepartmentsForSend.find(d => d.id == deptId);
-    const deptName = dept ? dept.name : 'Department';
-    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
-    const originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
-    try {
-        const payload = {
-            report_id: parseInt(reportId),
-            to_department_id: parseInt(deptId),
-            from_department_id: DEPARTMENT_ID,
-            send_duplicate: true
-        };
-        const res = await apiCall('send_report.php', 'POST', payload);
-        if (res && res.success) {
-            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
-            r.sent_to_department = deptId;
-            r.sent_from_department = DEPARTMENT_ID;
-            r.is_viewed_by_department = 0;
-            await fetchReports();
-            await renderReports();
-            await renderDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send report', true);
-        }
-    } catch(e) {
-        console.error('Send error:', e);
-        showToast('Network error: ' + e.message, true);
-    } finally {
-        if (btn) btn.innerHTML = originalText;
-        toggleSendDropdown(`reportSendDropdown-${reportId}`);
-        closeModal('viewReportModal');
-    }
-}
-
 // ==================== REPORT FUNCTIONS ====================
 async function viewReportDetail(id) { 
     const r = reportsList.find(r => r.id == id); 
@@ -3347,7 +3501,6 @@ function exportSingleReportExcel(id) {
     } 
 }
 
-
 function exportSingleReportPDFWindow(id) {
     const r = reportsList.find(item => item.id === id);
     if (!r) {
@@ -3355,27 +3508,19 @@ function exportSingleReportPDFWindow(id) {
         return;
     }
 
-    // ============ STATUS ============
     let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
     let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
     let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
-
-    // ============ PERIOD ============
     let periodText = r.period || 'Not specified';
     let periodLabel = periodText.charAt(0).toUpperCase() + periodText.slice(1);
-
-    // ============ FULL CONTENT - NO TRUNCATION ============
     let content = r.content || 'No content available';
     let wordCount = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
     let charCount = content.length;
-
-    // ============ DATES ============
     let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
     let updatedDate = r.updated_at ? new Date(r.updated_at).toLocaleString() : null;
     let createdBy = r.created_by || 'System';
     let updatedBy = r.updated_by || null;
 
-    // ============ CREATE PRINT WINDOW ============
     let w = window.open('', '_blank');
     if (!w) {
         showToast("Please allow popups to generate PDF", true);
@@ -3472,6 +3617,7 @@ function exportSingleReportPDFWindow(id) {
     w.document.close();
     showToast("📄 Report PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 function exportAllReportsToExcel() { 
     let ws = [['ID','Title','Period','Content','Created','Status','Created By']]; 
     reportsList.forEach(r => ws.push([r.id, r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System'])); 
@@ -3487,7 +3633,6 @@ function exportAllReportsToPDF() {
         return;
     }
 
-    // ============ CALCULATE TOTALS ============
     let totalReports = reportsList.length;
     let sentCount = 0;
     let draftCount = 0;
@@ -3495,19 +3640,13 @@ function exportAllReportsToPDF() {
     let periodCounts = {};
 
     for (let r of reportsList) {
-        // Count status
         if (r.status === 'sent') sentCount++;
         else if (r.status === 'draft') draftCount++;
-        
-        // Count characters
         if (r.content) totalChars += r.content.length;
-        
-        // Count periods
         let period = r.period || 'unknown';
         periodCounts[period] = (periodCounts[period] || 0) + 1;
     }
 
-    // ============ BUILD PERIOD SUMMARY TABLE ============
     let periodRows = '';
     let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
     for (let period of periodOrder) {
@@ -3523,7 +3662,6 @@ function exportAllReportsToPDF() {
         }
     }
 
-    // ============ BUILD REPORT ROWS - FULL CONTENT ============
     let rows = '';
     let reportNumber = 1;
 
@@ -3531,8 +3669,6 @@ function exportAllReportsToPDF() {
         let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
         let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
         let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
-        
-        // FULL content - no truncation
         let content = r.content || 'No content available';
         let createdDate = r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A';
         let updatedDate = r.updated_at ? new Date(r.updated_at).toLocaleString() : null;
@@ -3541,16 +3677,12 @@ function exportAllReportsToPDF() {
         
         rows +=
             '<div style="margin-bottom: 30px; border: 2px solid #4338ca; border-radius: 12px; overflow: hidden; page-break-inside: avoid; background: white;">' +
-            
-            // Report Header - Town Planning Colors
             '<div style="background: linear-gradient(135deg, #4338ca, #3730a3); color: white; padding: 15px 20px;">' +
             '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">' +
             '<div><h3 style="margin: 0; font-size: 17px; font-weight: 700;">#' + reportNumber + ' ' + escapeHtml(r.title) + '</h3>' +
             '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Report ID: #' + r.id + ' | Period: ' + r.period + '</p></div>' +
             '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>' +
             '</div></div>' +
-            
-            // Report Meta Info
             '<div style="padding: 12px 20px; background: #eef2ff; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">' +
             '<span><strong>📅 Created:</strong> ' + createdDate + ' by ' + escapeHtml(createdBy) + '</span>' +
             (updatedDate && updatedBy ? '<span><strong>✏️ Updated:</strong> ' + updatedDate + ' by ' + escapeHtml(updatedBy) + '</span>' : '') +
@@ -3558,22 +3690,16 @@ function exportAllReportsToPDF() {
             '<span><strong>📋 Period:</strong> ' + r.period + '</span>' +
             '<span><strong>📝 Characters:</strong> ' + (r.content ? r.content.length : 0).toLocaleString() + '</span>' +
             '</div>' +
-            
-            // Report Content - FULL (NO TRUNCATION)
             '<div style="padding: 18px 20px; background: white; font-size: 13px; line-height: 1.7; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; max-height: none; overflow-y: visible;">' +
             escapeHtml(content) +
             '</div>' +
-            
-            // Footer for each report
             '<div style="padding: 8px 20px; background: #f8fafc; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: right;">' +
             'Report #' + r.id + ' | Generated: ' + new Date().toLocaleString() +
             '</div>' +
             '</div>';
-        
         reportNumber++;
     }
 
-    // ============ CREATE PRINT WINDOW ============
     let w = window.open('', '_blank');
     if (!w) {
         showToast("Please allow popups to generate PDF", true);
@@ -3640,8 +3766,6 @@ function exportAllReportsToPDF() {
                 '<div class="summary-card periods"><div class="label">📆 Period Types</div><div class="value">' + Object.keys(periodCounts).length + '</div></div>\n' +
                 '<div class="summary-card avg"><div class="label">📊 Avg Characters</div><div class="value">' + (totalReports > 0 ? Math.round(totalChars / totalReports).toLocaleString() : '0') + '</div></div>\n' +
             '</div>\n' +
-            
-            // Period Summary Table
             '<div class="period-summary">\n' +
                 '<h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>\n' +
                 '<table class="period-table">\n' +
@@ -3651,13 +3775,10 @@ function exportAllReportsToPDF() {
                     '</tbody>\n' +
                 '</table>\n' +
             '</div>\n' +
-            
-            // Reports List - FULL CONTENT
             '<div class="reports-section">\n' +
                 '<div class="reports-title">📄 Reports List (' + totalReports + ' reports)</div>\n' +
                 rows +
             '</div>\n' +
-            
             '<div class="footer">\n' +
                 'GeoTraverse ERP System - Town Planning Department | Official All Reports Report<br>\n' +
                 'This document is system generated and requires no signature\n' +
@@ -3677,6 +3798,7 @@ function exportAllReportsToPDF() {
     w.document.close();
     showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 function exportAllUploadedReportsToExcel() { 
     if(uploadedReportsData.length===0) { showToast('No reports', true); return; } 
     let ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']]; 
@@ -4191,6 +4313,7 @@ window.toggleDailyWorkTable = toggleDailyWorkTable;
 window.openDailyWorkModal = openDailyWorkModal;
 window.exportDailyWorkToExcel = exportDailyWorkToExcel;
 window.exportDailyWorkToPDF = exportDailyWorkToPDF;
+window.sendDailyWorkToDept = sendDailyWorkToDept;
 window.changeColor = changeColor;
 window.createBackup = createBackup;
 window.restoreBackup = restoreBackup;
