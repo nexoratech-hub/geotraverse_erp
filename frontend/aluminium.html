@@ -826,31 +826,20 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     } catch(e) { console.error('API Error:', endpoint, e); return { success: false, message: e.message, data: [] }; }
 }
 
-// ==================== FETCH PROJECTS ====================
-// ==================== FETCH ALUMINIUM PROJECTS - FIXED ====================
+// ==================== FETCH PROJECTS - FIXED ====================
 async function fetchAluminiumProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&project_type=aluminium`); 
     if (res.success && res.data) { 
-        aluminiumProjects = res.data.filter(p => 
-            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
-            (!p.deleted_by_department || p.deleted_by_department != 1) && 
-            (!p.deleted_by_admin || p.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id); 
-        
-        // Also include projects with 'aluminium' in name or general projects
+        // Get all projects for this department
         const allProjects = res.data.filter(p => 
             (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
-            (!p.deleted_by_admin || p.deleted_by_admin != 1) &&
-            (p.project_type === 'aluminium' || p.project_type === 'general' || !p.project_type || p.project_type === '')
+            (!p.deleted_by_admin || p.deleted_by_admin != 1)
         );
         
-        // Merge and remove duplicates
-        const merged = [...aluminiumProjects, ...allProjects];
-        const seen = new Set();
-        aluminiumProjects = merged.filter(p => {
-            if (seen.has(p.id)) return false;
-            seen.add(p.id);
+        // Filter aluminium projects (not containing 'iron' in name)
+        aluminiumProjects = allProjects.filter(p => {
+            if (p.name && p.name.toLowerCase().includes('iron')) return false;
             return true;
         }).sort((a,b) => b.id - a.id);
         
@@ -867,14 +856,22 @@ async function fetchAluminiumProjects() {
     }
     updateProjectBadge();
 }
+
 async function fetchIronProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&project_type=iron`); 
     if (res.success && res.data) { 
-        ironProjects = res.data.filter(p => 
+        // Get all projects for this department
+        const allProjects = res.data.filter(p => 
             (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
             (!p.deleted_by_admin || p.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id); 
+        );
+        
+        // Filter iron projects (containing 'iron' in name)
+        ironProjects = allProjects.filter(p => {
+            if (p.name && p.name.toLowerCase().includes('iron')) return true;
+            return false;
+        }).sort((a,b) => b.id - a.id);
         
         unviewedIronProjectsCount = ironProjects.filter(p => 
             p.sent_from_dept && 
@@ -890,25 +887,24 @@ async function fetchIronProjects() {
     updateProjectBadge();
 }
 
-// ==================== FETCH ALUMINIUM DOCUMENTS - FIXED ====================
+// ==================== FETCH DOCUMENTS - FIXED ====================
 async function fetchAluminiumDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // Filter: department_id = 7 (Aluminium & Iron) AND (doc_type = 'aluminium' OR doc_type = 'general' OR doc_type = 'campaign')
+        // Filter: department_id = 7 AND (doc_type = 'aluminium' OR doc_type = 'general' OR doc_type = '' OR doc_type = 'campaign' OR doc_type IS NULL)
         aluminiumDocuments = res.data.filter(doc => 
             doc.department_id == DEPARTMENT_ID && 
-            (doc.doc_type === 'aluminium' || doc.doc_type === 'general' || doc.doc_type === 'campaign' || !doc.doc_type)
+            (doc.doc_type === 'aluminium' || doc.doc_type === 'general' || doc.doc_type === 'campaign' || !doc.doc_type || doc.doc_type === '')
         ).sort((a,b) => b.id - a.id);
     } else { 
         aluminiumDocuments = []; 
     }
 }
 
-// ==================== FETCH IRON DOCUMENTS - FIXED ====================
 async function fetchIronDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // Filter: department_id = 7 (Aluminium & Iron) AND doc_type = 'iron'
+        // Filter: department_id = 7 AND doc_type = 'iron'
         ironDocuments = res.data.filter(doc => 
             doc.department_id == DEPARTMENT_ID && 
             doc.doc_type === 'iron'
@@ -1354,12 +1350,11 @@ async function loadDashboard() {
     let totalIronDocs = ironDocuments.length;
     let totalDocs = totalAluminiumDocs + totalIronDocs;
     
-    // Count iron projects correctly - BOTH from ironProjects array AND from aluminiumProjects with 'iron' in name
+    // Count iron projects correctly - from ironProjects array
     let allIronProjects = [...ironProjects];
     // Also check aluminiumProjects for projects with 'iron' in name that might have been stored incorrectly
     aluminiumProjects.forEach(p => {
         if (p.name && p.name.toLowerCase().includes('iron')) {
-            // Check if already in ironProjects
             const exists = ironProjects.some(ip => ip.id === p.id);
             if (!exists) {
                 allIronProjects.push(p);
@@ -1450,7 +1445,7 @@ async function loadProjects() {
                 <div id="aluminiumProjectsHeader" class="section-header-buttons"><h2 id="aluminiumHeaderTitle">Added Projects</h2><div class="btn-group" id="aluminiumHeaderButtons"><button onclick="openAddAluminiumProjectModal()" class="btn-primary text-sm py-1.5 px-3"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllAluminiumProjectsToExcel()" class="btn-success text-sm py-1.5 px-3"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllAluminiumProjectsToPDF()" class="btn-danger text-sm py-1.5 px-3"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
                 <div id="aluminiumProjectsGrid" class="projects-grid"></div></div></div></div>
         <div id="ironProjectsContainer" class="project-cards-container ${currentProjectViewType === 'iron' ? '' : 'hidden'}"><div class="project-main-card"><div class="project-main-card-header"><h3><i class="fas fa-cog mr-2"></i> IRON PROJECTS</h3><p>Manage iron and steel projects</p></div>
-            <div class="p-4"><div class="tab-container"><button class="tab-button ${currentIronTab === 'added' ? 'active' : ''}" onclick="switchIronTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${ironProjects.length + aluminiumProjects.filter(p => p.name?.toLowerCase().includes('iron')).length}</span></button><button class="tab-button ${currentIronTab === 'uploaded' ? 'active' : ''}" onclick="switchIronTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${ironDocuments.length}</span></button></div>
+            <div class="p-4"><div class="tab-container"><button class="tab-button ${currentIronTab === 'added' ? 'active' : ''}" onclick="switchIronTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${ironProjects.length}</span></button><button class="tab-button ${currentIronTab === 'uploaded' ? 'active' : ''}" onclick="switchIronTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${ironDocuments.length}</span></button></div>
                 <div id="ironProjectsHeader" class="section-header-buttons"><h2 id="ironHeaderTitle">Added Projects</h2><div class="btn-group" id="ironHeaderButtons"><button onclick="openAddIronProjectModal()" class="btn-primary text-sm py-1.5 px-3"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllIronProjectsToExcel()" class="btn-success text-sm py-1.5 px-3"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllIronProjectsToPDF()" class="btn-danger text-sm py-1.5 px-3"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
                 <div id="ironProjectsGrid" class="projects-grid"></div></div></div></div>`;
     document.getElementById("projectsSection").innerHTML = html;
@@ -1500,7 +1495,6 @@ function switchIronTab(tab) {
 function renderAluminiumProjects() {
     // Filter: Show only non-iron projects
     const aluminiumFiltered = aluminiumProjects.filter(p => {
-        // If project has 'iron' in name, exclude it (it should be in iron section)
         if (p.name && p.name.toLowerCase().includes('iron')) return false;
         return true;
     });

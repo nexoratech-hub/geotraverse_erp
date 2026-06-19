@@ -632,7 +632,7 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- ==================== FIXED: VIEW REPORT MODAL ==================== -->
+<!-- ==================== VIEW REPORT MODAL ==================== -->
 <!-- ============================================================ -->
 <div id="viewReportModal" class="modal">
     <div class="modal-content" style="max-width: 850px;">
@@ -956,7 +956,6 @@ function getFullReportPath(filePath) {
 // ==================== FIXED: DOWNLOAD DOCUMENT URL ====================
 // ============================================================
 function getDocumentDownloadUrl(docId) {
-    // Using download_document.php which exists in backend
     return '../backend/api/download_document.php?id=' + docId + '&type=project';
 }
 
@@ -2235,7 +2234,7 @@ function saveProjectDocument() {
 }
 
 // ============================================================
-// ==================== FIXED: VIEW UPLOADED DOCUMENT INFO ====================
+// ==================== VIEW UPLOADED DOCUMENT INFO ====================
 // ============================================================
 function viewUploadedDocumentInfo(docId) {
     var doc = projectDocuments.find(function(d) { return d.id === docId; });
@@ -2277,7 +2276,6 @@ function viewUploadedDocumentInfo(docId) {
         }
     });
     
-    // FIXED: Use download_document.php which exists
     var downloadUrl = getDocumentDownloadUrl(doc.id);
     
     document.getElementById('documentInfoButtons').innerHTML =
@@ -2753,6 +2751,9 @@ function loadReports(highlightId) {
             document.getElementById('reportsGridContainer').innerHTML = gridHtml;
             
         } else {
+            // ============================================================
+            // ==================== UPLOADED REPORTS TAB ====================
+            // ============================================================
             html +=
                 '<div class="flex justify-between items-center mb-4 flex-wrap gap-2">' +
                     '<h2 class="text-xl font-bold"><i class="fas fa-upload text-pink-600 mr-2"></i>Uploaded Reports</h2>' +
@@ -2798,7 +2799,7 @@ function switchReportTab(tab) {
 }
 
 // ============================================================
-// ==================== FIXED: VIEW REPORT DETAILS ====================
+// ==================== VIEW ADDED REPORT DETAILS ====================
 // ============================================================
 function viewReportDetailsModal(id) {
     var r = reportsData.find(function(r) { return r.id === id; });
@@ -2811,20 +2812,20 @@ function viewReportDetailsModal(id) {
         markReportViewed(id);
     }
     
-    // Design kama ya project view - with vertical table and full content
+    // Added report details - show title, content, created by, created at only
     var detailsHtml = 
-        '<table class="project-details-table">' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Title:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(r.title) + '</strong></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Period:</td><td style="padding: 10px 8px;">' + escapeHtml(r.period || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Status:</td><td style="padding: 10px 8px;"><span class="status-badge ' + (r.status === 'sent' ? 'status-approved' : 'status-pending') + '">' + (r.status === 'sent' ? 'Sent' : 'Draft') + '</span></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Created By:</td><td style="padding: 10px 8px;">' + escapeHtml(r.created_by || 'System') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Created At:</td><td style="padding: 10px 8px;">' + formatDateTime(r.created_at) + '</td></tr>' +
-            (r.updated_by ? '<tr><td style="padding: 10px 8px; font-weight: 600;">Updated By:</td><td style="padding: 10px 8px;">' + escapeHtml(r.updated_by) + '</td></tr>' : '') +
-            (r.updated_at ? '<tr><td style="padding: 10px 8px; font-weight: 600;">Updated At:</td><td style="padding: 10px 8px;">' + formatDateTime(r.updated_at) + '</td></tr>' : '') +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Content:</td><td style="padding: 10px 8px;">' +
-                '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
-            '</td></tr>' +
-        '</table>';
+        '<div class="space-y-4">' +
+            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
+                '<h3 class="text-xl font-bold">' + escapeHtml(r.title) + '</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Report ID: #' + r.id + ' | Period: ' + r.period + '</p>' +
+            '</div>' +
+            '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
+            '<div class="text-[10px] text-gray-500 mt-2 pt-2 border-t">' +
+                '<i class="fas fa-user-plus text-xs mr-1"></i> Created by: ' + escapeHtml(r.created_by || 'System') + 
+                ' on ' + formatDateTime(r.created_at) +
+                (r.updated_by && r.updated_by !== r.created_by ? '<br><i class="fas fa-edit text-xs mr-1"></i> Updated by: ' + escapeHtml(r.updated_by) + ' on ' + formatDateTime(r.updated_at) : '') +
+            '</div>' +
+        '</div>';
     
     document.getElementById('viewReportContent').innerHTML = detailsHtml;
     
@@ -2845,7 +2846,7 @@ function viewReportDetailsModal(id) {
 }
 
 // ============================================================
-// ==================== FIXED: VIEW UPLOADED REPORT DETAIL ====================
+// ==================== VIEW UPLOADED REPORT DETAIL ====================
 // ============================================================
 function viewUploadedReportDetail(id) {
     var doc = uploadedReportsData.find(function(d) { return d.id === id; });
@@ -2854,43 +2855,33 @@ function viewUploadedReportDetail(id) {
         return;
     }
     
-    var fileUrl = getFullReportPath(doc.file_path || doc.file_name);
-    var isImage = fileUrl && fileUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
-    var isPdf = fileUrl && fileUrl.match(/\.pdf$/i);
-    
-    var previewHtml = '';
-    if (isImage && fileUrl) {
-        previewHtml = '<div style="text-align:center; margin:15px 0;"><img src="' + fileUrl + '?t=' + Date.now() + '" class="max-w-full max-h-[300px] mx-auto object-contain rounded border" onclick="showFullImage(\'' + fileUrl + '\')" style="cursor: pointer;" onerror="this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-image text-3xl mb-2\'></i><p>Image failed to load</p></div>\'"></div>';
-    } else if (isPdf && fileUrl) {
-        previewHtml = '<iframe src="' + fileUrl + '" class="w-full h-[500px] border-0 rounded" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-pdf text-3xl mb-2\'></i><p>PDF failed to load</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Open PDF</button></div>\'"></iframe>';
-    } else if (fileUrl) {
-        previewHtml = '<div style="text-align:center; padding:20px;"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">Preview not available for this file type.</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Download File</button></div>';
-    } else {
-        previewHtml = '<div style="text-align:center; padding:20px;"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">No file available for preview</p></div>';
-    }
-    
     var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
     var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
     
     var sentFromInfo = '';
     if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
         var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
-        sentFromInfo = '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Received From:</td><td style="padding: 10px 8px;"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></td></tr>';
+        sentFromInfo = '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></div></div>';
     }
     
     var detailsHtml = 
-        '<table class="project-details-table">' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Document Title:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(doc.title) + '</strong></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Name:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.file_name || '-') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Type:</td><td style="padding: 10px 8px;">' + fileExt + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Size:</td><td style="padding: 10px 8px;">' + fileSize + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Period:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.period || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Uploaded By:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.uploaded_by || 'System') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Uploaded At:</td><td style="padding: 10px 8px;">' + new Date(doc.created_at).toLocaleString() + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Description:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.description || 'No description') + '</td></tr>' +
-            sentFromInfo +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Preview:</td><td style="padding: 10px 8px;">' + previewHtml + '</td></tr>' +
-        '</table>';
+        '<div class="space-y-4">' +
+            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
+                '<h3 class="text-xl font-bold">Document Information</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p>' +
+            '</div>' +
+            '<div class="doc-info-container">' +
+                '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
+                sentFromInfo +
+            '</div>' +
+        '</div>';
     
     document.getElementById('viewReportContent').innerHTML = detailsHtml;
     
@@ -2902,8 +2893,10 @@ function viewUploadedReportDetail(id) {
     });
     
     var buttonsHtml = '';
-    if (fileUrl) {
-        buttonsHtml += '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download mr-1"></i> Download</button>';
+    // Download button - direct download only, no preview
+    if (doc.file_name) {
+        var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
+        buttonsHtml += '<a href="' + downloadUrl + '" target="_blank" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download mr-1"></i> Download</a>';
     }
     buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
     
