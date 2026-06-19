@@ -300,7 +300,6 @@
             color: #fbbf24;
         }
         
-        /* Document download button */
         .btn-download {
             background: #0d9488;
             color: white;
@@ -632,12 +631,14 @@
     </div>
 </div>
 
-<!-- VIEW REPORT MODAL -->
+<!-- ============================================================ -->
+<!-- ==================== FIXED: VIEW REPORT MODAL ==================== -->
+<!-- ============================================================ -->
 <div id="viewReportModal" class="modal">
     <div class="modal-content" style="max-width: 850px;">
         <div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Report Details</h3><button onclick="closeModal('viewReportModal')">&times;</button></div>
         <div class="modal-body">
-            <div id="viewReportContent" class="report-content-full"></div>
+            <div id="viewReportContent"></div>
             <div id="viewReportButtons" class="view-buttons-container"></div>
         </div>
     </div>
@@ -855,7 +856,7 @@ var API_BASE = '../backend/api/';
 var DEPARTMENT_ID = 9;
 var CURRENT_USER = "Architectural Manager";
 
-// PATHS - SAHIHI
+// PATHS
 var PATHS = {
     PROJECTS_UPLOAD: '/geotraverse/frontend/assets/uploads/projects/',
     PROJECTS_DOCUMENTS: '/geotraverse/frontend/assets/uploads/projects/projects_documents/',
@@ -951,8 +952,12 @@ function getFullReportPath(filePath) {
     return PATHS.REPORTS_UPLOAD + cleanPath;
 }
 
+// ============================================================
+// ==================== FIXED: DOWNLOAD DOCUMENT URL ====================
+// ============================================================
 function getDocumentDownloadUrl(docId) {
-    return '../backend/api/download_project_document.php?id=' + docId;
+    // Using download_document.php which exists in backend
+    return '../backend/api/download_document.php?id=' + docId + '&type=project';
 }
 
 // ============================================================
@@ -1740,7 +1745,7 @@ function viewProjectDetails(id) {
 }
 
 // ============================================================
-// ==================== SEND PROJECT (WITH DAILY WORK) ====================
+// ==================== SEND PROJECT ====================
 // ============================================================
 function sendProjectToDept(projectId, deptId) {
     var p = projectsData.find(function(p) { return p.id === projectId; });
@@ -2145,9 +2150,6 @@ function removeProjectDocument() {
     document.getElementById('projectDocPreview').classList.add('hidden');
 }
 
-// ============================================================
-// ==================== FIXED: SAVE PROJECT DOCUMENT ====================
-// ============================================================
 function saveProjectDocument() {
     var title = document.getElementById('projectDocTitle').value.trim();
     var description = document.getElementById('projectDocDesc').value;
@@ -2165,13 +2167,11 @@ function saveProjectDocument() {
     
     var file = fileInput.files[0];
     
-    // Check file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) { 
         showToast('File too large. Max size is 10MB', true); 
         return; 
     }
     
-    // Allowed file extensions
     var allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
     var fileExt = file.name.split('.').pop().toLowerCase();
     
@@ -2192,13 +2192,6 @@ function saveProjectDocument() {
     sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
     sendBtn.disabled = true;
     
-    console.log('Uploading document:', {
-        title: title,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type
-    });
-    
     fetch(API_BASE + 'upload_project_document.php', { 
         method: 'POST', 
         body: formData 
@@ -2210,13 +2203,10 @@ function saveProjectDocument() {
         return response.json(); 
     })
     .then(function(result) {
-        console.log('Upload result:', result);
-        
         if (result.success) {
             showToast('✅ Document uploaded successfully');
             addLog('Document uploaded: ' + title);
             
-            // Reset form
             document.getElementById('projectDocTitle').value = '';
             document.getElementById('projectDocDesc').value = '';
             document.getElementById('projectDocFile').value = '';
@@ -2225,7 +2215,6 @@ function saveProjectDocument() {
             
             closeModal('projectDocUploadModal');
             
-            // Refresh data
             fetchProjectDocuments().then(function() {
                 loadProjects();
                 loadDashboard();
@@ -2258,7 +2247,6 @@ function viewUploadedDocumentInfo(docId) {
     var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
     var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
     
-    // Build correct file URL using file_path from database
     var fileUrl = '';
     if (doc.file_path) {
         var cleanPath = doc.file_path.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
@@ -2271,13 +2259,9 @@ function viewUploadedDocumentInfo(docId) {
         fileUrl = PATHS.PROJECTS_DOCUMENTS + doc.file_name;
     }
     
-    console.log('Document file URL:', fileUrl);
-    console.log('Document file_path:', doc.file_path);
-    
     var infoHtml = 
         '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">' + escapeHtml(doc.title) + '</div></div>' +
         '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name) + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Stored Path:</div><div class="doc-info-value" style="font-size:10px; color:#666; word-break:break-all;">' + escapeHtml(doc.file_path || 'N/A') + '</div></div>' +
         '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
         '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
         '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
@@ -2293,7 +2277,7 @@ function viewUploadedDocumentInfo(docId) {
         }
     });
     
-    // Use download script for reliable download
+    // FIXED: Use download_document.php which exists
     var downloadUrl = getDocumentDownloadUrl(doc.id);
     
     document.getElementById('documentInfoButtons').innerHTML =
@@ -2304,24 +2288,6 @@ function viewUploadedDocumentInfo(docId) {
     openModal('documentInfoModal');
 }
 
-// ============================================================
-// ==================== DOWNLOAD PROJECT DOCUMENT ====================
-// ============================================================
-function downloadProjectDocument(docId) {
-    var doc = projectDocuments.find(function(d) { return d.id === docId; });
-    if (!doc) {
-        showToast('Document not found', true);
-        return;
-    }
-    
-    var downloadUrl = getDocumentDownloadUrl(docId);
-    window.open(downloadUrl, '_blank');
-    showToast('Downloading: ' + doc.file_name, false);
-}
-
-// ============================================================
-// ==================== DELETE PROJECT DOCUMENT ====================
-// ============================================================
 function deleteProjectDocument(docId) {
     if (confirm('Delete this document? It will be moved to recycle bin.')) {
         var doc = projectDocuments.find(function(d) { return d.id === docId; });
@@ -2364,9 +2330,6 @@ function exportAllProjectDocsToPDF() {
     showToast("PDF preview opened - Click Print to save");
 }
 
-// ============================================================
-// ==================== SEND DOCUMENT ====================
-// ============================================================
 function sendDocumentToDept(docId, deptId) {
     var doc = projectDocuments.find(function(d) { return d.id === docId; });
     if (!doc) {
@@ -2436,7 +2399,7 @@ function sendDocumentToDept(docId, deptId) {
 }
 
 // ============================================================
-// ==================== REQUESTS SECTION (fund_requests) ====================
+// ==================== REQUESTS SECTION ====================
 // ============================================================
 function loadRequests(highlightId) {
     highlightId = highlightId || null;
@@ -2835,20 +2798,35 @@ function switchReportTab(tab) {
 }
 
 // ============================================================
-// ==================== REPORT FUNCTIONS ====================
+// ==================== FIXED: VIEW REPORT DETAILS ====================
 // ============================================================
 function viewReportDetailsModal(id) {
     var r = reportsData.find(function(r) { return r.id === id; });
-    if (!r) return;
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
     
     if (r.is_viewed_by_department == 0 && r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
         markReportViewed(id);
     }
     
-    document.getElementById('viewReportContent').innerHTML =
-        '<div class="bg-pink-800 p-3 rounded text-white"><strong>' + escapeHtml(r.title) + '</strong><span class="float-right">' + r.period + '</span></div>' +
-        '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
-        '<div class="text-[9px] text-gray-400 mt-3">Created by: ' + escapeHtml(r.created_by || 'System') + ' on ' + formatDateTime(r.created_at) + ' | Status: ' + (r.status === 'sent' ? 'Sent' : 'Draft') + '</div>';
+    // Design kama ya project view - with vertical table and full content
+    var detailsHtml = 
+        '<table class="project-details-table">' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Title:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(r.title) + '</strong></td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Period:</td><td style="padding: 10px 8px;">' + escapeHtml(r.period || 'N/A') + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Status:</td><td style="padding: 10px 8px;"><span class="status-badge ' + (r.status === 'sent' ? 'status-approved' : 'status-pending') + '">' + (r.status === 'sent' ? 'Sent' : 'Draft') + '</span></td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Created By:</td><td style="padding: 10px 8px;">' + escapeHtml(r.created_by || 'System') + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Created At:</td><td style="padding: 10px 8px;">' + formatDateTime(r.created_at) + '</td></tr>' +
+            (r.updated_by ? '<tr><td style="padding: 10px 8px; font-weight: 600;">Updated By:</td><td style="padding: 10px 8px;">' + escapeHtml(r.updated_by) + '</td></tr>' : '') +
+            (r.updated_at ? '<tr><td style="padding: 10px 8px; font-weight: 600;">Updated At:</td><td style="padding: 10px 8px;">' + formatDateTime(r.updated_at) + '</td></tr>' : '') +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Content:</td><td style="padding: 10px 8px;">' +
+                '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
+            '</td></tr>' +
+        '</table>';
+    
+    document.getElementById('viewReportContent').innerHTML = detailsHtml;
     
     var deptOptions = '';
     allDepartmentsForSend.forEach(function(d) {
@@ -2857,13 +2835,80 @@ function viewReportDetailsModal(id) {
         }
     });
     
-    document.getElementById('viewReportButtons').innerHTML =
+    document.getElementById('viewReportButtons').innerHTML = 
         '<button onclick="exportSingleReportExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
         '<button onclick="exportSingleReportPDFNewWindow(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>' +
         '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
     
     openModal('viewReportModal');
     loadReports();
+}
+
+// ============================================================
+// ==================== FIXED: VIEW UPLOADED REPORT DETAIL ====================
+// ============================================================
+function viewUploadedReportDetail(id) {
+    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
+    if (!doc) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    var fileUrl = getFullReportPath(doc.file_path || doc.file_name);
+    var isImage = fileUrl && fileUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
+    var isPdf = fileUrl && fileUrl.match(/\.pdf$/i);
+    
+    var previewHtml = '';
+    if (isImage && fileUrl) {
+        previewHtml = '<div style="text-align:center; margin:15px 0;"><img src="' + fileUrl + '?t=' + Date.now() + '" class="max-w-full max-h-[300px] mx-auto object-contain rounded border" onclick="showFullImage(\'' + fileUrl + '\')" style="cursor: pointer;" onerror="this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-image text-3xl mb-2\'></i><p>Image failed to load</p></div>\'"></div>';
+    } else if (isPdf && fileUrl) {
+        previewHtml = '<iframe src="' + fileUrl + '" class="w-full h-[500px] border-0 rounded" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-pdf text-3xl mb-2\'></i><p>PDF failed to load</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Open PDF</button></div>\'"></iframe>';
+    } else if (fileUrl) {
+        previewHtml = '<div style="text-align:center; padding:20px;"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">Preview not available for this file type.</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Download File</button></div>';
+    } else {
+        previewHtml = '<div style="text-align:center; padding:20px;"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">No file available for preview</p></div>';
+    }
+    
+    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
+    var sentFromInfo = '';
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+        sentFromInfo = '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Received From:</td><td style="padding: 10px 8px;"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></td></tr>';
+    }
+    
+    var detailsHtml = 
+        '<table class="project-details-table">' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Document Title:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(doc.title) + '</strong></td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Name:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.file_name || '-') + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Type:</td><td style="padding: 10px 8px;">' + fileExt + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">File Size:</td><td style="padding: 10px 8px;">' + fileSize + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Period:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.period || 'N/A') + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Uploaded By:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.uploaded_by || 'System') + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Uploaded At:</td><td style="padding: 10px 8px;">' + new Date(doc.created_at).toLocaleString() + '</td></tr>' +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Description:</td><td style="padding: 10px 8px;">' + escapeHtml(doc.description || 'No description') + '</td></tr>' +
+            sentFromInfo +
+            '<tr><td style="padding: 10px 8px; font-weight: 600;">Preview:</td><td style="padding: 10px 8px;">' + previewHtml + '</td></tr>' +
+        '</table>';
+    
+    document.getElementById('viewReportContent').innerHTML = detailsHtml;
+    
+    var deptOptions = '';
+    allDepartmentsForSend.forEach(function(d) {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+        }
+    });
+    
+    var buttonsHtml = '';
+    if (fileUrl) {
+        buttonsHtml += '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download mr-1"></i> Download</button>';
+    }
+    buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    
+    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
+    openModal('viewReportModal');
 }
 
 function sendReportToDeptModal(reportId, deptId) {
@@ -2936,6 +2981,78 @@ function sendReportToDeptModal(reportId, deptId) {
         }
         toggleSendDropdown('reportSendDropdown-' + reportId);
         closeModal('viewReportModal');
+    });
+}
+
+function sendUploadedReportToDept(reportId, deptId) {
+    var doc = uploadedReportsData.find(function(d) { return d.id === reportId; });
+    if (!doc) {
+        showToast('Report not found', true);
+        return;
+    }
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
+    
+    var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
+    var originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    var payload = {
+        document_id: parseInt(reportId),
+        to_department_id: parseInt(deptId),
+        from_department_id: DEPARTMENT_ID,
+        sent_by: CURRENT_USER,
+        doc_type: 'uploaded_report',
+        doc_data: {
+            id: doc.id,
+            title: doc.title,
+            description: doc.description || '',
+            file_name: doc.file_name || '',
+            file_path: doc.file_path || '',
+            file_size: doc.file_size || 0,
+            file_type: doc.file_type || '',
+            period: doc.period || 'monthly',
+            uploaded_by: doc.uploaded_by || CURRENT_USER,
+            department_id: doc.department_id || DEPARTMENT_ID,
+            created_at: doc.created_at,
+            sent_count: (doc.sent_count || 0) + 1
+        }
+    };
+    
+    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
+        if (res && res.success) {
+            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
+            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName);
+            
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            doc.last_sent_at = new Date().toISOString();
+            
+            closeModal('viewReportModal');
+            loadReports();
+            loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send report', true);
+        }
+    }).catch(function(e) {
+        console.error('Send uploaded report error:', e);
+        showToast('Network error: ' + e.message, true);
+    }).finally(function() {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
     });
 }
 
@@ -3094,9 +3211,129 @@ function deleteReport(id) {
     }
 }
 
-// ============================================================
-// ==================== GENERATE REPORT ====================
-// ============================================================
+function deleteUploadedReport(id) {
+    if (confirm('Delete this uploaded report?')) {
+        var doc = uploadedReportsData.find(function(d) { return d.id === id; });
+        if (doc) {
+            addToRecycleBin(id, 'uploaded_report', doc.title).then(function() {
+                apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID }).then(function(res) {
+                    if (res.success) {
+                        showToast('Uploaded report moved to recycle bin');
+                        loadReports();
+                        loadDashboard();
+                    } else {
+                        showToast(res.message || 'Failed', true);
+                    }
+                });
+            });
+        }
+    }
+}
+
+function exportAllUploadedReportsToExcel() {
+    if (uploadedReportsData.length === 0) { showToast('No reports', true); return; }
+    var ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']];
+    uploadedReportsData.forEach(function(d) {
+        var fileSize = d.file_size ? formatFileSize(d.file_size) : 'Unknown';
+        ws.push([d.title, d.file_name, d.description || '', d.period, d.uploaded_by, d.created_at, fileSize]);
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports');
+    XLSX.writeFile(wb, 'uploaded_reports_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    showToast('Uploaded reports exported to Excel');
+}
+
+function exportAllUploadedReportsToPDF() {
+    if (uploadedReportsData.length === 0) { showToast('No reports', true); return; }
+    var rows = uploadedReportsData.map(function(d) {
+        return '<div style="margin-bottom:20px;border-bottom:1px solid #be123c;"><h3 style="color:#be123c;">' + escapeHtml(d.title) + '</h3><p><strong>File:</strong> ' + d.file_name + '</p><p><strong>Period:</strong> ' + d.period + '</p><p><strong>Uploaded:</strong> ' + d.uploaded_by + ' on ' + new Date(d.created_at).toLocaleString() + '</p><p>' + escapeHtml(d.description || '') + '</p></div>';
+    }).join('');
+    var w = window.open('', '_blank');
+    w.document.write('<!DOCTYPE html><html><head><title>All Uploaded Reports</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;}</style></head><body><h1>All Uploaded Reports</h1><p>Generated: ' + new Date().toLocaleString() + '</p>' + rows + '<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);">Save as PDF</button></div></body></html>');
+    w.document.close();
+    showToast("PDF preview opened - Click Print to save");
+}
+
+function openUploadReportModal() {
+    document.getElementById('uploadReportTitle').value = '';
+    document.getElementById('uploadReportPeriod').value = 'monthly';
+    document.getElementById('uploadedFilePreview').classList.add('hidden');
+    document.getElementById('reportFileInput').value = '';
+    currentUploadedFile = null;
+    openModal('uploadReportModal');
+}
+
+document.getElementById('reportFileInput').addEventListener('change', function(e) {
+    if (e.target.files && e.target.files[0]) {
+        currentUploadedFile = e.target.files[0];
+        document.getElementById('fileNameDisplay').innerText = currentUploadedFile.name;
+        document.getElementById('uploadedFilePreview').classList.remove('hidden');
+    }
+});
+
+function previewUploadedFile() {
+    if (currentUploadedFile) {
+        var fileType = currentUploadedFile.type;
+        if (fileType.indexOf('image/') === 0) {
+            var reader = new FileReader();
+            reader.onload = function(ev) { showFullImage(ev.target.result); };
+            reader.readAsDataURL(currentUploadedFile);
+        } else {
+            var url = URL.createObjectURL(currentUploadedFile);
+            window.open(url, '_blank');
+            URL.revokeObjectURL(url);
+        }
+    }
+}
+
+function removeUploadedFile() {
+    currentUploadedFile = null;
+    document.getElementById('reportFileInput').value = '';
+    document.getElementById('uploadedFilePreview').classList.add('hidden');
+}
+
+function saveUploadedReport() {
+    var title = document.getElementById('uploadReportTitle').value.trim();
+    var period = document.getElementById('uploadReportPeriod').value;
+    if (!title) { showToast('Title required', true); return; }
+    if (!currentUploadedFile) { showToast('Please select a file', true); return; }
+    if (currentUploadedFile.size > 10 * 1024 * 1024) { showToast('File too large. Max size is 10MB', true); return; }
+    
+    var formData = new FormData();
+    formData.append('title', title);
+    formData.append('period', period);
+    formData.append('department_id', DEPARTMENT_ID);
+    formData.append('uploaded_by', CURRENT_USER);
+    formData.append('report_file', currentUploadedFile);
+    formData.append('description', 'Uploaded report document');
+    
+    var sendBtn = document.querySelector('#uploadReportModal .btn-primary');
+    var originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.disabled = true;
+    
+    fetch(API_BASE + 'upload_report_document.php', { method: 'POST', body: formData })
+    .then(function(response) { return response.json(); })
+    .then(function(result) {
+        if (result.success) {
+            showToast('✅ Report uploaded successfully');
+            addLog('Report uploaded: ' + title);
+            closeModal('uploadReportModal');
+            loadReports();
+            loadDashboard();
+        } else {
+            showToast('❌ ' + (result.message || 'Upload failed'), true);
+        }
+    })
+    .catch(function(error) {
+        showToast('❌ Network error: ' + error.message, true);
+    })
+    .finally(function() {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    });
+}
+
 function openGenerateReportModal() {
     document.getElementById('genReportTitle').value = '';
     document.getElementById('genPeriodType').value = 'daily';
@@ -3180,290 +3417,6 @@ function generateAndSaveReport() {
             }
         });
     });
-}
-
-// ============================================================
-// ==================== UPLOAD REPORT FUNCTIONS ====================
-// ============================================================
-function openUploadReportModal() {
-    document.getElementById('uploadReportTitle').value = '';
-    document.getElementById('uploadReportPeriod').value = 'monthly';
-    document.getElementById('uploadedFilePreview').classList.add('hidden');
-    document.getElementById('reportFileInput').value = '';
-    currentUploadedFile = null;
-    openModal('uploadReportModal');
-}
-
-document.getElementById('reportFileInput').addEventListener('change', function(e) {
-    if (e.target.files && e.target.files[0]) {
-        currentUploadedFile = e.target.files[0];
-        document.getElementById('fileNameDisplay').innerText = currentUploadedFile.name;
-        document.getElementById('uploadedFilePreview').classList.remove('hidden');
-    }
-});
-
-function previewUploadedFile() {
-    if (currentUploadedFile) {
-        var fileType = currentUploadedFile.type;
-        if (fileType.indexOf('image/') === 0) {
-            var reader = new FileReader();
-            reader.onload = function(ev) { showFullImage(ev.target.result); };
-            reader.readAsDataURL(currentUploadedFile);
-        } else {
-            var url = URL.createObjectURL(currentUploadedFile);
-            window.open(url, '_blank');
-            URL.revokeObjectURL(url);
-        }
-    }
-}
-
-function removeUploadedFile() {
-    currentUploadedFile = null;
-    document.getElementById('reportFileInput').value = '';
-    document.getElementById('uploadedFilePreview').classList.add('hidden');
-}
-
-function saveUploadedReport() {
-    var title = document.getElementById('uploadReportTitle').value.trim();
-    var period = document.getElementById('uploadReportPeriod').value;
-    if (!title) { showToast('Title required', true); return; }
-    if (!currentUploadedFile) { showToast('Please select a file', true); return; }
-    if (currentUploadedFile.size > 10 * 1024 * 1024) { showToast('File too large. Max size is 10MB', true); return; }
-    
-    var formData = new FormData();
-    formData.append('title', title);
-    formData.append('period', period);
-    formData.append('department_id', DEPARTMENT_ID);
-    formData.append('uploaded_by', CURRENT_USER);
-    formData.append('report_file', currentUploadedFile);
-    formData.append('description', 'Uploaded report document');
-    
-    var sendBtn = document.querySelector('#uploadReportModal .btn-primary');
-    var originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
-    sendBtn.disabled = true;
-    
-    fetch(API_BASE + 'upload_report_document.php', { method: 'POST', body: formData })
-    .then(function(response) { return response.json(); })
-    .then(function(result) {
-        if (result.success) {
-            showToast('✅ Report uploaded successfully');
-            addLog('Report uploaded: ' + title);
-            closeModal('uploadReportModal');
-            loadReports();
-            loadDashboard();
-        } else {
-            showToast('❌ ' + (result.message || 'Upload failed'), true);
-        }
-    })
-    .catch(function(error) {
-        showToast('❌ Network error: ' + error.message, true);
-    })
-    .finally(function() {
-        sendBtn.innerHTML = originalText;
-        sendBtn.disabled = false;
-    });
-}
-
-function viewUploadedReportDetail(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (!doc) {
-        showToast('Report not found', true);
-        return;
-    }
-    
-    var fileUrl = getFullReportPath(doc.file_path || doc.file_name);
-    var isImage = fileUrl && fileUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
-    var isPdf = fileUrl && fileUrl.match(/\.pdf$/i);
-    
-    var previewHtml = '';
-    if (isImage && fileUrl) {
-        previewHtml = '<div class="text-center"><img src="' + fileUrl + '?t=' + Date.now() + '" class="max-w-full max-h-[300px] mx-auto object-contain rounded border" onclick="showFullImage(\'' + fileUrl + '\')" style="cursor: pointer;" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-image text-3xl mb-2\'></i><p>Image failed to load</p></div>\'"></div>';
-    } else if (isPdf && fileUrl) {
-        previewHtml = '<iframe src="' + fileUrl + '" class="w-full h-[500px] border-0 rounded" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div class=\'text-center py-4 text-gray-400\'><i class=\'fas fa-file-pdf text-3xl mb-2\'></i><p>PDF failed to load</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Open PDF</button></div>\'"></iframe>';
-    } else if (fileUrl) {
-        previewHtml = '<div class="text-center py-8"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">Preview not available for this file type.</p><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary mt-2 text-sm">Download File</button></div>';
-    } else {
-        previewHtml = '<div class="text-center py-8"><i class="fas fa-file-alt text-5xl text-gray-400 mb-3"></i><p class="text-sm">No file available for preview</p></div>';
-    }
-    
-    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    
-    var sentFromInfo = '';
-    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-        var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
-        sentFromInfo = '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></div></div>';
-    }
-    
-    var infoHtml = 
-        '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">' + escapeHtml(doc.title) + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
-        sentFromInfo;
-    
-    document.getElementById('viewReportContent').innerHTML = 
-        '<div class="doc-info-container">' + infoHtml + '</div>' +
-        '<div class="mt-4">' + previewHtml + '</div>';
-    
-    var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
-    
-    var buttonsHtml = '';
-    if (fileUrl) {
-        buttonsHtml += '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download mr-1"></i> Download</button>';
-    }
-    buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane mr-1"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    
-    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
-    openModal('viewReportModal');
-}
-
-function sendUploadedReportToDept(reportId, deptId) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === reportId; });
-    if (!doc) {
-        showToast('Report not found', true);
-        return;
-    }
-    if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
-        return;
-    }
-    
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    
-    var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) {
-        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
-        btn.disabled = true;
-    }
-    
-    var payload = {
-        document_id: parseInt(reportId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        doc_type: 'uploaded_report',
-        doc_data: {
-            id: doc.id,
-            title: doc.title,
-            description: doc.description || '',
-            file_name: doc.file_name || '',
-            file_path: doc.file_path || '',
-            file_size: doc.file_size || 0,
-            file_type: doc.file_type || '',
-            period: doc.period || 'monthly',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
-            department_id: doc.department_id || DEPARTMENT_ID,
-            created_at: doc.created_at,
-            sent_count: (doc.sent_count || 0) + 1
-        }
-    };
-    
-    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
-            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName);
-            
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.is_sent = 1;
-            doc.last_sent_at = new Date().toISOString();
-            
-            closeModal('viewReportModal');
-            loadReports();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send report', true);
-        }
-    }).catch(function(e) {
-        console.error('Send uploaded report error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-        }
-        toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
-    });
-}
-
-function deleteUploadedReport(docId) {
-    if (confirm('Delete this uploaded report?')) {
-        var doc = uploadedReportsData.find(function(d) { return d.id === docId; });
-        if (doc) {
-            addToRecycleBin(docId, 'uploaded_report', doc.title).then(function() {
-                apiCall('delete_uploaded_report.php', 'POST', { id: docId, department_id: DEPARTMENT_ID }).then(function(res) {
-                    if (res.success) {
-                        showToast('Uploaded report moved to recycle bin');
-                        loadReports();
-                        loadDashboard();
-                    } else {
-                        showToast(res.message || 'Failed', true);
-                    }
-                });
-            });
-        }
-    }
-}
-
-function exportSingleUploadedReportExcel(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (doc) {
-        var ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']];
-        var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-        ws.push([doc.title, doc.file_name, doc.description || '', doc.period, doc.uploaded_by, doc.created_at, fileSize]);
-        var wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReport');
-        XLSX.writeFile(wb, 'uploaded_report_' + doc.id + '.xlsx');
-        showToast('Exported to Excel');
-    }
-}
-
-function exportSingleUploadedReportPDF(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (doc) {
-        var fileUrl = PATHS.REPORTS_UPLOAD + (doc.file_name || '');
-        var w = window.open('', '_blank');
-        w.document.write('<!DOCTYPE html><html><head><title>' + escapeHtml(doc.title) + ' - Uploaded Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;border-radius:10px;}h1{color:#be123c;}</style></head><body><h1>' + escapeHtml(doc.title) + '</h1><p><strong>File Name:</strong> ' + doc.file_name + '</p><p><strong>Period:</strong> ' + doc.period + '</p><p><strong>Description:</strong> ' + escapeHtml(doc.description || '') + '</p><p><strong>Uploaded By:</strong> ' + escapeHtml(doc.uploaded_by || 'System') + '</p><p><strong>Uploaded At:</strong> ' + new Date(doc.created_at).toLocaleString() + '</p><iframe src="' + fileUrl + '" width="100%" height="600px"></iframe><div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);">Save as PDF</button></div></body></html>');
-        w.document.close();
-        showToast("PDF preview opened - Click Print to save");
-    }
-}
-
-function exportAllUploadedReportsToExcel() {
-    if (uploadedReportsData.length === 0) { showToast('No reports', true); return; }
-    var ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']];
-    uploadedReportsData.forEach(function(d) {
-        var fileSize = d.file_size ? formatFileSize(d.file_size) : 'Unknown';
-        ws.push([d.title, d.file_name, d.description || '', d.period, d.uploaded_by, d.created_at, fileSize]);
-    });
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports');
-    XLSX.writeFile(wb, 'uploaded_reports_' + new Date().toISOString().slice(0,10) + '.xlsx');
-    showToast('Uploaded reports exported to Excel');
-}
-
-function exportAllUploadedReportsToPDF() {
-    if (uploadedReportsData.length === 0) { showToast('No reports', true); return; }
-    var rows = uploadedReportsData.map(function(d) {
-        return '<div style="margin-bottom:20px;border-bottom:1px solid #be123c;"><h3 style="color:#be123c;">' + escapeHtml(d.title) + '</h3><p><strong>File:</strong> ' + d.file_name + '</p><p><strong>Period:</strong> ' + d.period + '</p><p><strong>Uploaded:</strong> ' + d.uploaded_by + ' on ' + new Date(d.created_at).toLocaleString() + '</p><p>' + escapeHtml(d.description || '') + '</p></div>';
-    }).join('');
-    var w = window.open('', '_blank');
-    w.document.write('<!DOCTYPE html><html><head><title>All Uploaded Reports</title><style>body{font-family:Arial;padding:20px;border:2px solid #be123c;}</style></head><body><h1>All Uploaded Reports</h1><p>Generated: ' + new Date().toLocaleString() + '</p>' + rows + '<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);">Save as PDF</button></div></body></html>');
-    w.document.close();
-    showToast("PDF preview opened - Click Print to save");
 }
 
 // ============================================================
@@ -3829,7 +3782,6 @@ window.openUploadProjectDocModal = openUploadProjectDocModal;
 window.saveProjectDocument = saveProjectDocument;
 window.deleteProjectDocument = deleteProjectDocument;
 window.viewUploadedDocumentInfo = viewUploadedDocumentInfo;
-window.downloadProjectDocument = downloadProjectDocument;
 window.sendDocumentToDept = sendDocumentToDept;
 window.exportAllProjectDocsToExcel = exportAllProjectDocsToExcel;
 window.exportAllProjectDocsToPDF = exportAllProjectDocsToPDF;
@@ -3860,8 +3812,6 @@ window.saveUploadedReport = saveUploadedReport;
 window.viewUploadedReportDetail = viewUploadedReportDetail;
 window.sendUploadedReportToDept = sendUploadedReportToDept;
 window.deleteUploadedReport = deleteUploadedReport;
-window.exportSingleUploadedReportExcel = exportSingleUploadedReportExcel;
-window.exportSingleUploadedReportPDF = exportSingleUploadedReportPDF;
 window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel;
 window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF;
 window.loadDailyWorkForProject = loadDailyWorkForProject;
