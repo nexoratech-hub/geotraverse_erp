@@ -850,7 +850,6 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 async function fetchAluminiumProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // ========== FIXED: Only projects with project_type = 'aluminium' OR default ==========
         aluminiumProjects = res.data.filter(p => 
             (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
@@ -875,7 +874,6 @@ async function fetchAluminiumProjects() {
 async function fetchIronProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // ========== FIXED: Only projects with project_type = 'iron' ==========
         ironProjects = res.data.filter(p => 
             (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
             (!p.deleted_by_department || p.deleted_by_department != 1) && 
@@ -901,7 +899,7 @@ async function fetchIronProjects() {
 async function fetchAluminiumDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // ========== FIXED: Filter by doc_type = 'aluminium' OR 'general' OR null ==========
+        // ========== FIXED: Only documents with doc_type = 'aluminium' OR 'general' OR null ==========
         aluminiumDocuments = res.data.filter(doc => 
             doc.department_id == DEPARTMENT_ID && 
             (doc.doc_type === 'aluminium' || doc.doc_type === 'general' || doc.doc_type === null || doc.doc_type === '')
@@ -915,7 +913,7 @@ async function fetchAluminiumDocuments() {
 async function fetchIronDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
-        // ========== FIXED: Filter by doc_type = 'iron' ONLY ==========
+        // ========== FIXED: Only documents with doc_type = 'iron' ==========
         ironDocuments = res.data.filter(doc => 
             doc.department_id == DEPARTMENT_ID && 
             doc.doc_type === 'iron'
@@ -1233,13 +1231,12 @@ async function saveProjectDocument() {
 function viewDocumentInfo(docId, type) {
     const doc = type === 'aluminium' ? aluminiumDocuments.find(d => d.id === docId) : ironDocuments.find(d => d.id === docId);
     if(doc) {
-        // ========== FIXED: Get correct file path from database ==========
+        // Get correct file path from database
         let filePath = doc.file_path || '';
         let fileUrl = '';
         
         // If file_path exists, use it directly
         if (filePath && filePath !== '') {
-            // Remove 'assets/' prefix if exists
             let cleanPath = filePath;
             if (cleanPath.startsWith('assets/')) {
                 cleanPath = cleanPath.substring(7);
@@ -1247,18 +1244,12 @@ function viewDocumentInfo(docId, type) {
             if (cleanPath.startsWith('frontend/')) {
                 cleanPath = cleanPath.substring(9);
             }
-            // Build full URL
             fileUrl = '/geotraverse/frontend/assets/' + cleanPath;
         } else {
-            // Fallback: use file_name
             fileUrl = '/geotraverse/frontend/assets/uploads/projects/projects_documents/' + doc.file_name;
         }
         
-        // Also try alternative path if the above doesn't work
-        let altUrl = '/geotraverse/frontend/assets/uploads/projects/' + doc.file_name;
-        
         console.log('Document file URL:', fileUrl);
-        console.log('Alternative URL:', altUrl);
         
         let infoHtml = `<div class="space-y-2">
             <p><strong>Title:</strong> ${escapeHtml(doc.title)}</p>
@@ -1277,9 +1268,9 @@ function viewDocumentInfo(docId, type) {
             }
         });
         
+        // ========== FIXED: Removed Alternative Download button ==========
         document.getElementById('documentInfoButtons').innerHTML = `
             <button onclick="window.open('${fileUrl}', '_blank')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
-            <button onclick="window.open('${altUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Alternative Download</button>
             <div class="send-dropdown">
                 <button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button>
                 <div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div>
@@ -1288,7 +1279,6 @@ function viewDocumentInfo(docId, type) {
         openModal('documentInfoModal');
     }
 }
-
 function sendDocumentToDept(docId, deptId, type) { 
     const dept = allDepartmentsForSend.find(d => d.id == deptId); 
     const deptName = dept ? dept.name : 'Department'; 
