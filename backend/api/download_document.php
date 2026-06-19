@@ -1,25 +1,13 @@
 <?php
-// backend/api/download_document.php
+// download_document.php - FIXED: Handle sent documents
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Accept');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit(0);
+while (ob_get_level()) {
+    ob_end_clean();
 }
 
-// Get parameters
-$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
-$type = isset($_GET['type']) ? $_GET['type'] : 'project';
+error_reporting(0);
+ini_set('display_errors', 0);
 
-if (!$id) {
-    http_response_code(400);
-    die('Document ID is required');
-}
-
-// Database connection
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -28,106 +16,189 @@ $password = '';
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    http_response_code(500);
-    die('Database connection failed');
+} catch(PDOException $e) {
+    die('Database error');
+}
+
+$docId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$type = isset($_GET['type']) ? $_GET['type'] : 'project';
+
+if (!$docId) {
+    die('Document ID required');
 }
 
 try {
-    // Determine table
+    $doc = null;
+    $fileName = '';
+    $filePath = '';
+    
+    // ============================================================
+    // Get document from appropriate table
+    // ============================================================
     if ($type === 'project') {
-        $table = 'project_documents';
-    } elseif ($type === 'uploaded_report') {
-        $table = 'uploaded_reports';
+        $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
+        $stmt->execute([$docId]);
+        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
     } else {
-        http_response_code(400);
-        die('Invalid document type');
-    }
-    
-    // Get document details
-    $sql = "SELECT file_name, file_path FROM $table WHERE id = :id AND is_deleted = 0";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':id' => $id]);
-    $doc = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$doc) {
-        http_response_code(404);
-        die('Document not found');
-    }
-    
-    $fileName = $doc['file_name'];
-    $filePath = $doc['file_path'];
-    
-    // Determine full path - try multiple locations
-    $possiblePaths = [];
-    
-    // 1. Using the stored path directly
-    $possiblePaths[] = __DIR__ . '/../../' . $filePath;
-    
-    // 2. Using filename only in projects folder
-    $possiblePaths[] = __DIR__ . '/../../frontend/assets/uploads/projects/' . basename($filePath);
-    
-    // 3. Using filename only in reports folder
-    $possiblePaths[] = __DIR__ . '/../../frontend/assets/uploads/reports/' . basename($filePath);
-    
-    // 4. Using the path with assets prefix
-    $possiblePaths[] = __DIR__ . '/../../assets/uploads/projects/' . basename($filePath);
-    $possiblePaths[] = __DIR__ . '/../../assets/uploads/reports/' . basename($filePath);
-    
-    // 5. Using the path without any prefix
-    $possiblePaths[] = __DIR__ . '/../' . $filePath;
-    $possiblePaths[] = __DIR__ . '/../../../' . $filePath;
-    
-    // 6. Search recursively in uploads directory
-    $searchDir = __DIR__ . '/../../frontend/assets/uploads/';
-    if (is_dir($searchDir)) {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($searchDir));
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getFilename() === basename($filePath)) {
-                $possiblePaths[] = $file->getPathname();
+        // For sent documents, get from sent_documents
+        $stmt = $pdo->prepare("SELECT * FROM sent_documents WHERE id = ?");
+        $stmt->execute([$docId]);
+        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        // If found, try to get file info from document_data
+        if ($doc && $doc['document_data']) {
+            $data = json_decode($doc['document_data'], true);
+            if ($data) {
+                if (isset($data['file_path']) && empty($doc['document_file'])) {
+                    $doc['document_file'] = $data['file_path'];
+                }
+                if (isset($data['file_name']) && empty($doc['document_file'])) {
+                    $doc['document_file'] = $data['file_name'];
+                }
             }
         }
     }
+
+    if (!$doc) {
+        die('Document not found');
+    }
+
+    // ============================================================
+    // Get file name and path
+    // ============================================================
+    if ($type === 'project') {
+        $fileName = $doc['file_name'] ?? 'document';
+        $filePath = $doc['file_path'] ?? $fileName;
+    } else {
+        // For sent documents, use document_file or from data
+        $fileName = $doc['document_file'] ?? $doc['file_name'] ?? 'document';
+        $filePath = $doc['document_file'] ?? $doc['file_path'] ?? $fileName;
+        
+        // If file_path contains path, extract filename
+        if (strpos($filePath, '/') !== false || strpos($filePath, '\\') !== false) {
+            $fileName = basename($filePath);
+        }
+    }
     
-    // Find the first existing file
+    // Clean
+    $fileName = basename($fileName);
+    $filePath = basename($filePath);
+    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+    
+    // ============================================================
+    // Try to find the file
+    // ============================================================
+    $possiblePaths = [
+        // For sent documents
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/sent_documents/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/sent_documents/' . $filePath,
+        // Original paths
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/project_documents/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/project_documents/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/' . $filePath,
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/uploads/' . $filePath,
+        // With timestamp prefix
+        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/*_' . $docId . '_' . $filePath,
+    ];
+    
     $fullPath = null;
     foreach ($possiblePaths as $path) {
-        if (file_exists($path) && is_file($path)) {
+        if (strpos($path, '*') !== false) {
+            // Handle wildcard
+            $dir = dirname($path);
+            $pattern = basename($path);
+            if (file_exists($dir)) {
+                $files = glob($dir . '/' . $pattern);
+                if (!empty($files) && file_exists($files[0])) {
+                    $fullPath = $files[0];
+                    break;
+                }
+            }
+        } else if (file_exists($path)) {
             $fullPath = $path;
             break;
         }
     }
     
+    // If still not found, search in uploads directory
     if (!$fullPath) {
-        http_response_code(404);
-        die('File not found on server. Tried: ' . implode(', ', array_slice($possiblePaths, 0, 5)));
+        $searchDirs = [
+            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/',
+            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/',
+            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/',
+        ];
+        foreach ($searchDirs as $dir) {
+            if (file_exists($dir)) {
+                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
+                foreach ($iterator as $file) {
+                    if ($file->isFile() && $file->getFilename() === $filePath) {
+                        $fullPath = $file->getRealPath();
+                        break 2;
+                    }
+                }
+            }
+        }
     }
     
-    // Get file size
+    if (!$fullPath || !file_exists($fullPath)) {
+        die('File not found: ' . $filePath);
+    }
+
     $fileSize = filesize($fullPath);
     
-    // Send file with proper headers
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $fileName . '"');
-    header('Content-Length: ' . $fileSize);
-    header('Content-Transfer-Encoding: binary');
-    header('Cache-Control: private, max-age=0, must-revalidate');
-    header('Pragma: public');
-    header('Accept-Ranges: bytes');
+    // ============================================================
+    // Set MIME type
+    // ============================================================
+    $mimeTypes = [
+        'pdf'  => 'application/pdf',
+        'doc'  => 'application/msword',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls'  => 'application/vnd.ms-excel',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'ppt'  => 'application/vnd.ms-powerpoint',
+        'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'txt'  => 'text/plain',
+        'csv'  => 'text/csv',
+        'jpg'  => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png'  => 'image/png',
+        'gif'  => 'image/gif',
+        'webp' => 'image/webp',
+        'svg'  => 'image/svg+xml',
+        'zip'  => 'application/zip',
+        'rar'  => 'application/x-rar-compressed',
+        '7z'   => 'application/x-7z-compressed',
+        'mp4'  => 'video/mp4',
+        'mp3'  => 'audio/mpeg',
+        'wav'  => 'audio/wav'
+    ];
     
-    // Clear output buffer
+    $mimeType = $mimeTypes[$fileExtension] ?? 'application/octet-stream';
+    
+    // ============================================================
+    // Send headers
+    // ============================================================
     while (ob_get_level()) {
         ob_end_clean();
     }
     
-    // Read and output file
+    header('Content-Type: ' . $mimeType);
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    header('Content-Length: ' . $fileSize);
+    header('Content-Transfer-Encoding: binary');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+    header('Pragma: public');
+    header('Expires: 0');
+    header('Content-Encoding: none');
+    
     readfile($fullPath);
     exit;
     
-} catch (PDOException $e) {
-    http_response_code(500);
-    die('Database error: ' . $e->getMessage());
-} catch (Exception $e) {
-    http_response_code(500);
+} catch(PDOException $e) {
+    die('Database error');
+} catch(Exception $e) {
     die('Error: ' . $e->getMessage());
 }
+?>

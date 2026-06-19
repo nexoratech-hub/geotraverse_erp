@@ -1,5 +1,15 @@
 <?php
-// ============ DATABASE CONNECTION ============
+// download_report_document.php - Fixed version for uploaded reports
+
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -9,58 +19,92 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch(PDOException $e) {
-    die('Database connection failed: ' . $e->getMessage());
+    die(json_encode(['success' => false, 'message' => 'Database error']));
 }
 
-// ============ GET PARAMETERS ============
-$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+$docId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
-if ($id <= 0) {
-    die('Invalid document ID');
+if (!$docId) {
+    die(json_encode(['success' => false, 'message' => 'Document ID required']));
 }
 
 try {
-    $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ? AND is_deleted = 0");
-    $stmt->execute([$id]);
+    $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ?");
+    $stmt->execute([$docId]);
     $doc = $stmt->fetch(PDO::FETCH_ASSOC);
-    
+
     if (!$doc) {
-        die('Document not found');
+        die(json_encode(['success' => false, 'message' => 'Document not found']));
     }
-    
-    // ============ GET FILE NAME ============
-    // file_path stores the unique filename
-    $fileName = $doc['file_path'] ?? $doc['file_name'] ?? '';
-    
-    if (empty($fileName)) {
-        die('File name not found in database');
+
+    $filePath = $doc['file_path'] ?? $doc['file_name'] ?? '';
+    if (empty($filePath)) {
+        die(json_encode(['success' => false, 'message' => 'File path not found']));
     }
+
+    $filePath = str_replace(['../', '..\\'], '', $filePath);
+    $filePath = ltrim($filePath, '/');
     
-    // ============ BUILD FULL PATH ============
-    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/';
-    $fullPath = $uploadDir . $fileName;
+    $basePath = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/';
+    $fullPath = $basePath . $filePath;
     
-    // ============ CHECK IF FILE EXISTS ============
     if (!file_exists($fullPath)) {
-        die('File not found on server: ' . $fileName);
+        $fullPath = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/' . basename($filePath);
+    }
+    if (!file_exists($fullPath)) {
+        $fullPath = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/' . basename($filePath);
+    }
+
+    if (!file_exists($fullPath)) {
+        die(json_encode(['success' => false, 'message' => 'File not found']));
+    }
+
+    $fileName = $doc['file_name'] ?? basename($filePath);
+    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+    $fileSize = filesize($fullPath);
+    
+    $mimeTypes = [
+        'pdf'  => 'application/pdf',
+        'doc'  => 'application/msword',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls'  => 'application/vnd.ms-excel',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'ppt'  => 'application/vnd.ms-powerpoint',
+        'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'txt'  => 'text/plain',
+        'csv'  => 'text/csv',
+        'jpg'  => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png'  => 'image/png',
+        'gif'  => 'image/gif',
+        'webp' => 'image/webp',
+        'svg'  => 'image/svg+xml',
+        'zip'  => 'application/zip',
+        'rar'  => 'application/x-rar-compressed',
+        '7z'   => 'application/x-7z-compressed',
+        'mp4'  => 'video/mp4',
+        'mp3'  => 'audio/mpeg'
+    ];
+    
+    $mimeType = $mimeTypes[$fileExtension] ?? 'application/octet-stream';
+    
+    while (ob_get_level()) {
+        ob_end_clean();
     }
     
-    // ============ GET ORIGINAL NAME ============
-    // Try to get original name from database, fallback to file name
-    $originalName = $doc['original_file_name'] ?? $doc['file_name'] ?? $fileName;
-    
-    // ============ DOWNLOAD FILE ============
-    header('Content-Description: File Transfer');
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $originalName . '"');
-    header('Content-Length: ' . filesize($fullPath));
-    header('Cache-Control: no-cache, must-revalidate');
+    header('Content-Type: ' . $mimeType);
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    header('Content-Length: ' . $fileSize);
+    header('Content-Transfer-Encoding: binary');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+    header('Pragma: public');
     header('Expires: 0');
+    header('Content-Encoding: none');
     
     readfile($fullPath);
     exit;
     
 } catch(PDOException $e) {
-    die('Database error: ' . $e->getMessage());
+    die(json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]));
 }
 ?>

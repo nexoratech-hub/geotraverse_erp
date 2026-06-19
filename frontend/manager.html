@@ -1022,17 +1022,56 @@ function fetchProjects() {
     return apiCall('get_projects.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
             projectsData = res.data.filter(function(p) {
-                return (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
+                return (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID || p.to_department_id === DEPARTMENT_ID) &&
                     (!p.deleted_by_department || p.deleted_by_department != 1) && 
                     (!p.deleted_by_admin || p.deleted_by_admin != 1);
-            }).sort(function(a,b) { return b.id - a.id; });
+            });
             
-            unviewedProjectsCount = projectsData.filter(function(p) {
-                return p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+            // Reset unviewed count
+            unviewedProjectsCount = 0;
+            
+            // Check each project
+            projectsData.forEach(function(p) {
+                var isUnviewed = false;
+                
+                // Check regular project fields
+                if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
                     p.sent_to_dept === DEPARTMENT_ID && 
                     (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
-                    viewedProjectIds.indexOf(p.id) === -1;
-            }).length;
+                    viewedProjectIds.indexOf(p.id) === -1) {
+                    isUnviewed = true;
+                }
+                
+                // Check sent project fields
+                if (p.from_department_id && p.from_department_id != DEPARTMENT_ID && 
+                    p.to_department_id === DEPARTMENT_ID && 
+                    (p.is_viewed == 0 || p.is_viewed === null) &&
+                    viewedProjectIds.indexOf(p.id) === -1) {
+                    isUnviewed = true;
+                }
+                
+                // Check if it's a sent project
+                if (p.is_sent_project && p.from_department_id != DEPARTMENT_ID && 
+                    p.to_department_id === DEPARTMENT_ID && 
+                    (p.is_viewed == 0 || p.is_viewed === null) &&
+                    viewedProjectIds.indexOf(p.id) === -1) {
+                    isUnviewed = true;
+                }
+                
+                p._is_unviewed = isUnviewed;
+                
+                if (isUnviewed) {
+                    unviewedProjectsCount++;
+                }
+            });
+            
+            // Sort: unviewed first
+            projectsData.sort(function(a, b) {
+                if (a._is_unviewed && !b._is_unviewed) return -1;
+                if (!a._is_unviewed && b._is_unviewed) return 1;
+                return b.id - a.id;
+            });
+            
         } else {
             projectsData = [];
             unviewedProjectsCount = 0;
@@ -1040,7 +1079,6 @@ function fetchProjects() {
         updateProjectBadge();
     });
 }
-
 function fetchFundRequests() {
     return apiCall('get_fund_requests.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
@@ -1063,18 +1101,63 @@ function fetchFundRequests() {
 function fetchReports() {
     return apiCall('get_reports.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
+            // Process all reports (original + sent)
             reportsData = res.data.filter(function(r) {
-                return (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
+                return (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID || r.to_department_id === DEPARTMENT_ID) &&
                     (!r.deleted_by_department || r.deleted_by_department != 1) && 
                     (!r.deleted_by_admin || r.deleted_by_admin != 1);
-            }).sort(function(a,b) { return b.id - a.id; });
+            });
             
-            unviewedReportsCount = reportsData.filter(function(r) {
-                return r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+            // ============================================================
+            // FIX: Ensure unviewed flags are set and sort
+            // ============================================================
+            reportsData.forEach(function(r) {
+                var isUnviewed = false;
+                
+                // Check from sent_reports
+                if (r.is_unviewed === true || r.is_unviewed === 1) {
+                    isUnviewed = true;
+                }
+                
+                // Check from original reports sent to this department
+                if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
                     r.sent_to_department === DEPARTMENT_ID && 
-                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
-                    viewedReportIds.indexOf(r.id) === -1;
+                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null)) {
+                    isUnviewed = true;
+                }
+                
+                // Check from viewedReportIds (localStorage)
+                if (viewedReportIds.indexOf(r.id) === -1 && r.is_sent_report) {
+                    isUnviewed = true;
+                }
+                
+                r._is_unviewed = isUnviewed;
+                r.is_unviewed = isUnviewed;
+                r.is_new = isUnviewed;
+            });
+            
+            // ============================================================
+            // FIX: Sort: Unviewed first
+            // ============================================================
+            reportsData.sort(function(a, b) {
+                if (a._is_unviewed && !b._is_unviewed) return -1;
+                if (!a._is_unviewed && b._is_unviewed) return 1;
+                
+                var aDate = new Date(a.created_at || a.sent_at || 0);
+                var bDate = new Date(b.created_at || b.sent_at || 0);
+                return bDate - aDate;
+            });
+            
+            // ============================================================
+            // Count unviewed reports
+            // ============================================================
+            unviewedReportsCount = reportsData.filter(function(r) { 
+                return r._is_unviewed === true; 
             }).length;
+            
+            console.log('Reports loaded:', reportsData.length);
+            console.log('Unviewed reports:', unviewedReportsCount);
+            
         } else {
             reportsData = [];
             unviewedReportsCount = 0;
@@ -1082,7 +1165,6 @@ function fetchReports() {
         updateReportBadge();
     });
 }
-
 function fetchDailyWork() {
     return apiCall('get_dailywork.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         dailyworkData = (res.success && res.data) ? res.data.filter(function(w) {
@@ -1093,7 +1175,68 @@ function fetchDailyWork() {
 
 function fetchProjectDocuments() {
     return apiCall('get_project_documents.php?department_id=' + DEPARTMENT_ID).then(function(res) {
-        projectDocuments = (res.success && res.data) ? res.data : [];
+        if (res.success && res.data) {
+            // Process documents - both original and sent
+            projectDocuments = res.data.map(function(doc) {
+                // Ensure file_path is set
+                if (!doc.file_path && doc.file_name) {
+                    doc.file_path = doc.file_name;
+                }
+                
+                // ============================================================
+                // Check if document is unviewed (sent document)
+                // ============================================================
+                var isUnviewed = false;
+                
+                // Check if it's a sent document
+                if (doc.is_sent_document) {
+                    // Check is_viewed flag from sent_documents
+                    if (doc.is_viewed == 0 || doc.is_viewed === null || doc.is_viewed === '0') {
+                        isUnviewed = true;
+                    }
+                    // Check is_viewed_by_department
+                    if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null || doc.is_viewed_by_department === '0') {
+                        isUnviewed = true;
+                    }
+                    // Check is_unviewed flag from backend
+                    if (doc.is_unviewed === true || doc.is_unviewed === 1 || doc.is_unviewed === '1') {
+                        isUnviewed = true;
+                    }
+                    // Check viewed status from viewedProjectIds
+                    if (viewedProjectIds.indexOf(doc.id) === -1) {
+                        isUnviewed = true;
+                    }
+                }
+                
+                // Also check if document was sent to this department
+                if (doc.sent_to_department && doc.sent_to_department == DEPARTMENT_ID && 
+                    doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                    if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) {
+                        isUnviewed = true;
+                    }
+                }
+                
+                doc._is_unviewed = isUnviewed;
+                doc.is_new = isUnviewed;
+                
+                console.log('Document:', doc.id, doc.title, 'is_unviewed:', isUnviewed, 'is_sent:', doc.is_sent_document);
+                
+                return doc;
+            });
+            
+            // Sort: unviewed first
+            projectDocuments.sort(function(a, b) {
+                if (a._is_unviewed && !b._is_unviewed) return -1;
+                if (!a._is_unviewed && b._is_unviewed) return 1;
+                return b.id - a.id;
+            });
+            
+            console.log('Project documents loaded:', projectDocuments.length);
+            console.log('Sent documents:', projectDocuments.filter(function(d) { return d.is_sent_document; }).length);
+            console.log('Unviewed documents:', projectDocuments.filter(function(d) { return d._is_unviewed; }).length);
+        } else {
+            projectDocuments = [];
+        }
     });
 }
 
@@ -1143,16 +1286,31 @@ function loadDepartmentsForDropdowns() {
 // ============================================================
 function updateProjectBadge() { 
     var badge = document.getElementById('projectBadge'); 
-    if (badge) { 
-        if (unviewedProjectsCount > 0) { 
+    if (badge) {
+        // Count unviewed projects
+        var unviewedProjects = projectsData.filter(function(p) { 
+            return p._is_unviewed === true; 
+        }).length;
+        
+        // Count unviewed documents
+        var unviewedDocs = projectDocuments.filter(function(d) { 
+            return d._is_unviewed === true || d.is_unviewed === true || d.is_new === true; 
+        }).length;
+        
+        // Total unviewed
+        var totalUnviewed = unviewedProjects + unviewedDocs;
+        
+        // Update global count
+        unviewedProjectsCount = totalUnviewed;
+        
+        if (totalUnviewed > 0) { 
             badge.classList.remove('hidden'); 
-            badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; 
+            badge.innerText = totalUnviewed > 99 ? '99+' : totalUnviewed; 
         } else { 
             badge.classList.add('hidden'); 
         } 
     } 
 }
-
 function updateReportBadge() { 
     var badge = document.getElementById('reportBadge'); 
     if (badge) { 
@@ -1181,12 +1339,67 @@ function updateRequestBadge() {
 // ==================== MARK VIEWED ====================
 // ============================================================
 function markProjectViewed(id) { 
-    if (viewedProjectIds.indexOf(id) === -1) { 
-        viewedProjectIds.push(id); 
-        localStorage.setItem('manager_viewedProjectIds', JSON.stringify(viewedProjectIds)); 
-        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
-        updateProjectBadge(); 
-    } 
+    // Check if already viewed
+    if (viewedProjectIds.indexOf(id) !== -1) {
+        return;
+    }
+    
+    // Add to viewed list
+    viewedProjectIds.push(id); 
+    localStorage.setItem('manager_viewedProjectIds', JSON.stringify(viewedProjectIds));
+    
+    // Find the project
+    var project = projectsData.find(function(p) { return p.id === id; });
+    if (!project) {
+        return;
+    }
+    
+    // ============================================================
+    // FIX: Check both regular and sent project flags
+    // ============================================================
+    var isUnviewed = false;
+    
+    // Check regular project fields
+    if (project.sent_from_dept && project.sent_from_dept != DEPARTMENT_ID && 
+        project.sent_to_dept === DEPARTMENT_ID && 
+        (project.is_viewed_by_department == 0 || project.is_viewed_by_department === null)) {
+        isUnviewed = true;
+    }
+    
+    // Check sent project fields (from sent_projects table)
+    if (project.from_department_id && project.from_department_id != DEPARTMENT_ID && 
+        project.to_department_id === DEPARTMENT_ID && 
+        (project.is_viewed == 0 || project.is_viewed === null)) {
+        isUnviewed = true;
+    }
+    
+    // Check if it's a sent project
+    if (project.is_sent_project && project.from_department_id != DEPARTMENT_ID && 
+        project.to_department_id === DEPARTMENT_ID && 
+        (project.is_viewed == 0 || project.is_viewed === null)) {
+        isUnviewed = true;
+    }
+    
+    // Only decrement if it was unviewed
+    if (isUnviewed) {
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+        project._is_unviewed = false;
+        project.is_viewed = 1;
+        project.is_viewed_by_department = 1;
+    }
+    
+    updateProjectBadge();
+    
+    // ============================================================
+    // FIX: Call API to mark as viewed in database
+    // ============================================================
+    apiCall('mark_project_viewed.php', 'POST', { 
+        project_id: id, 
+        department_id: DEPARTMENT_ID,
+        is_admin: 0
+    }).catch(function(e) {
+        console.log('Mark viewed API error:', e);
+    });
 }
 
 function markReportViewed(id) { 
@@ -1617,9 +1830,113 @@ function deleteProjectDocument(docId) {
     });
 }
 
+
 function viewUploadedProjectDocument(docId) {
     var doc = projectDocuments.find(function(d) { return d.id === docId; });
     if (doc) {
+        // ============================================================
+        // Check if document is unviewed
+        // ============================================================
+        var isUnviewed = false;
+        
+        // Check from doc flags
+        if (doc.is_unviewed === true || doc._is_unviewed === true || doc.is_new === true) {
+            isUnviewed = true;
+        }
+        
+        // Check is_viewed
+        if (doc.is_viewed == 0 || doc.is_viewed === null || doc.is_viewed === '0') {
+            isUnviewed = true;
+        }
+        
+        // Check is_viewed_by_department
+        if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null || doc.is_viewed_by_department === '0') {
+            isUnviewed = true;
+        }
+        
+        // Check viewedProjectIds (localStorage)
+        if (viewedProjectIds.indexOf(docId) === -1) {
+            isUnviewed = true;
+        }
+        
+        console.log('Document:', docId, 'isUnviewed:', isUnviewed);
+        
+        // ============================================================
+        // If unviewed, mark as viewed
+        // ============================================================
+        if (isUnviewed) {
+            // Add to viewed list (localStorage)
+            if (viewedProjectIds.indexOf(docId) === -1) {
+                viewedProjectIds.push(docId);
+                localStorage.setItem('manager_viewedProjectIds', JSON.stringify(viewedProjectIds));
+                console.log('Added to viewedProjectIds:', docId);
+            }
+            
+            // Update local document
+            doc._is_unviewed = false;
+            doc.is_new = false;
+            doc.is_unviewed = false;
+            doc.is_viewed = 1;
+            doc.is_viewed_by_department = 1;
+            
+            // ============================================================
+            // Call API to mark as viewed in database
+            // ============================================================
+            apiCall('mark_document_viewed.php', 'POST', { 
+                document_id: docId, 
+                department_id: DEPARTMENT_ID,
+                is_admin: 0
+            }).then(function(res) {
+                console.log('Mark document viewed response:', res);
+                if (res && res.success) {
+                    console.log('✅ Document marked as viewed in database');
+                    console.log('Current status:', res.current_status);
+                } else {
+                    console.log('❌ Failed to mark document as viewed in database');
+                }
+            }).catch(function(e) {
+                console.log('Mark document viewed error:', e);
+            });
+            
+            // ============================================================
+            // Update badge count
+            // ============================================================
+            // Count remaining unviewed documents
+            var remainingUnviewedDocs = projectDocuments.filter(function(d) {
+                return (d._is_unviewed === true || d.is_unviewed === true || d.is_new === true) && d.id !== docId;
+            }).length;
+            
+            // Count unviewed projects
+            var unviewedProjects = projectsData.filter(function(p) { 
+                return p._is_unviewed === true; 
+            }).length;
+            
+            // Total unviewed
+            var totalUnviewed = unviewedProjects + remainingUnviewedDocs;
+            unviewedProjectsCount = totalUnviewed;
+            
+            // Update badge
+            updateProjectBadge();
+            
+            // ============================================================
+            // Remove the NEW badge from the card
+            // ============================================================
+            var card = document.getElementById('doc-card-' + docId);
+            if (card) {
+                var badge = card.querySelector('.new-badge');
+                if (badge) {
+                    badge.remove();
+                    console.log('✅ NEW badge removed from card');
+                }
+                card.classList.remove('search-highlight');
+            }
+            
+            showToast('✅ Document marked as viewed', false);
+        }
+        
+        // ============================================================
+        // Show document info
+        // ============================================================
         showDocumentInfo(doc, 'project');
     }
 }
@@ -1672,14 +1989,34 @@ function exportDocumentToExcel(docId, type) {
 
 function downloadDocument(docId, type) {
     if (type === 'project') {
+        // Open in new window with correct headers
         window.open('../backend/api/download_document.php?id=' + docId + '&type=project', '_blank');
+        showToast('📄 Downloading document...', false);
     } else if (type === 'uploaded_report') {
         var doc = uploadedReportsData.find(function(d) { return d.id === docId; });
         if (doc) {
             var fileUrl = getFullReportPath(doc.file_path || doc.file_name);
             if (fileUrl) {
-                window.open(fileUrl, '_blank');
-                showToast('📄 Downloading report...', false);
+                // Try to download using fetch to handle MIME types
+                fetch(fileUrl)
+                    .then(function(response) {
+                        return response.blob();
+                    })
+                    .then(function(blob) {
+                        var url = window.URL.createObjectURL(blob);
+                        var a = document.createElement('a');
+                        a.href = url;
+                        a.download = doc.file_name || 'document';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                        showToast('📄 Downloading report...', false);
+                    })
+                    .catch(function() {
+                        // Fallback: open in new window
+                        window.open(fileUrl, '_blank');
+                    });
             } else {
                 showToast('File not found', true);
             }
@@ -1688,11 +2025,115 @@ function downloadDocument(docId, type) {
 }
 
 function sendDocumentToDept(docId, deptId, type) {
-    var dept = allDepartmentsForSend.find(function(d) { return d.id === deptId; });
+    // ============================================================
+    // FIX: Get the document based on type
+    // ============================================================
+    var doc = null;
+    if (type === 'project') {
+        doc = projectDocuments.find(function(d) { return d.id === docId; });
+    } else if (type === 'uploaded_report') {
+        doc = uploadedReportsData.find(function(d) { return d.id === docId; });
+    } else if (type === 'campaign') {
+        // If campaign documents exist
+        doc = campaignDocuments ? campaignDocuments.find(function(d) { return d.id === docId; }) : null;
+    }
+    
+    if (!doc) {
+        showToast('Document not found', true);
+        return;
+    }
+    
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
-    showToast('✅ Document sent to ' + deptName, false);
-    toggleSendDropdown('docSendDropdown-' + docId);
-    closeModal('documentInfoModal');
+    
+    var btn = document.querySelector('#docSendDropdown-' + docId + ' .dropdown-trigger');
+    var originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    // ============================================================
+    // FIX: Prepare document data with all required fields
+    // ============================================================
+    var documentData = {
+        id: doc.id,
+        title: doc.title || 'Untitled Document',
+        description: doc.description || '',
+        file_name: doc.file_name || '',
+        file_path: doc.file_path || doc.file_name || '',
+        file_size: doc.file_size || 0,
+        file_type: doc.file_type || '',
+        uploaded_by: doc.uploaded_by || CURRENT_USER,
+        department_id: doc.department_id || DEPARTMENT_ID,
+        created_at: doc.created_at || new Date().toISOString(),
+        sent_count: (doc.sent_count || 0) + 1,
+        is_sent: 1
+    };
+    
+    // ============================================================
+    // FIX: Create payload with required fields
+    // ============================================================
+    var payload = {
+        document_id: parseInt(docId),
+        to_department_id: parseInt(deptId),
+        from_department_id: DEPARTMENT_ID,
+        sent_by: CURRENT_USER,
+        doc_type: type || 'project',
+        document_data: documentData,
+        from_department_name: departmentNames[DEPARTMENT_ID] || 'Manager',
+        to_department_name: deptName
+    };
+    
+    console.log('Sending document payload:', payload);
+    
+    // ============================================================
+    // FIX: Use send_document_advanced.php endpoint
+    // ============================================================
+    apiCall('send_document_advanced.php', 'POST', payload)
+    .then(function(res) {
+        if (res && res.success) {
+            showToast('✅ Document "' + doc.title + '" sent to ' + deptName, false);
+            addToActionHistory('Document sent: "' + doc.title + '" to ' + deptName, CURRENT_USER);
+            
+            // Update local document
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            doc.last_sent_at = new Date().toISOString();
+            
+            // Refresh data
+            if (type === 'project') {
+                fetchProjectDocuments();
+                loadProjects();
+            } else if (type === 'uploaded_report') {
+                fetchUploadedReports();
+                loadReports();
+            }
+            loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    })
+    .catch(function(e) {
+        console.error('Send document error:', e);
+        showToast('Network error: ' + e.message, true);
+    })
+    .finally(function() {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown('docSendDropdown-' + docId);
+        closeModal('documentInfoModal');
+    });
 }
 
 // ============================================================
@@ -1944,68 +2385,218 @@ function loadDashboard() {
     
     Promise.all([fetchProjects(), fetchFundRequests(), fetchDailyWork(), fetchReports(), fetchProjectDocuments(), fetchUploadedReports()])
     .then(function() {
-        var totalIncome = 0, totalExpense = 0;
-        fundRequestsData.forEach(function(t) {
-            if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0;
-            if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0;
+        // ============================================================
+        // FIX: Define variables before using them
+        // ============================================================
+        
+        // ============================================================
+        // 1. PROJECTS CARD DATA - Projects + Documents
+        // ============================================================
+        var totalProjects = projectsData.length;
+        var totalDocuments = projectDocuments.length;
+        var totalProjectsAndDocs = totalProjects + totalDocuments;
+        
+        var unviewedProjects = projectsData.filter(function(p) { 
+            return p._is_unviewed === true; 
+        }).length;
+        
+        var unviewedDocs = projectDocuments.filter(function(d) { 
+            return d._is_unviewed === true || d.is_unviewed === true || d.is_new === true; 
+        }).length;
+        
+        var totalUnviewedProjects = unviewedProjects + unviewedDocs;
+        
+        // ============================================================
+        // 2. REPORTS CARD DATA - Added Reports + Uploaded Reports
+        // ============================================================
+        var totalAddedReports = reportsData.length;
+        var totalUploadedReports = uploadedReportsData.length;
+        var totalAllReports = totalAddedReports + totalUploadedReports;
+        
+        var unviewedAddedReports = reportsData.filter(function(r) {
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+        }).length;
+        
+        var unviewedUploadedReports = uploadedReportsData.filter(function(r) {
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+        }).length;
+        
+        var totalUnviewedReports = unviewedAddedReports + unviewedUploadedReports;
+        
+        // ============================================================
+        // 3. REQUESTS CARD DATA
+        // ============================================================
+        var totalRequests = fundRequestsData.length;
+        var pendingRequests = fundRequestsData.filter(function(r) { return r.status === 'pending' || r.status === 'Pending'; }).length;
+        var approvedRequests = fundRequestsData.filter(function(r) { return r.status === 'approved' || r.status === 'Approved'; }).length;
+        var cancelledRequests = fundRequestsData.filter(function(r) { return r.status === 'cancelled' || r.status === 'Cancelled'; }).length;
+        var totalRequestAmount = fundRequestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        
+        // ============================================================
+        // 4. DAILY WORK CARD DATA
+        // ============================================================
+        var totalDailyWork = dailyworkData.length;
+        var totalBudget = 0;
+        var totalAmountSpent = 0;
+        
+        dailyworkData.forEach(function(w) {
+            totalBudget += parseFloat(w.budget) || 0;
+            totalAmountSpent += parseFloat(w.amount) || 0;
         });
+        
+        var remainingBudget = totalBudget - totalAmountSpent;
+        
+        var completedWork = dailyworkData.filter(function(w) { 
+            return w.status === 'completed' || w.status === 'Completed'; 
+        }).length;
+        var pendingWork = dailyworkData.filter(function(w) { 
+            return w.status === 'pending' || w.status === 'Pending'; 
+        }).length;
+        var partialWork = dailyworkData.filter(function(w) { 
+            return w.status === 'partial' || w.status === 'Partial'; 
+        }).length;
+        
+        // ============================================================
+        // 5. PROJECT STATUS COUNTS (For Chart)
+        // ============================================================
         var pending = projectsData.filter(function(p) { return p.status === 'pending'; }).length;
         var inProgress = projectsData.filter(function(p) { return p.status === 'in_progress'; }).length;
         var completed = projectsData.filter(function(p) { return p.status === 'completed'; }).length;
-        var pendingRequests = fundRequestsData.filter(function(r) { return r.status === 'pending'; }).length;
-        var totalRequests = fundRequestsData.length;
-        var approvedRequests = fundRequestsData.filter(function(r) { return r.status === 'approved'; }).length;
-        var totalRequestAmount = fundRequestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        var approved = projectsData.filter(function(p) { return p.status === 'approved'; }).length;
         
+        // ============================================================
+        // DASHBOARD HTML WITH 4 CARDS
+        // ============================================================
         document.getElementById('dashboardPage').innerHTML = 
-            '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
-                '<div class="stat-card cursor-pointer" onclick="showPage(\'projects\')">' +
-                    '<div class="stat-icon bg-blue-100 text-blue-600"><i class="fas fa-tasks text-lg"></i></div>' +
-                    '<p class="stat-label">Projects</p>' +
-                    '<p class="stat-number text-blue-600">' + projectsData.length + '</p>' +
-                    (unviewedProjectsCount > 0 ? '<p class="text-[10px] text-red-500 mt-1">' + unviewedProjectsCount + ' new</p>' : '') +
+            // ============================================================
+            // 4 MAIN CARDS
+            // ============================================================
+            '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">' +
+                
+                // ============================================================
+                // CARD 1: PROJECTS + DOCUMENTS
+                // ============================================================
+                '<div class="stat-card cursor-pointer" onclick="showPage(\'projects\')" style="border-top: 4px solid #1e40af;">' +
+                    '<div class="flex items-center justify-between mb-2">' +
+                        '<div class="stat-icon bg-blue-100 text-blue-600" style="margin:0;"><i class="fas fa-tasks text-lg"></i></div>' +
+                        '<span class="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">' + totalUnviewedProjects + ' new</span>' +
+                    '</div>' +
+                    '<p class="stat-label text-left">Projects & Documents</p>' +
+                    '<div class="flex items-end justify-between mt-1">' +
+                        '<p class="stat-number text-blue-600" style="font-size:28px; margin:0;">' + totalProjectsAndDocs + '</p>' +
+                        '<div class="text-right">' +
+                            '<p class="text-[10px] text-gray-500">Projects: ' + totalProjects + '</p>' +
+                            '<p class="text-[10px] text-gray-500">Documents: ' + totalDocuments + '</p>' +
+                        '</div>' +
+                    '</div>' +
                 '</div>' +
-                '<div class="stat-card cursor-pointer" onclick="showPage(\'reports\')">' +
-                    '<div class="stat-icon bg-purple-100 text-purple-600"><i class="fas fa-chart-line text-lg"></i></div>' +
-                    '<p class="stat-label">Reports</p>' +
-                    '<p class="stat-number text-purple-600">' + (reportsData.length + uploadedReportsData.length) + '</p>' +
-                    (unviewedReportsCount > 0 ? '<p class="text-[10px] text-red-500 mt-1">' + unviewedReportsCount + ' new</p>' : '') +
+                
+                // ============================================================
+                // CARD 2: REPORTS + UPLOADED REPORTS
+                // ============================================================
+                '<div class="stat-card cursor-pointer" onclick="showPage(\'reports\')" style="border-top: 4px solid #8b5cf6;">' +
+                    '<div class="flex items-center justify-between mb-2">' +
+                        '<div class="stat-icon bg-purple-100 text-purple-600" style="margin:0;"><i class="fas fa-chart-line text-lg"></i></div>' +
+                        '<span class="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">' + totalUnviewedReports + ' new</span>' +
+                    '</div>' +
+                    '<p class="stat-label text-left">All Reports</p>' +
+                    '<div class="flex items-end justify-between mt-1">' +
+                        '<p class="stat-number text-purple-600" style="font-size:28px; margin:0;">' + totalAllReports + '</p>' +
+                        '<div class="text-right">' +
+                            '<p class="text-[10px] text-gray-500">Added: ' + totalAddedReports + '</p>' +
+                            '<p class="text-[10px] text-gray-500">Uploaded: ' + totalUploadedReports + '</p>' +
+                        '</div>' +
+                    '</div>' +
                 '</div>' +
-                '<div class="stat-card cursor-pointer" onclick="showPage(\'requests\')">' +
-                    '<div class="stat-icon bg-orange-100 text-orange-600"><i class="fas fa-hand-holding-usd text-lg"></i></div>' +
-                    '<p class="stat-label">Requests</p>' +
-                    '<p class="stat-number text-orange-600">' + totalRequests + '</p>' +
-                    '<p class="text-[10px] text-gray-500 mt-1">Pending: ' + pendingRequests + '</p>' +
+                
+                // ============================================================
+                // CARD 3: REQUESTS
+                // ============================================================
+                '<div class="stat-card cursor-pointer" onclick="showPage(\'requests\')" style="border-top: 4px solid #f59e0b;">' +
+                    '<div class="flex items-center justify-between mb-2">' +
+                        '<div class="stat-icon bg-orange-100 text-orange-600" style="margin:0;"><i class="fas fa-hand-holding-usd text-lg"></i></div>' +
+                        '<span class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">' + totalRequests + ' total</span>' +
+                    '</div>' +
+                    '<p class="stat-label text-left">Fund Requests</p>' +
+                    '<div class="flex items-end justify-between mt-1">' +
+                        '<p class="stat-number text-orange-600" style="font-size:28px; margin:0;">' + totalRequests + '</p>' +
+                        '<div class="text-right">' +
+                            '<p class="text-[10px] text-green-600">Approved: ' + approvedRequests + '</p>' +
+                            '<p class="text-[10px] text-yellow-600">Pending: ' + pendingRequests + '</p>' +
+                            '<p class="text-[10px] text-red-600">Cancelled: ' + cancelledRequests + '</p>' +
+                        '</div>' +
+                    '</div>' +
+                    '<p class="text-[10px] text-gray-500 mt-1 text-right">Total: ' + formatMoney(totalRequestAmount) + '</p>' +
                 '</div>' +
-                '<div class="stat-card cursor-pointer" onclick="showPage(\'requests\')">' +
-                    '<div class="stat-icon bg-green-100 text-green-600"><i class="fas fa-chart-line text-lg"></i></div>' +
-                    '<p class="stat-label">Request Summary</p>' +
-                    '<p class="stat-number text-green-600" style="font-size:16px;">Total: ' + formatMoney(totalRequestAmount) + '</p>' +
-                    '<p class="text-[10px] text-gray-500 mt-1">Approved: ' + approvedRequests + '</p>' +
-                '</div>' +
-            '</div>' +
-            '<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">' +
-                '<div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-blue-600 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas><div class="flex justify-center gap-3 mt-3 text-xs"><span class="text-yellow-600">Pending: ' + pending + '</span><span class="text-blue-600">Progress: ' + inProgress + '</span><span class="text-green-600">Complete: ' + completed + '</span></div></div>' +
-                '<div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-bar text-orange-600 mr-2"></i>Request Summary</h3>' +
-                    '<div class="grid grid-cols-2 gap-4 text-center">' +
-                        '<div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Approved Requests</p><p class="text-lg font-bold text-green-600">' + approvedRequests + '</p></div>' +
-                        '<div class="bg-yellow-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Pending Requests</p><p class="text-lg font-bold text-yellow-600">' + pendingRequests + '</p></div>' +
-                        '<div class="bg-red-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Cancelled</p><p class="text-lg font-bold text-red-600">' + fundRequestsData.filter(function(r) { return r.status === 'cancelled'; }).length + '</p></div>' +
-                        '<div class="bg-blue-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Total Amount</p><p class="text-lg font-bold text-blue-600">' + formatMoney(totalRequestAmount) + '</p></div>' +
+                
+                // ============================================================
+                // CARD 4: DAILY WORK
+                // ============================================================
+                '<div class="stat-card cursor-pointer" onclick="showPage(\'projects\')" style="border-top: 4px solid #10b981;">' +
+                    '<div class="flex items-center justify-between mb-2">' +
+                        '<div class="stat-icon bg-green-100 text-green-600" style="margin:0;"><i class="fas fa-calendar-day text-lg"></i></div>' +
+                        '<span class="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">' + totalDailyWork + ' records</span>' +
+                    '</div>' +
+                    '<p class="stat-label text-left">Daily Work</p>' +
+                    '<div class="flex items-end justify-between mt-1">' +
+                        '<p class="stat-number text-green-600" style="font-size:28px; margin:0;">' + totalDailyWork + '</p>' +
+                        '<div class="text-right">' +
+                            '<p class="text-[10px] text-green-600">Budget: ' + formatMoney(totalBudget) + '</p>' +
+                            '<p class="text-[10px] text-orange-600">Spent: ' + formatMoney(totalAmountSpent) + '</p>' +
+                            '<p class="text-[10px] ' + (remainingBudget >= 0 ? 'text-green-600' : 'text-red-600') + '">Remaining: ' + formatMoney(remainingBudget) + '</p>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="flex gap-2 mt-1">' +
+                        '<span class="text-[8px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded">✅ ' + completedWork + '</span>' +
+                        '<span class="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded">⏳ ' + partialWork + '</span>' +
+                        '<span class="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">🕐 ' + pendingWork + '</span>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="grid grid-cols-3 gap-3 mb-5">' +
-                '<button onclick="openAddProjectModal()" class="bg-blue-600 text-white py-2 rounded-lg text-sm">+ Add Project</button>' +
-                '<button onclick="openModal(\'requestModal\')" class="bg-orange-600 text-white py-2 rounded-lg text-sm">+ New Request</button>' +
-                '<button onclick="openModal(\'reportModal\')" class="bg-purple-600 text-white py-2 rounded-lg text-sm">+ Add Report</button>' +
+            
+            // ============================================================
+            // PROJECT STATUS CHART & QUICK ACTIONS
+            // ============================================================
+            '<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">' +
+                '<div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-blue-600 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas><div class="flex justify-center gap-3 mt-3 text-xs flex-wrap"><span class="text-yellow-600">Pending: ' + pending + '</span><span class="text-blue-600">Progress: ' + inProgress + '</span><span class="text-green-600">Complete: ' + completed + '</span><span class="text-purple-600">Approved: ' + approved + '</span></div></div>' +
+                '<div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-bolt text-orange-600 mr-2"></i>Quick Actions</h3>' +
+                    '<div class="grid grid-cols-2 gap-3">' +
+                        '<button onclick="openAddProjectModal()" class="bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 transition"><i class="fas fa-plus mr-1"></i> Add Project</button>' +
+                        '<button onclick="openModal(\'requestModal\')" class="bg-orange-600 text-white py-2 rounded-lg text-sm hover:bg-orange-700 transition"><i class="fas fa-plus mr-1"></i> New Request</button>' +
+                        '<button onclick="openModal(\'reportModal\')" class="bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700 transition"><i class="fas fa-plus mr-1"></i> Add Report</button>' +
+                        '<button onclick="showPage(\'projects\')" class="bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 transition"><i class="fas fa-folder mr-1"></i> View All</button>' +
+                    '</div>' +
+                '</div>' +
             '</div>' +
-            '<div class="bg-white rounded-xl p-4 shadow-sm border mt-4"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-blue-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">' + 
-            actionHistory.slice(0,5).map(function(l) { 
-                return '<div class="py-1 border-b flex justify-between"><span>' + escapeHtml(l.action) + '</span><span class="text-gray-400">' + new Date(l.created_at).toLocaleString() + '</span></div>';
-            }).join('') + 
-            '</div></div>';
+            
+            // ============================================================
+            // RECENT ACTIVITY
+            // ============================================================
+            '<div class="bg-white rounded-xl p-4 shadow-sm border mt-4">' +
+                '<div class="flex justify-between items-center mb-2">' +
+                    '<h3 class="text-sm font-semibold"><i class="fas fa-history text-blue-600 mr-1"></i>Recent Activity</h3>' +
+                    (totalUnviewedProjects > 0 ? '<span class="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full">' + totalUnviewedProjects + ' unviewed items</span>' : '') +
+                '</div>' +
+                '<div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">' + 
+                actionHistory.slice(0,5).map(function(l) { 
+                    return '<div class="py-1 border-b flex justify-between"><span>' + escapeHtml(l.action) + '</span><span class="text-gray-400">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                }).join('') + 
+                '</div>' +
+                // Unviewed items quick list
+                (totalUnviewedProjects > 0 ? 
+                    '<div class="mt-3 pt-2 border-t">' +
+                        '<p class="text-xs font-semibold text-gray-600 mb-2">📋 Unviewed Items:</p>' +
+                        '<div class="flex flex-wrap gap-2">' +
+                            (unviewedProjects > 0 ? '<span class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full cursor-pointer" onclick="showPage(\'projects\')">📁 ' + unviewedProjects + ' projects</span>' : '') +
+                            (unviewedDocs > 0 ? '<span class="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded-full cursor-pointer" onclick="showPage(\'projects\')">📄 ' + unviewedDocs + ' documents</span>' : '') +
+                        '</div>' +
+                    '</div>' 
+                : '') +
+            '</div>';
         
+        // ============================================================
+        // Chart
+        // ============================================================
         var ctx = document.getElementById('statusChart')?.getContext('2d');
         if (ctx) {
             new Chart(ctx, {
@@ -2013,17 +2604,24 @@ function loadDashboard() {
                 data: {
                     labels: ['Pending', 'In Progress', 'Completed', 'Approved'],
                     datasets: [{
-                        data: [pending, inProgress, completed, projectsData.filter(function(p) { return p.status === 'approved'; }).length],
+                        data: [pending, inProgress, completed, approved],
                         backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'],
                         borderWidth: 0
                     }]
                 },
-                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+                options: { 
+                    responsive: true, 
+                    plugins: { 
+                        legend: { 
+                            position: 'bottom',
+                            labels: { boxWidth: 10, font: { size: 10 } }
+                        } 
+                    } 
+                }
             });
         }
     });
 }
-
 // ============================================================
 // ==================== PROJECTS SECTION ====================
 // ============================================================
@@ -2031,6 +2629,9 @@ function loadProjects(highlightId) {
     highlightId = highlightId || null;
     fetchProjects().then(function() {
         fetchProjectDocuments().then(function() {
+            // ============================================================
+            // Build tabs
+            // ============================================================
             var html = 
                 '<div class="tab-container">' +
                     '<button class="tab-button ' + (currentProjectTab === 'added' ? 'active' : '') + '" onclick="switchProjectTab(\'added\')">' +
@@ -2041,10 +2642,20 @@ function loadProjects(highlightId) {
                     '</button>' +
                 '</div>';
             
+            // ============================================================
+            // TAB 1: ADDED PROJECTS
+            // ============================================================
             if (currentProjectTab === 'added') {
                 html += 
                     '<div class="section-card">' +
-                        '<div class="section-card-header"><h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3><div class="flex gap-2"><button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>' +
+                        '<div class="section-card-header">' +
+                            '<h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3>' +
+                            '<div class="flex gap-2 flex-wrap">' +
+                                '<button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button>' +
+                                '<button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>' +
+                                '<button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>' +
+                            '</div>' +
+                        '</div>' +
                         '<div class="section-card-body"><div id="projectsGrid" class="projects-grid"></div></div>' +
                     '</div>';
                 document.getElementById('projectsPage').innerHTML = html;
@@ -2054,9 +2665,43 @@ function loadProjects(highlightId) {
                     return;
                 }
                 
+                // ============================================================
+                // Build projects grid
+                // ============================================================
                 var projectsHtml = '';
-                projectsData.forEach(function(p) {
-                    var isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_dept === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && viewedProjectIds.indexOf(p.id) === -1;
+                for (var i = 0; i < projectsData.length; i++) {
+                    var p = projectsData[i];
+                    
+                    // Check if project is NEW (unviewed)
+                    var isNew = false;
+                    
+                    // Check regular project fields
+                    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+                        p.sent_to_dept === DEPARTMENT_ID && 
+                        (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+                        viewedProjectIds.indexOf(p.id) === -1) {
+                        isNew = true;
+                    }
+                    
+                    // Check sent project fields (from sent_projects table)
+                    if (p.from_department_id && p.from_department_id != DEPARTMENT_ID && 
+                        p.to_department_id === DEPARTMENT_ID && 
+                        (p.is_viewed == 0 || p.is_viewed === null) && 
+                        viewedProjectIds.indexOf(p.id) === -1) {
+                        isNew = true;
+                    }
+                    
+                    // Check if it's a sent project
+                    if (p.is_sent_project && p.from_department_id != DEPARTMENT_ID && 
+                        p.to_department_id === DEPARTMENT_ID && 
+                        (p.is_viewed == 0 || p.is_viewed === null) && 
+                        viewedProjectIds.indexOf(p.id) === -1) {
+                        isNew = true;
+                    }
+                    
+                    // Mark as unviewed for sorting
+                    p._is_unviewed = isNew;
+                    
                     var fileUrl = getFullImageUrl(p.image);
                     var isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || fileUrl.indexOf('data:image/') === 0);
                     var statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
@@ -2072,25 +2717,37 @@ function loadProjects(highlightId) {
                         imageHtml = '<div class="no-image flex flex-col items-center justify-center bg-gray-100 h-[160px]"><i class="fas fa-image text-4xl text-gray-400"></i><p class="text-xs text-gray-500 mt-2">No Image</p></div>';
                     }
                     
+                    // Get sender info for sent projects
+                    var senderInfo = '';
+                    if (p.from_department_name || p.sent_from_name) {
+                        var sentFrom = p.from_department_name || p.sent_from_name || departmentNames[p.from_department_id] || '';
+                        senderInfo = '<div class="text-[9px] text-blue-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ' + escapeHtml(sentFrom) + '</div>';
+                    }
+                    
                     projectsHtml += 
                         '<div class="project-card ' + (isHighlighted ? 'search-highlight' : '') + '" id="proj-card-' + p.id + '">' +
                             (isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : '') +
-                            '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + '</p></div>' +
+                            '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + (p.is_sent_project ? ' (Sent)' : '') + '</p></div>' +
                             imageHtml +
                             '<div class="p-3">' +
-                                '<div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ' + escapeHtml(p.client_name || 'N/A') + '</p><span class="status-badge ' + statusClass + ' text-[9px] px-2 py-0.5">' + statusText + '</span></div>' +
+                                '<div class="flex justify-between items-start">' +
+                                    '<p class="text-xs text-gray-500">Client: ' + escapeHtml(p.client_name || 'N/A') + '</p>' +
+                                    '<span class="status-badge ' + statusClass + ' text-[9px] px-2 py-0.5">' + statusText + '</span>' +
+                                '</div>' +
                                 '<p class="text-sm font-semibold text-blue-600 mt-1">' + formatMoney(p.amount) + '</p>' +
                                 '<div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>' + (p.progress || 0) + '%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-blue-600 h-1 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div></div>' +
+                                senderInfo +
                                 '<div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">' +
-                                    '<button onclick="viewProjectDetails(' + p.id + ')" class="action-btn view"><i class="fas fa-eye"></i> View</button>' +
-                                    '<button onclick="editProject(' + p.id + ')" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>' +
-                                    '<button onclick="deleteProject(' + p.id + ')" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>' +
+                                    '<button onclick="event.stopPropagation(); viewProjectDetails(' + p.id + ')" class="action-btn view"><i class="fas fa-eye"></i> View</button>' +
+                                    '<button onclick="event.stopPropagation(); editProject(' + p.id + ')" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>' +
+                                    '<button onclick="event.stopPropagation(); deleteProject(' + p.id + ')" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>' +
                                 '</div>' +
                                 '<div class="user-info">Created by: ' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div>' +
                             '</div>' +
                         '</div>';
-                });
+                }
                 document.getElementById('projectsGrid').innerHTML = projectsHtml;
+                
                 if (highlightId) {
                     var el = document.getElementById('proj-card-' + highlightId);
                     if (el) {
@@ -2099,10 +2756,22 @@ function loadProjects(highlightId) {
                         highlightTimer = setTimeout(function() { el.classList.remove('search-highlight'); }, 3000);
                     }
                 }
-            } else {
+            }
+            
+            // ============================================================
+            // TAB 2: UPLOADED DOCUMENTS
+            // ============================================================
+            else {
                 html += 
                     '<div class="section-card">' +
-                        '<div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>' +
+                        '<div class="section-card-header">' +
+                            '<h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Documents</h3>' +
+                            '<div class="flex gap-2 flex-wrap">' +
+                                '<button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button>' +
+                                '<button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>' +
+                                '<button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>' +
+                            '</div>' +
+                        '</div>' +
                         '<div class="section-card-body"><div id="uploadedDocsGrid" class="documents-grid"></div></div>' +
                     '</div>';
                 document.getElementById('projectsPage').innerHTML = html;
@@ -2112,25 +2781,71 @@ function loadProjects(highlightId) {
                     return;
                 }
                 
+                // ============================================================
+                // Build uploaded documents grid with NEW badge and Delete button
+                // ============================================================
                 var docsHtml = '';
-                projectDocuments.forEach(function(doc) {
+                for (var j = 0; j < projectDocuments.length; j++) {
+                    var doc = projectDocuments[j];
                     var fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
                     var isHighlighted = highlightId && doc.id === highlightId;
+                    
+                    // ============================================================
+                    // Check if document is unviewed (sent document)
+                    // ============================================================
+                    var isNew = false;
+                    
+                    // Check if it's a sent document
+                    if (doc.is_sent_document) {
+                        if (doc.is_viewed == 0 || doc.is_viewed === null || doc.is_viewed === '0') isNew = true;
+                        if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null || doc.is_viewed_by_department === '0') isNew = true;
+                        if (doc.is_unviewed === true || doc.is_unviewed === 1 || doc.is_unviewed === '1') isNew = true;
+                        if (doc._is_unviewed === true) isNew = true;
+                        if (viewedProjectIds.indexOf(doc.id) === -1) isNew = true;
+                    }
+                    
+                    // Check if document was sent to this department
+                    if (doc.sent_to_department && doc.sent_to_department == DEPARTMENT_ID && 
+                        doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                        if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) isNew = true;
+                    }
+                    
+                    // Get sender name
+                    var senderName = doc.sent_from_name || doc.from_department_name || '';
+                    if (!senderName && doc.sent_from_department) {
+                        senderName = departmentNames[doc.sent_from_department] || '';
+                    }
+                    
+                    // Determine if this is a sent document (from another department)
+                    var isSentDocument = doc.is_sent_document || 
+                                         (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID);
+                    
                     docsHtml += 
                         '<div class="uploaded-doc-card ' + (isHighlighted ? 'search-highlight' : '') + '" id="doc-card-' + doc.id + '">' +
-                            '<div class="card-header"><h4>' + escapeHtml(doc.title) + '</h4><p>' + (doc.file_name || 'Document') + '</p></div>' +
+                            // NEW badge
+                            (isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : '') +
+                            '<div class="card-header"><h4>' + escapeHtml(doc.title) + '</h4>' +
+                            '<p>' + (doc.file_name || 'Document') + (isSentDocument ? ' (Sent)' : '') + '</p>' +
+                            // Delete button for ALL documents
+                            '<button class="delete-btn-header" onclick="event.stopPropagation(); deleteProjectDocument(' + doc.id + ')"><i class="fas fa-trash-alt"></i></button>' +
+                            '</div>' +
                             '<div class="p-3">' +
-                                '<div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ' + new Date(doc.created_at).toLocaleDateString() + '</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">' + fileExt.toUpperCase() + '</span></div>' +
+                                '<div class="flex justify-between items-start mb-2">' +
+                                    '<span class="text-[9px] text-gray-400">' + (isSentDocument ? 'Received: ' : 'Uploaded: ') + new Date(doc.created_at).toLocaleDateString() + '</span>' +
+                                    '<span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">' + fileExt.toUpperCase() + '</span>' +
+                                '</div>' +
+                                (senderName ? '<div class="text-[9px] text-blue-500 mb-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ' + escapeHtml(senderName) + '</div>' : '') +
                                 '<p class="text-xs text-gray-500 mb-2">' + escapeHtml(doc.description || 'No description') + '</p>' +
                                 '<div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">' +
                                     '<button onclick="viewUploadedProjectDocument(' + doc.id + ')" class="action-btn view"><i class="fas fa-eye"></i> View</button>' +
                                     '<button onclick="deleteProjectDocument(' + doc.id + ')" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>' +
                                 '</div>' +
-                                '<div class="user-info">Uploaded by: ' + escapeHtml(doc.uploaded_by || 'System') + ' on ' + new Date(doc.created_at).toLocaleString() + '</div>' +
+                                '<div class="user-info">' + (isSentDocument ? 'Sent by: ' : 'Uploaded by: ') + escapeHtml(doc.uploaded_by || doc.sent_by || 'System') + ' on ' + new Date(doc.created_at).toLocaleString() + '</div>' +
                             '</div>' +
                         '</div>';
-                });
+                }
                 document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+                
                 if (highlightId) {
                     var el = document.getElementById('doc-card-' + highlightId);
                     if (el) {
@@ -2140,11 +2855,14 @@ function loadProjects(highlightId) {
                     }
                 }
             }
+            
+            // ============================================================
+            // Update badges - Count both projects and documents
+            // ============================================================
             updateProjectBadge();
         });
     });
 }
-
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadProjects();
@@ -2157,14 +2875,53 @@ function viewProjectDetails(id) {
     var p = projectsData.find(function(p) { return p.id === id; });
     if (!p) return;
     
-    if (p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && viewedProjectIds.indexOf(id) === -1) {
+    // ============================================================
+    // FIX: Mark as viewed - check both regular and sent project fields
+    // ============================================================
+    var isUnviewed = false;
+    
+    // Check regular project fields
+    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+        p.sent_to_dept === DEPARTMENT_ID && 
+        (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+        viewedProjectIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check sent project fields (from sent_projects table)
+    if (p.from_department_id && p.from_department_id != DEPARTMENT_ID && 
+        p.to_department_id === DEPARTMENT_ID && 
+        (p.is_viewed == 0 || p.is_viewed === null) && 
+        viewedProjectIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check if it's a sent project
+    if (p.is_sent_project && p.from_department_id != DEPARTMENT_ID && 
+        p.to_department_id === DEPARTMENT_ID && 
+        (p.is_viewed == 0 || p.is_viewed === null) && 
+        viewedProjectIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Mark as viewed if unviewed
+    if (isUnviewed) {
         markProjectViewed(id);
-        apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
+        
+        // Update the project in local data
+        p._is_unviewed = false;
+        p.is_viewed = 1;
+        p.is_viewed_by_department = 1;
+        
+        // Update the badge count
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+        updateProjectBadge();
     }
     
     currentProjectId = id;
     loadDailyWorkForProject(id);
     
+    // ... rest of the function remains the same ...
     var fileUrl = getFullImageUrl(p.image);
     var isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || fileUrl.indexOf('data:image/') === 0);
     
@@ -2215,7 +2972,6 @@ function viewProjectDetails(id) {
     openModal('viewProjModal');
     loadProjects();
 }
-
 // ============================================================
 // ==================== DAILY WORK FUNCTIONS ====================
 // ============================================================
