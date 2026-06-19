@@ -1,5 +1,5 @@
 <?php
-// send_report_advanced.php - FIXED: Save to sent_reports table
+// send_report_advanced.php - Send report
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-error_reporting(E_ALL);
+error_reporting(0);
 ini_set('display_errors', 0);
 
 $host = 'localhost';
@@ -35,7 +35,7 @@ if (!$input) {
 
 // Required fields
 if (!isset($input['report_id']) || !isset($input['to_department_id']) || !isset($input['from_department_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+    echo json_encode(['success' => false, 'message' => 'Missing required fields: report_id, to_department_id, from_department_id']);
     exit;
 }
 
@@ -45,7 +45,7 @@ $fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
 $reportData = isset($input['report_data']) ? $input['report_data'] : [];
 
-// If report_data is empty, fetch from database
+// If report_data is empty, try to fetch from database
 if (empty($reportData)) {
     try {
         $stmt = $pdo->prepare("SELECT * FROM reports WHERE id = ? AND department_id = ?");
@@ -60,7 +60,6 @@ if (empty($reportData)) {
     }
 }
 
-// Validate report data
 if (empty($reportData) || !isset($reportData['title'])) {
     echo json_encode(['success' => false, 'message' => 'Report data is required or incomplete']);
     exit;
@@ -78,11 +77,11 @@ try {
     $toDeptName = 'Department ' . $toDeptId;
 }
 
-// Prepare report data JSON
-$reportDataJson = json_encode($reportData);
+$reportTitle = $reportData['title'] ?? 'Untitled Report';
+$reportPeriod = $reportData['period'] ?? 'monthly';
 
 // ============================================================
-// Check if sent_reports table exists, create if not
+// Create sent_reports table if not exists
 // ============================================================
 $tableCheck = $pdo->query("SHOW TABLES LIKE 'sent_reports'");
 if ($tableCheck->rowCount() == 0) {
@@ -111,17 +110,14 @@ if ($tableCheck->rowCount() == 0) {
     $pdo->exec($createTable);
 }
 
-// ============================================================
-// Save to sent_reports table
-// ============================================================
+// Prepare report data JSON
+$reportDataJson = json_encode($reportData);
+
 try {
     // Check if already exists
     $checkStmt = $pdo->prepare("SELECT id FROM sent_reports WHERE original_report_id = ? AND to_department_id = ? AND is_deleted = 0");
     $checkStmt->execute([$reportId, $toDeptId]);
     $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    
-    $reportTitle = $reportData['title'] ?? 'Untitled Report';
-    $reportPeriod = $reportData['period'] ?? 'monthly';
     
     if ($existing) {
         // Update existing
@@ -150,7 +146,6 @@ try {
             $reportPeriod,
             $existing['id']
         ]);
-        
         $sentId = $existing['id'];
     } else {
         // Insert new
@@ -183,13 +178,10 @@ try {
             $reportTitle,
             $reportPeriod
         ]);
-        
         $sentId = $pdo->lastInsertId();
     }
     
-    // ============================================================
-    // Update original report - mark as sent
-    // ============================================================
+    // Update original report
     try {
         $updateStmt = $pdo->prepare("UPDATE reports SET 
             sent_to_department = ?,
@@ -201,7 +193,7 @@ try {
             WHERE id = ?");
         $updateStmt->execute([$toDeptId, $fromDeptId, $reportId]);
     } catch(PDOException $e) {
-        // Columns might not exist, ignore
+        // Columns might not exist
     }
     
     echo json_encode([
@@ -212,8 +204,7 @@ try {
         'to_department_name' => $toDeptName,
         'from_department' => $fromDeptId,
         'from_department_name' => $fromDeptName,
-        'report_title' => $reportTitle,
-        'report_period' => $reportPeriod
+        'report_title' => $reportTitle
     ]);
     
 } catch(PDOException $e) {

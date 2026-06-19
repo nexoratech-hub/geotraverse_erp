@@ -1,5 +1,5 @@
 <?php
-// send_document_advanced.php - FIXED: Copy file when sending
+// send_document_advanced.php - FIXED
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-error_reporting(E_ALL);
+error_reporting(0);
 ini_set('display_errors', 0);
 
 $host = 'localhost';
@@ -28,37 +28,81 @@ try {
 
 $input = json_decode(file_get_contents('php://input'), true);
 
-if (!$input || !isset($input['document_id']) || !isset($input['to_department_id']) || !isset($input['from_department_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+if (!$input) {
+    echo json_encode(['success' => false, 'message' => 'Invalid input']);
     exit;
+}
+
+// Required fields
+$required = ['document_id', 'to_department_id', 'from_department_id', 'doc_type'];
+foreach ($required as $field) {
+    if (!isset($input[$field])) {
+        echo json_encode(['success' => false, 'message' => "Missing required field: $field"]);
+        exit;
+    }
 }
 
 $docId = (int)$input['document_id'];
 $toDeptId = (int)$input['to_department_id'];
 $fromDeptId = (int)$input['from_department_id'];
+$docType = $input['doc_type'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
-$docType = isset($input['doc_type']) ? $input['doc_type'] : 'project';
 
 // ============================================================
-// Get original document
+// FIX: Check for document_data (primary) or uploaded_report_data (fallback)
 // ============================================================
-try {
-    $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
-    $stmt->execute([$docId]);
-    $doc = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$doc) {
-        echo json_encode(['success' => false, 'message' => 'Document not found']);
-        exit;
+$docData = [];
+if (isset($input['document_data']) && !empty($input['document_data'])) {
+    $docData = $input['document_data'];
+} elseif (isset($input['uploaded_report_data']) && !empty($input['uploaded_report_data'])) {
+    $docData = $input['uploaded_report_data'];
+} elseif (isset($input['doc_data']) && !empty($input['doc_data'])) {
+    $docData = $input['doc_data'];
+}
+
+// If document_data is empty, try to fetch from database
+if (empty($docData)) {
+    try {
+        if ($docType === 'uploaded_report') {
+            $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ?");
+            $stmt->execute([$docId]);
+            $docData = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
+            $stmt->execute([$docId]);
+            $docData = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+        if ($docData) {
+            $docData['sent_count'] = ($docData['sent_count'] ?? 0) + 1;
+            $docData['is_sent'] = 1;
+        }
+    } catch(PDOException $e) {
+        // Ignore
     }
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Error fetching document: ' . $e->getMessage()]);
-    exit;
 }
 
 // ============================================================
-// Get department names
+// FIX: Allow document_data to be minimal - just check for title or id
 // ============================================================
+if (empty($docData)) {
+    // Try to use direct fields from input
+    if (isset($input['document_title']) || isset($input['title'])) {
+        $docData = [
+            'id' => $docId,
+            'title' => $input['document_title'] ?? $input['title'] ?? 'Document',
+            'file_name' => $input['document_file'] ?? $input['file_name'] ?? '',
+            'description' => $input['description'] ?? '',
+            'uploaded_by' => $sentBy,
+            'department_id' => $fromDeptId,
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Document data is required or incomplete']);
+        exit;
+    }
+}
+
+// Get department names
 try {
     $deptStmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
     $deptStmt->execute([$fromDeptId]);
@@ -66,106 +110,47 @@ try {
     $deptStmt->execute([$toDeptId]);
     $toDeptName = $deptStmt->fetchColumn();
 } catch(PDOException $e) {
-    $fromDeptName = 'Department ' . $fromDeptId;
-    $toDeptName = 'Department ' . $toDeptId;
+    $fromDeptName = isset($input['from_department_name']) ? $input['from_department_name'] : 'Department ' . $fromDeptId;
+    $toDeptName = isset($input['to_department_name']) ? $input['to_department_name'] : 'Department ' . $toDeptId;
 }
 
-// ============================================================
-// Find and copy the actual file
-// ============================================================
-$filePath = $doc['file_path'] ?? $doc['file_name'] ?? '';
-$fileName = $doc['file_name'] ?? 'document';
-$fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+$docTitle = $docData['title'] ?? 'Untitled Document';
+$docFile = $docData['file_name'] ?? '';
 
-// Try to find the file in multiple locations
-$possiblePaths = [
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/' . $filePath,
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/project_documents/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/project_documents/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/uploads/' . basename($filePath),
-];
-
-$sourceFile = null;
-foreach ($possiblePaths as $path) {
-    if (file_exists($path)) {
-        $sourceFile = $path;
-        break;
-    }
+// ============================================================
+// Create sent_documents table if not exists
+// ============================================================
+$tableCheck = $pdo->query("SHOW TABLES LIKE 'sent_documents'");
+if ($tableCheck->rowCount() == 0) {
+    $createTable = "
+    CREATE TABLE IF NOT EXISTS `sent_documents` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `original_document_id` int(11) NOT NULL,
+        `document_data` longtext DEFAULT NULL,
+        `from_department_id` int(11) NOT NULL,
+        `to_department_id` int(11) NOT NULL,
+        `sent_by` varchar(100) DEFAULT NULL,
+        `sent_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `is_viewed` tinyint(4) DEFAULT 0,
+        `viewed_at` timestamp NULL DEFAULT NULL,
+        `is_deleted` tinyint(4) DEFAULT 0,
+        `deleted_at` timestamp NULL DEFAULT NULL,
+        `sent_count` int(11) DEFAULT 0,
+        `is_sent` tinyint(4) DEFAULT 0,
+        `last_sent_at` timestamp NULL DEFAULT NULL,
+        `from_department_name` varchar(100) DEFAULT NULL,
+        `to_department_name` varchar(100) DEFAULT NULL,
+        `document_title` varchar(255) DEFAULT NULL,
+        `document_type` varchar(50) DEFAULT NULL,
+        `document_file` varchar(255) DEFAULT NULL,
+        PRIMARY KEY (`id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    $pdo->exec($createTable);
 }
 
-// If still not found, search in entire project
-if (!$sourceFile) {
-    $searchDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/';
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($searchDir));
-    foreach ($iterator as $file) {
-        if ($file->isFile() && $file->getFilename() === basename($fileName)) {
-            $sourceFile = $file->getRealPath();
-            break;
-        }
-    }
-}
+// Prepare document data JSON
+$docDataJson = json_encode($docData);
 
-// ============================================================
-// Copy file to sent documents folder
-// ============================================================
-$sentFile = null;
-$sentFilePath = null;
-
-if ($sourceFile && file_exists($sourceFile)) {
-    // Create sent documents directory if not exists
-    $sentDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/';
-    if (!file_exists($sentDir)) {
-        mkdir($sentDir, 0777, true);
-    }
-    
-    // Generate unique filename
-    $newFileName = time() . '_' . $docId . '_' . basename($fileName);
-    $sentFilePath = 'frontend/assets/uploads/sent_documents/' . $newFileName;
-    $sentFile = $sentDir . $newFileName;
-    
-    // Copy the file
-    if (!copy($sourceFile, $sentFile)) {
-        // If copy fails, try to use the original file path
-        $sentFilePath = $filePath;
-        $sentFile = $sourceFile;
-    }
-} else {
-    // If file not found, use original path from database
-    $sentFilePath = $filePath;
-    $sentFile = null;
-}
-
-// ============================================================
-// Prepare document data for sent_documents table
-// ============================================================
-$documentData = [
-    'id' => $doc['id'],
-    'title' => $doc['title'],
-    'description' => $doc['description'],
-    'file_name' => $fileName,
-    'file_path' => $sentFilePath, // Use copied file path
-    'file_size' => $doc['file_size'] ?? 0,
-    'file_type' => $doc['file_type'] ?? '',
-    'uploaded_by' => $doc['uploaded_by'],
-    'department_id' => $doc['department_id'],
-    'created_at' => $doc['created_at'],
-    'doc_type' => $doc['doc_type'] ?? 'general',
-    'sent_from_department' => $fromDeptId,
-    'sent_to_department' => $toDeptId,
-    'sent_by' => $sentBy,
-    'sent_at' => date('Y-m-d H:i:s'),
-    'is_sent' => 1,
-    'sent_count' => ($doc['sent_count'] ?? 0) + 1
-];
-
-$documentDataJson = json_encode($documentData);
-
-// ============================================================
-// Save to sent_documents table
-// ============================================================
 try {
     // Check if already exists
     $checkStmt = $pdo->prepare("SELECT id FROM sent_documents WHERE original_document_id = ? AND to_department_id = ? AND is_deleted = 0");
@@ -191,17 +176,16 @@ try {
             WHERE id = ?");
         
         $stmt->execute([
-            $documentDataJson,
+            $docDataJson,
             $fromDeptId,
             $sentBy,
             $fromDeptName,
             $toDeptName,
-            $doc['title'],
+            $docTitle,
             $docType,
-            $fileName,
+            $docFile,
             $existing['id']
         ]);
-        
         $sentId = $existing['id'];
     } else {
         // Insert new
@@ -226,44 +210,56 @@ try {
         
         $stmt->execute([
             $docId,
-            $documentDataJson,
+            $docDataJson,
             $fromDeptId,
             $toDeptId,
             $sentBy,
             $fromDeptName,
             $toDeptName,
-            $doc['title'],
+            $docTitle,
             $docType,
-            $fileName
+            $docFile
         ]);
-        
         $sentId = $pdo->lastInsertId();
     }
     
-    // ============================================================
-    // Update original document - mark as sent
-    // ============================================================
-    $updateStmt = $pdo->prepare("UPDATE project_documents SET 
-        sent_to_department = ?,
-        sent_from_department = ?,
-        is_viewed_by_department = 0,
-        sent_count = sent_count + 1,
-        is_sent = 1,
-        last_sent_at = NOW()
-        WHERE id = ?");
-    $updateStmt->execute([$toDeptId, $fromDeptId, $docId]);
+    // Update original document
+    try {
+        if ($docType === 'uploaded_report') {
+            $updateStmt = $pdo->prepare("UPDATE uploaded_reports SET 
+                sent_to_department = ?,
+                sent_from_department = ?,
+                is_viewed_by_department = 0,
+                sent_count = sent_count + 1,
+                is_sent = 1,
+                last_sent_at = NOW()
+                WHERE id = ?");
+            $updateStmt->execute([$toDeptId, $fromDeptId, $docId]);
+        } else {
+            $updateStmt = $pdo->prepare("UPDATE project_documents SET 
+                sent_to_department = ?,
+                sent_from_department = ?,
+                is_viewed_by_department = 0,
+                sent_count = sent_count + 1,
+                is_sent = 1,
+                last_sent_at = NOW()
+                WHERE id = ?");
+            $updateStmt->execute([$toDeptId, $fromDeptId, $docId]);
+        }
+    } catch(PDOException $e) {
+        // Columns might not exist
+    }
     
     echo json_encode([
         'success' => true,
-        'message' => 'Document sent successfully with file copy',
+        'message' => 'Document sent successfully',
         'sent_id' => $sentId,
         'to_department' => $toDeptId,
         'to_department_name' => $toDeptName,
-        'file_copied' => ($sentFile && file_exists($sentFile)),
-        'source_file' => $sourceFile,
-        'sent_file' => $sentFilePath,
-        'document_title' => $doc['title'],
-        'file_name' => $fileName
+        'from_department' => $fromDeptId,
+        'from_department_name' => $fromDeptName,
+        'document_title' => $docTitle,
+        'document_type' => $docType
     ]);
     
 } catch(PDOException $e) {

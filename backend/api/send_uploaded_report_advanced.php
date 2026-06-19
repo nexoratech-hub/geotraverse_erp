@@ -1,5 +1,5 @@
 <?php
-// send_uploaded_report_advanced.php - FIXED: Save to sent_uploaded_reports table
+// send_uploaded_report_advanced.php - Send uploaded report (alias for send_document_advanced)
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-error_reporting(E_ALL);
+error_reporting(0);
 ini_set('display_errors', 0);
 
 $host = 'localhost';
@@ -34,30 +34,24 @@ if (!$input) {
 }
 
 // Required fields
-if (!isset($input['uploaded_report_id']) && !isset($input['document_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Report ID or Document ID required']);
+if (!isset($input['uploaded_report_id']) || !isset($input['to_department_id']) || !isset($input['from_department_id'])) {
+    echo json_encode(['success' => false, 'message' => 'Missing required fields: uploaded_report_id, to_department_id, from_department_id']);
     exit;
 }
 
-if (!isset($input['to_department_id']) || !isset($input['from_department_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Department IDs required']);
-    exit;
-}
-
-$reportId = isset($input['uploaded_report_id']) ? (int)$input['uploaded_report_id'] : (int)$input['document_id'];
+$reportId = (int)$input['uploaded_report_id'];
 $toDeptId = (int)$input['to_department_id'];
 $fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
 $reportData = isset($input['uploaded_report_data']) ? $input['uploaded_report_data'] : [];
 
-// If report_data is empty, try to fetch from uploaded_reports table
+// If report_data is empty, try to fetch from database
 if (empty($reportData)) {
     try {
         $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ?");
         $stmt->execute([$reportId]);
-        $fetched = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($fetched) {
-            $reportData = $fetched;
+        $reportData = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($reportData) {
             $reportData['sent_count'] = ($reportData['sent_count'] ?? 0) + 1;
             $reportData['is_sent'] = 1;
         }
@@ -66,25 +60,6 @@ if (empty($reportData)) {
     }
 }
 
-// If still empty, try project_documents with doc_type = 'uploaded_report'
-if (empty($reportData)) {
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ? AND doc_type = 'uploaded_report'");
-        $stmt->execute([$reportId]);
-        $fetched = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($fetched) {
-            $reportData = $fetched;
-            $reportData['sent_count'] = ($reportData['sent_count'] ?? 0) + 1;
-            $reportData['is_sent'] = 1;
-            $reportData['file_name'] = $fetched['file_name'];
-            $reportData['file_path'] = $fetched['file_path'];
-        }
-    } catch(PDOException $e) {
-        // Ignore
-    }
-}
-
-// Validate report data
 if (empty($reportData) || !isset($reportData['title'])) {
     echo json_encode(['success' => false, 'message' => 'Uploaded report data is required or incomplete']);
     exit;
@@ -98,12 +73,16 @@ try {
     $deptStmt->execute([$toDeptId]);
     $toDeptName = $deptStmt->fetchColumn();
 } catch(PDOException $e) {
-    $fromDeptName = isset($input['from_department_name']) ? $input['from_department_name'] : 'Department ' . $fromDeptId;
-    $toDeptName = isset($input['to_department_name']) ? $input['to_department_name'] : 'Department ' . $toDeptId;
+    $fromDeptName = 'Department ' . $fromDeptId;
+    $toDeptName = 'Department ' . $toDeptId;
 }
 
+$reportTitle = $reportData['title'] ?? 'Untitled Uploaded Report';
+$reportPeriod = $reportData['period'] ?? 'monthly';
+$reportFile = $reportData['file_name'] ?? '';
+
 // ============================================================
-// Check if sent_uploaded_reports table exists, create if not
+// Create sent_uploaded_reports table if not exists
 // ============================================================
 $tableCheck = $pdo->query("SHOW TABLES LIKE 'sent_uploaded_reports'");
 if ($tableCheck->rowCount() == 0) {
@@ -133,62 +112,9 @@ if ($tableCheck->rowCount() == 0) {
     $pdo->exec($createTable);
 }
 
-// ============================================================
-// Copy file if it exists
-// ============================================================
-$filePath = $reportData['file_path'] ?? $reportData['file_name'] ?? '';
-$fileName = $reportData['file_name'] ?? 'document';
-$fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-
-// Try to find the source file
-$sourceFile = null;
-$possiblePaths = [
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/' . $filePath,
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/reports/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/reports/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/reports/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/project_documents/' . basename($filePath),
-    $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/project_documents/' . basename($filePath),
-];
-
-foreach ($possiblePaths as $path) {
-    if (file_exists($path)) {
-        $sourceFile = $path;
-        break;
-    }
-}
-
-// Copy file to sent_documents folder
-$sentFilePath = $filePath;
-if ($sourceFile && file_exists($sourceFile)) {
-    $sentDir = $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/';
-    if (!file_exists($sentDir)) {
-        mkdir($sentDir, 0777, true);
-    }
-    
-    $newFileName = time() . '_' . $reportId . '_' . basename($fileName);
-    $sentFilePath = 'frontend/assets/uploads/sent_documents/' . $newFileName;
-    $sentFile = $sentDir . $newFileName;
-    
-    if (!copy($sourceFile, $sentFile)) {
-        $sentFilePath = $filePath;
-    }
-}
-
-// ============================================================
 // Prepare report data JSON
-// ============================================================
-$reportData['file_path'] = $sentFilePath;
-$reportData['file_name'] = $fileName;
 $reportDataJson = json_encode($reportData);
 
-$reportTitle = $reportData['title'] ?? 'Untitled Uploaded Report';
-$reportPeriod = $reportData['period'] ?? 'monthly';
-$reportFile = $fileName;
-
-// ============================================================
-// Save to sent_uploaded_reports table
-// ============================================================
 try {
     // Check if already exists
     $checkStmt = $pdo->prepare("SELECT id FROM sent_uploaded_reports WHERE original_uploaded_report_id = ? AND to_department_id = ? AND is_deleted = 0");
@@ -224,7 +150,6 @@ try {
             $reportFile,
             $existing['id']
         ]);
-        
         $sentId = $existing['id'];
     } else {
         // Insert new
@@ -259,29 +184,22 @@ try {
             $reportPeriod,
             $reportFile
         ]);
-        
         $sentId = $pdo->lastInsertId();
     }
     
-    // ============================================================
-    // Update original uploaded report - mark as sent
-    // ============================================================
+    // Update original uploaded report
     try {
-        // Check if table has sent columns
-        $checkCols = $pdo->query("SHOW COLUMNS FROM uploaded_reports LIKE 'sent_to_department'");
-        if ($checkCols->rowCount() > 0) {
-            $updateStmt = $pdo->prepare("UPDATE uploaded_reports SET 
-                sent_to_department = ?,
-                sent_from_department = ?,
-                is_viewed_by_department = 0,
-                sent_count = sent_count + 1,
-                is_sent = 1,
-                last_sent_at = NOW()
-                WHERE id = ?");
-            $updateStmt->execute([$toDeptId, $fromDeptId, $reportId]);
-        }
+        $updateStmt = $pdo->prepare("UPDATE uploaded_reports SET 
+            sent_to_department = ?,
+            sent_from_department = ?,
+            is_viewed_by_department = 0,
+            sent_count = sent_count + 1,
+            is_sent = 1,
+            last_sent_at = NOW()
+            WHERE id = ?");
+        $updateStmt->execute([$toDeptId, $fromDeptId, $reportId]);
     } catch(PDOException $e) {
-        // Columns might not exist, ignore
+        // Columns might not exist
     }
     
     echo json_encode([
@@ -292,9 +210,7 @@ try {
         'to_department_name' => $toDeptName,
         'from_department' => $fromDeptId,
         'from_department_name' => $fromDeptName,
-        'report_title' => $reportTitle,
-        'file_copied' => isset($sentFile) && file_exists($sentFile),
-        'file_path' => $sentFilePath
+        'report_title' => $reportTitle
     ]);
     
 } catch(PDOException $e) {

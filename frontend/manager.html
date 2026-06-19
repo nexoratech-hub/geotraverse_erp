@@ -1097,11 +1097,436 @@ function fetchFundRequests() {
         updateRequestBadge();
     });
 }
+// ============================================================
+// EXPORT SINGLE PROJECT TO PDF - FIXED
+// ============================================================
+// ============================================================
+// EXPORT SINGLE PROJECT TO PDF - FIXED
+// ============================================================
+function exportProjectToPDFNewWindow(projectId) {
+    var p = projectsData.find(function(p) { return p.id === projectId; });
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    showToast('📄 Generating PDF...', false);
+    
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to generate PDF', true);
+        return;
+    }
+    
+    var imageUrl = getFullImageUrl(p.image);
+    var isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || imageUrl.startsWith('data:image/'));
+    
+    // Status
+    var statusClass = '';
+    var statusText = '';
+    if (p.status === 'pending') { 
+        statusClass = 'status-pending'; 
+        statusText = 'Pending'; 
+    } else if (p.status === 'in_progress') { 
+        statusClass = 'status-progress'; 
+        statusText = 'In Progress'; 
+    } else if (p.status === 'completed') { 
+        statusClass = 'status-completed'; 
+        statusText = 'Completed'; 
+    } else { 
+        statusClass = 'status-approved'; 
+        statusText = 'Approved'; 
+    }
+    
+    // Get daily work data for this project
+    var projectWork = dailyworkData.filter(function(w) { 
+        return parseInt(w.project_id) === parseInt(p.id); 
+    });
+    
+    // Calculate totals
+    var totalBudget = 0, totalExpenses = 0;
+    for (var i = 0; i < projectWork.length; i++) {
+        var w = projectWork[i];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+    }
+    var totalRemaining = totalBudget - totalExpenses;
+    var remainingColor = totalRemaining >= 0 ? '#059669' : '#dc2626';
+    
+    // Build daily work rows
+    var dailyRows = '';
+    if (projectWork.length > 0) {
+        for (var j = 0; j < projectWork.length; j++) {
+            var w = projectWork[j];
+            var budget = parseFloat(w.budget) || 0;
+            var expenses = parseFloat(w.amount) || 0;
+            var statusBg = w.status === 'completed' ? '#d1fae5' : (w.status === 'partial' ? '#fef3c7' : '#fee2e2');
+            var statusColor = w.status === 'completed' ? '#059669' : (w.status === 'partial' ? '#d97706' : '#dc2626');
+            var statusTextDW = w.status === 'completed' ? 'Completed' : (w.status === 'partial' ? 'Partial' : 'Pending');
+            var description = (w.work_description || '-').replace(/\n/g, '<br>');
+            var recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+            
+            dailyRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; white-space: nowrap;">' + escapeHtml(recordDate) + '</td>' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; word-break: break-word;">' + escapeHtml(description) + '</td>' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: right; font-family: monospace;">' + formatMoney(budget) + '</td>' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: right; font-family: monospace;">' + formatMoney(expenses) + '</td>' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 10px; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusTextDW + '</span></td>' +
+                '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: center;">' + escapeHtml(w.created_by || 'System') + '</td>' +
+            '</tr>';
+        }
+        // Add total row
+        dailyRows += '<tr style="background: #fef3c7; font-weight: bold;">' +
+            '<td colspan="2" style="padding: 10px 8px; border: 1px solid #1e40af; text-align: right;"><strong>TOTAL:</strong></td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: right; font-family: monospace;"><strong>' + formatMoney(totalBudget) + '</strong></td>' +
+            '<td style="padding: 10px 8px; border: 1px solid #1e40af; text-align: right; font-family: monospace;"><strong>' + formatMoney(totalExpenses) + '</strong></td>' +
+            '<td colspan="2" style="border: 1px solid #1e40af;"></td>' +
+        '</tr>';
+    } else {
+        dailyRows = '<tr><td colspan="6" style="padding: 30px; text-align: center; color: #94a3b8;">No daily work records found</td></tr>';
+    }
+    
+    // Image HTML
+    var imageHtml = '';
+    if (imageUrl && isImage) {
+        imageHtml = '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 250px; max-height: 180px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null; this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\'>No Image</div>\'">';
+    } else {
+        imageHtml = '<div style="color:#999;padding:10px;"><i class="fas fa-image" style="font-size:24px;display:block;margin-bottom:5px;"></i>No Image Available</div>';
+    }
+    
+    var deptName = departmentNames && departmentNames[p.department_id] ? departmentNames[p.department_id] : 'Manager';
+    
+    printWindow.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>' + escapeHtml(p.name) + ' - Full Project Report</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #1e40af; }\n' +
+            '.header { background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.image-section { text-align: center; padding: 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.image-section img { max-width: 250px; max-height: 180px; border-radius: 8px; object-fit: cover; }\n' +
+            '.no-image { padding: 30px; color: #9ca3af; text-align: center; }\n' +
+            '.no-image i { font-size: 48px; margin-bottom: 10px; }\n' +
+            '.status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; }\n' +
+            '.status-pending { background: #fef3c7; color: #d97706; }\n' +
+            '.status-progress { background: #dbeafe; color: #2563eb; }\n' +
+            '.status-completed { background: #d1fae5; color: #059669; }\n' +
+            '.status-approved { background: #e9d5ff; color: #7e22ce; }\n' +
+            '.section-title { background: #1e40af; color: white; padding: 12px 25px; font-size: 14px; font-weight: bold; margin-top: 20px; }\n' +
+            '.details-vertical { margin: 20px 25px; }\n' +
+            '.details-row { display: flex; border-bottom: 1px solid #e5e7eb; padding: 10px 0; }\n' +
+            '.details-label { width: 35%; font-weight: 600; color: #1e40af; }\n' +
+            '.details-value { width: 65%; color: #1f2937; }\n' +
+            '.summary-cards { display: flex; gap: 15px; margin: 15px 25px; flex-wrap: wrap; }\n' +
+            '.summary-card { flex: 1; background: #f0fdf4; border-radius: 10px; text-align: center; padding: 12px; border: 1px solid #d1fae5; min-width: 120px; }\n' +
+            '.summary-card h4 { font-size: 10px; color: #166534; margin-bottom: 4px; text-transform: uppercase; }\n' +
+            '.summary-card p { font-size: 14px; font-weight: bold; }\n' +
+            '.table-wrapper { margin: 15px 25px 25px 25px; overflow-x: auto; }\n' +
+            '.daily-table { width: 100%; border-collapse: collapse; font-size: 11px; }\n' +
+            '.daily-table th { background: #1e40af; color: white; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #3b82f6; }\n' +
+            '.daily-table td { padding: 8px; border: 1px solid #cbd5e1; }\n' +
+            '.daily-table th:nth-child(1), .daily-table td:nth-child(1) { width: 18%; white-space: nowrap; }\n' +
+            '.daily-table th:nth-child(2), .daily-table td:nth-child(2) { width: 30%; word-break: break-word; }\n' +
+            '.daily-table th:nth-child(3), .daily-table td:nth-child(3) { width: 12%; text-align: right; }\n' +
+            '.daily-table th:nth-child(4), .daily-table td:nth-child(4) { width: 12%; text-align: right; }\n' +
+            '.daily-table th:nth-child(5), .daily-table td:nth-child(5) { width: 12%; text-align: center; }\n' +
+            '.daily-table th:nth-child(6), .daily-table td:nth-child(6) { width: 16%; text-align: center; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; background: #f9fafb; margin-top: 20px; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #1e40af; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button:hover { background: #1e3a8a; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '.print-btn button.close-btn:hover { background: #4b5563; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { border: 1px solid #1e40af; box-shadow: none; } .header { background: #1e40af !important; -webkit-print-color-adjust: exact; } .daily-table th { background: #1e40af !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header"><h1>' + escapeHtml(p.name) + '</h1><p>Full Project Report - ' + new Date().toLocaleString() + '</p></div>\n' +
+            '<div class="info-bar"><span><strong>Project ID:</strong> #' + p.id + '</span><span><strong>Department:</strong> ' + escapeHtml(deptName) + '</span><span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER || 'Manager User') + '</span><span><strong>Total Daily Records:</strong> ' + projectWork.length + '</span></div>\n' +
+            '<div class="image-section">' + imageHtml + '</div>\n' +
+            '<div class="section-title"><i class="fas fa-info-circle"></i> Project Details</div>\n' +
+            '<div class="details-vertical">\n' +
+                '<div class="details-row"><div class="details-label">Project Name:</div><div class="details-value"><strong>' + escapeHtml(p.name) + '</strong></div></div>\n' +
+                '<div class="details-row"><div class="details-label">Client:</div><div class="details-value">' + escapeHtml(p.client_name || 'N/A') + '</div></div>\n' +
+                '<div class="details-row"><div class="details-label">Amount:</div><div class="details-value"><span style="color:#059669;font-weight:bold;">' + formatMoney(p.amount) + '</span></div></div>\n' +
+                '<div class="details-row"><div class="details-label">Status:</div><div class="details-value"><span class="status-badge ' + statusClass + '">' + statusText + '</span></div></div>\n' +
+                '<div class="details-row"><div class="details-label">Progress:</div><div class="details-value">' + (p.progress || 0) + '%<div style="background:#e2e8f0;border-radius:10px;margin-top:6px;height:6px;max-width:200px;"><div style="width:' + (p.progress||0) + '%;background:#1e40af;border-radius:10px;height:6px;"></div></div></div></div>\n' +
+                '<div class="details-row"><div class="details-label">Location:</div><div class="details-value">' + escapeHtml(p.location || 'N/A') + '</div></div>\n' +
+                '<div class="details-row"><div class="details-label">Start Date:</div><div class="details-value">' + (p.start_date || 'Not specified') + '</div></div>\n' +
+                '<div class="details-row"><div class="details-label">End Date:</div><div class="details-value">' + (p.end_date || 'Not specified') + '</div></div>\n' +
+                '<div class="details-row"><div class="details-label">Description:</div><div class="details-value">' + escapeHtml(p.description || 'No description') + '</div></div>\n' +
+                '<div class="details-row"><div class="details-label">Created By:</div><div class="details-value">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="section-title"><i class="fas fa-calendar-day"></i> Daily Work Records</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card"><h4>💰 Total Budget</h4><p>' + formatMoney(totalBudget) + '</p></div>\n' +
+                '<div class="summary-card"><h4>💸 Total Expenses</h4><p>' + formatMoney(totalExpenses) + '</p></div>\n' +
+                '<div class="summary-card"><h4>📊 Remaining</h4><p style="color:' + remainingColor + ';">' + formatMoney(totalRemaining) + '</p></div>\n' +
+            '</div>\n' +
+            '<div class="table-wrapper"><table class="daily-table"><thead><tr><th>Date/Time</th><th>Description</th><th class="text-right">Budget (TZS)</th><th class="text-right">Expenses (TZS)</th><th class="text-center">Status</th><th class="text-center">Created By</th></tr></thead><tbody>' + dailyRows + '</tbody></table></div>\n' +
+            '<div class="footer">GeoTraverse ERP System - Manager Department | Official Project Report</div>\n' +
+            '<div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button><button class="close-btn" onclick="window.close();">❌ Close</button></div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+    
+    printWindow.document.close();
+    printWindow.focus();
+    showToast('📄 PDF preview opened - Click "Save as PDF" to download', false);
+}
 
+// ============================================================
+// EXPORT ALL PROJECTS TO PDF - FIXED
+// ============================================================
+function exportAllProjectsToPDF() {
+    if (projectsData.length === 0) {
+        showToast('No projects to export', true);
+        return;
+    }
+    
+    showToast('📄 Generating PDF for all projects...', false);
+    
+    // Make sure daily work data is loaded
+    if (dailyworkData.length === 0) {
+        fetchDailyWork().then(function() {
+            generateAllProjectsPDF();
+        }).catch(function() {
+            generateAllProjectsPDF();
+        });
+    } else {
+        generateAllProjectsPDF();
+    }
+}
+
+function generateAllProjectsPDF() {
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to generate PDF', true);
+        return;
+    }
+    
+    var totalAmount = 0;
+    var pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    var totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
+    
+    // Calculate totals
+    for (var i = 0; i < projectsData.length; i++) {
+        var p = projectsData[i];
+        totalAmount += parseFloat(p.amount) || 0;
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+        
+        var projectWork = dailyworkData.filter(function(w) { 
+            return parseInt(w.project_id) === parseInt(p.id); 
+        });
+        totalDailyRecords += projectWork.length;
+        for (var k = 0; k < projectWork.length; k++) {
+            var w = projectWork[k];
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            var expensesValue = parseFloat(w.expenses) || 0;
+            var amountSpent = parseFloat(w.amount) || 0;
+            totalExpensesAll += (expensesValue + amountSpent);
+        }
+    }
+    var totalRemainingAll = totalBudgetAll - totalExpensesAll;
+    
+    // Build rows for each project
+    var rows = '';
+    for (var m = 0; m < projectsData.length; m++) {
+        var p = projectsData[m];
+        var imageUrl = getFullImageUrl(p.image);
+        var isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) || imageUrl.indexOf('data:image/') === 0);
+        
+        // ============================================================
+        // FIX: Image HTML with proper error handling
+        // ============================================================
+        var imageHtml = '';
+        if (imageUrl && isImage) {
+            imageHtml = '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.onerror=null; this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\'>No Image</div>\'">';
+        } else {
+            imageHtml = '<div style="color:#999;padding:10px;"><i class="fas fa-image" style="font-size:24px;display:block;margin-bottom:5px;"></i>No Image Available</div>';
+        }
+        
+        var statusBadgeClass = '';
+        var statusText = '';
+        var statusBg = '';
+        var statusColor = '';
+        if (p.status === 'pending') {
+            statusBadgeClass = 'status-pending';
+            statusText = 'Pending';
+            statusBg = '#fef3c7';
+            statusColor = '#d97706';
+        } else if (p.status === 'in_progress') {
+            statusBadgeClass = 'status-progress';
+            statusText = 'In Progress';
+            statusBg = '#dbeafe';
+            statusColor = '#2563eb';
+        } else if (p.status === 'completed') {
+            statusBadgeClass = 'status-completed';
+            statusText = 'Completed';
+            statusBg = '#d1fae5';
+            statusColor = '#059669';
+        } else {
+            statusBadgeClass = 'status-approved';
+            statusText = 'Approved';
+            statusBg = '#e9d5ff';
+            statusColor = '#7e22ce';
+        }
+        
+        var projectWork = dailyworkData.filter(function(w) { 
+            return parseInt(w.project_id) === parseInt(p.id); 
+        });
+        
+        var projBudget = 0, projExpenses = 0;
+        for (var n = 0; n < projectWork.length; n++) {
+            var w = projectWork[n];
+            projBudget += parseFloat(w.budget) || 0;
+            var expensesValue = parseFloat(w.expenses) || 0;
+            var amountSpent = parseFloat(w.amount) || 0;
+            projExpenses += (expensesValue + amountSpent);
+        }
+        var projRemaining = projBudget - projExpenses;
+        var projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+        
+        // Daily work rows for this project
+        var dailyRows = '';
+        if (projectWork.length > 0) {
+            for (var o = 0; o < projectWork.length; o++) {
+                var w = projectWork[o];
+                var budget = parseFloat(w.budget) || 0;
+                var expensesValue = parseFloat(w.expenses) || 0;
+                var amountSpent = parseFloat(w.amount) || 0;
+                var totalExpenseForRecord = expensesValue + amountSpent;
+                
+                var statusBgDW = w.status === 'completed' ? '#d1fae5' : (w.status === 'partial' ? '#fef3c7' : '#fee2e2');
+                var statusColorDW = w.status === 'completed' ? '#059669' : (w.status === 'partial' ? '#d97706' : '#dc2626');
+                var statusTextDW = w.status === 'completed' ? 'Completed' : (w.status === 'partial' ? 'Partial' : 'Pending');
+                var description = (w.work_description || '-').replace(/\n/g, '<br>');
+                var recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                
+                dailyRows += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; white-space: nowrap;">' + escapeHtml(recordDate) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word;">' + escapeHtml(description) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">' + formatMoney(budget) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">' + formatMoney(totalExpenseForRecord) + '</td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; background: ' + statusBgDW + '; color: ' + statusColorDW + ';">' + statusTextDW + '</span></td>' +
+                    '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;">' + escapeHtml(w.created_by || 'System') + '</td>' +
+                '</tr>';
+            }
+            // Add total row
+            dailyRows += '<tr style="background: #fef3c7; font-weight: bold;">' +
+                '<td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>' +
+                '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;"><strong>' + formatMoney(projBudget) + '</strong></td>' +
+                '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;"><strong>' + formatMoney(projExpenses) + '</strong></td>' +
+                '<td colspan="2" style="border: 1px solid #cbd5e1;"></td>' +
+            '</tr>';
+        } else {
+            dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records</td></tr>';
+        }
+        
+        var sourceDeptName = 'System';
+        if (p.sent_from_dept) {
+            sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
+        } else if (p.created_by) {
+            sourceDeptName = p.created_by;
+        }
+        var isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+        
+        rows += '<div style="margin-bottom: 40px; border: 2px solid #1e40af; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">' +
+            '<div style="background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 15px 20px;">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">' +
+            '<div><h3 style="margin: 0; font-size: 18px; font-weight: 700;">' + escapeHtml(p.name) + '</h3>' +
+            '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #' + p.id + ' | Client: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + '</p></div>' +
+            '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>' +
+            '</div>' +
+            '<div style="font-size: 10px; margin-top: 8px; opacity: 0.7;"><i class="fas ' + (isSent ? 'fa-paper-plane' : 'fa-user') + ' mr-1"></i> Source: ' + escapeHtml(sourceDeptName) + (isSent ? ' <span style="color: #6ee7b7;"><i class="fas fa-check-circle"></i> Sent</span>' : '') + '</div>' +
+            '</div>' +
+            '<div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">' +
+            imageHtml +
+            '</div>' +
+            '<div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">' +
+            '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #1e40af;">📌 Amount:</td><td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">' + formatMoney(p.amount) + '</span></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">📈 Progress:</td><td style="padding: 8px 12px;">' + (p.progress || 0) + '%<div style="background:#e2e8f0; border-radius:10px; margin-top:6px; height:6px; max-width:200px;"><div style="width:' + (p.progress||0) + '%; background:#1e40af; border-radius:10px; height:6px;"></div></div></td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">📍 Location:</td><td style="padding: 8px 12px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">📅 Start Date:</td><td style="padding: 8px 12px;">' + (p.start_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">📅 End Date:</td><td style="padding: 8px 12px;">' + (p.end_date || 'Not specified') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">📝 Description:</td><td style="padding: 8px 12px;">' + escapeHtml(p.description || 'No description') + '</td></tr>' +
+            '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">👤 Created By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>' +
+            (p.updated_by ? '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 8px 12px; font-weight: 600; color: #1e40af;">✏️ Updated By:</td><td style="padding: 8px 12px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>' : '') +
+            '</table></div>' +
+            '<div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #1e40af;">' +
+            '<h4 style="margin: 0 0 12px 0; font-size: 14px; color: #1e40af;"><i class="fas fa-calendar-day"></i> Daily Work Records (' + projectWork.length + ')</h4>' +
+            (projectWork.length > 0 ? '<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;"><div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;"><div style="font-size: 10px; color: #166534;">💰 Total Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669;">' + formatMoney(projBudget) + '</div></div><div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;"><div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c;">' + formatMoney(projExpenses) + '</div></div><div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;"><div style="font-size: 10px; color: #1e40af;">📊 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ' + projRemainingColor + ';">' + formatMoney(projRemaining) + '</div></div></div>' : '') +
+            '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse; font-size: 11px;"><thead><tr style="background: #1e40af; color: white;"><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 16%;">Date/Time</th><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 30%;">Description</th><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 12%; text-align: right;">Budget (TZS)</th><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 12%; text-align: right;">Expenses (TZS)</th><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 12%; text-align: center;">Status</th><th style="padding: 10px 8px; border: 1px solid #3b82f6; width: 18%; text-align: center;">Created By</th></tr></thead><tbody>' + dailyRows + '</tbody></table></div></div></div>';
+    }
+    
+    printWindow.document.write('<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+        '<meta charset="UTF-8">\n' +
+        '<title>All Projects Report - Manager Department</title>\n' +
+        '<style>\n' +
+            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
+            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #1e40af; }\n' +
+            '.header { background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 25px; text-align: center; }\n' +
+            '.header h1 { font-size: 24px; margin: 0; }\n' +
+            '.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n' +
+            '.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n' +
+            '.summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n' +
+            '.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }\n' +
+            '.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; }\n' +
+            '.summary-card.total .value { color: #1e40af; }\n' +
+            '.summary-card.amount .value { color: #059669; }\n' +
+            '.summary-card.budget .value { color: #3b82f6; }\n' +
+            '.summary-card.expenses .value { color: #dc2626; }\n' +
+            '.summary-card.records .value { color: #8b5cf6; }\n' +
+            '.summary-card.remaining .value { color: #f59e0b; }\n' +
+            '.projects-section { padding: 20px 25px; }\n' +
+            '.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n' +
+            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
+            '.print-btn button { background: #1e40af; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
+            '.print-btn button:hover { background: #1e3a8a; }\n' +
+            '.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n' +
+            '.print-btn button.close-btn:hover { background: #4b5563; }\n' +
+            '@media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #1e40af !important; -webkit-print-color-adjust: exact; } }\n' +
+        '</style>\n' +
+    '</head>\n' +
+    '<body>\n' +
+        '<div class="container">\n' +
+            '<div class="header"><h1>📊 All Projects Report</h1><p>Manager Department - Complete Project Overview with Daily Work Records</p></div>\n' +
+            '<div class="info-bar"><span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span><span><strong>Total Projects:</strong> ' + projectsData.length + '</span><span><strong>Total Daily Records:</strong> ' + totalDailyRecords + '</span><span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span><span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span></div>\n' +
+            '<div class="summary-cards"><div class="summary-card total"><div class="label">Total Projects</div><div class="value">' + projectsData.length + '</div></div><div class="summary-card amount"><div class="label">Total Amount</div><div class="value">' + formatMoney(totalAmount) + '</div></div><div class="summary-card budget"><div class="label">Total Budget</div><div class="value">' + formatMoney(totalBudgetAll) + '</div></div><div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">' + formatMoney(totalExpensesAll) + '</div></div><div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value" style="color: ' + (totalRemainingAll >= 0 ? '#059669' : '#dc2626') + ';">' + formatMoney(totalRemainingAll) + '</div></div><div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">' + totalDailyRecords + '</div></div></div>\n' +
+            '<div class="projects-section">' + rows + '</div>\n' +
+            '<div class="footer">GeoTraverse ERP System - Manager Department | Official All Projects Report</div>\n' +
+            '<div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button><button class="close-btn" onclick="window.close();">❌ Close</button></div>\n' +
+        '</div>\n' +
+    '</body>\n' +
+    '</html>');
+    
+    printWindow.document.close();
+    printWindow.focus();
+    showToast('📄 All Projects PDF preview opened - Click "Save as PDF" to download', false);
+}
+
+
+// ============================================================
+// FETCH REPORTS - FIXED
+// ============================================================
 function fetchReports() {
     return apiCall('get_reports.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
-            // Process all reports (original + sent)
             reportsData = res.data.filter(function(r) {
                 return (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID || r.to_department_id === DEPARTMENT_ID) &&
                     (!r.deleted_by_department || r.deleted_by_department != 1) && 
@@ -1109,25 +1534,38 @@ function fetchReports() {
             });
             
             // ============================================================
-            // FIX: Ensure unviewed flags are set and sort
+            // FIX: Set _is_unviewed flag for each report
             // ============================================================
             reportsData.forEach(function(r) {
                 var isUnviewed = false;
                 
-                // Check from sent_reports
-                if (r.is_unviewed === true || r.is_unviewed === 1) {
-                    isUnviewed = true;
-                }
-                
-                // Check from original reports sent to this department
+                // Check regular report fields
                 if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
                     r.sent_to_department === DEPARTMENT_ID && 
-                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null)) {
+                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
+                    viewedReportIds.indexOf(r.id) === -1) {
                     isUnviewed = true;
                 }
                 
-                // Check from viewedReportIds (localStorage)
-                if (viewedReportIds.indexOf(r.id) === -1 && r.is_sent_report) {
+                // Check sent report fields (from sent_reports table)
+                if (r.from_department_id && r.from_department_id != DEPARTMENT_ID && 
+                    r.to_department_id === DEPARTMENT_ID && 
+                    (r.is_viewed == 0 || r.is_viewed === null) &&
+                    viewedReportIds.indexOf(r.id) === -1) {
+                    isUnviewed = true;
+                }
+                
+                // Check if it's a sent report
+                if (r.is_sent_report && r.from_department_id != DEPARTMENT_ID && 
+                    r.to_department_id === DEPARTMENT_ID && 
+                    (r.is_viewed == 0 || r.is_viewed === null) &&
+                    viewedReportIds.indexOf(r.id) === -1) {
+                    isUnviewed = true;
+                }
+                
+                // Check source_type
+                if (r.source_type === 'sent' && (r.is_viewed == 0 || r.is_viewed === null) &&
+                    viewedReportIds.indexOf(r.id) === -1) {
                     isUnviewed = true;
                 }
                 
@@ -1137,20 +1575,15 @@ function fetchReports() {
             });
             
             // ============================================================
-            // FIX: Sort: Unviewed first
+            // Sort: Unviewed first
             // ============================================================
             reportsData.sort(function(a, b) {
                 if (a._is_unviewed && !b._is_unviewed) return -1;
                 if (!a._is_unviewed && b._is_unviewed) return 1;
-                
-                var aDate = new Date(a.created_at || a.sent_at || 0);
-                var bDate = new Date(b.created_at || b.sent_at || 0);
-                return bDate - aDate;
+                return b.id - a.id;
             });
             
-            // ============================================================
             // Count unviewed reports
-            // ============================================================
             unviewedReportsCount = reportsData.filter(function(r) { 
                 return r._is_unviewed === true; 
             }).length;
@@ -1402,15 +1835,206 @@ function markProjectViewed(id) {
     });
 }
 
+// ==================== MARK REPORT VIEWED - FIXED ====================
 function markReportViewed(id) { 
-    if (viewedReportIds.indexOf(id) === -1) { 
-        viewedReportIds.push(id); 
-        localStorage.setItem('manager_viewedReportIds', JSON.stringify(viewedReportIds)); 
-        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-        updateReportBadge(); 
-    } 
+    // Check if already viewed
+    if (viewedReportIds.indexOf(id) !== -1) {
+        return;
+    }
+    
+    // Add to viewed list
+    viewedReportIds.push(id); 
+    localStorage.setItem('manager_viewedReportIds', JSON.stringify(viewedReportIds));
+    
+    // Find the report
+    var report = reportsData.find(function(r) { return r.id === id; });
+    if (!report) {
+        return;
+    }
+    
+    // ============================================================
+    // FIX: Check both regular and sent report flags
+    // ============================================================
+    var isUnviewed = false;
+    
+    // Check regular report fields
+    if (report.sent_from_department && report.sent_from_department != DEPARTMENT_ID && 
+        report.sent_to_department === DEPARTMENT_ID && 
+        (report.is_viewed_by_department == 0 || report.is_viewed_by_department === null)) {
+        isUnviewed = true;
+    }
+    
+    // Check sent report fields (from sent_reports table)
+    if (report.from_department_id && report.from_department_id != DEPARTMENT_ID && 
+        report.to_department_id === DEPARTMENT_ID && 
+        (report.is_viewed == 0 || report.is_viewed === null)) {
+        isUnviewed = true;
+    }
+    
+    // Check if it's a sent report
+    if (report.is_sent_report && report.from_department_id != DEPARTMENT_ID && 
+        report.to_department_id === DEPARTMENT_ID && 
+        (report.is_viewed == 0 || report.is_viewed === null)) {
+        isUnviewed = true;
+    }
+    
+    // Check if source_type is 'sent'
+    if (report.source_type === 'sent' && (report.is_viewed == 0 || report.is_viewed === null)) {
+        isUnviewed = true;
+    }
+    
+    // Only decrement if it was unviewed
+    if (isUnviewed) {
+        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+        report._is_unviewed = false;
+        report.is_unviewed = false;
+        report.is_new = false;
+        report.is_viewed = 1;
+        report.is_viewed_by_department = 1;
+    }
+    
+    updateReportBadge();
+    
+    // ============================================================
+    // Call API to mark as viewed in database
+    // ============================================================
+    apiCall('mark_report_viewed.php', 'POST', { 
+        report_id: id, 
+        department_id: DEPARTMENT_ID,
+        is_admin: 0
+    }).catch(function(e) {
+        console.log('Mark report viewed error:', e);
+    });
 }
 
+// ============================================================
+// VIEW REPORT DETAILS - FIXED
+// ============================================================
+function viewReportDetails(id) {
+    var r = reportsData.find(function(r) { return r.id === id; });
+    if (!r) return;
+    
+    // ============================================================
+    // FIX: Check if report is unviewed (sent report)
+    // ============================================================
+    var isUnviewed = false;
+    
+    // Check regular report fields
+    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+        r.sent_to_department === DEPARTMENT_ID && 
+        (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+        viewedReportIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check sent report fields (from sent_reports table)
+    if (r.from_department_id && r.from_department_id != DEPARTMENT_ID && 
+        r.to_department_id === DEPARTMENT_ID && 
+        (r.is_viewed == 0 || r.is_viewed === null) && 
+        viewedReportIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check if it's a sent report
+    if (r.is_sent_report && r.from_department_id != DEPARTMENT_ID && 
+        r.to_department_id === DEPARTMENT_ID && 
+        (r.is_viewed == 0 || r.is_viewed === null) && 
+        viewedReportIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check source_type
+    if (r.source_type === 'sent' && (r.is_viewed == 0 || r.is_viewed === null) && 
+        viewedReportIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // Check _is_unviewed flag
+    if (r._is_unviewed === true && viewedReportIds.indexOf(id) === -1) {
+        isUnviewed = true;
+    }
+    
+    // ============================================================
+    // Mark as viewed if unviewed
+    // ============================================================
+    if (isUnviewed) {
+        markReportViewed(id);
+        
+        // Update the report in local data
+        r._is_unviewed = false;
+        r.is_unviewed = false;
+        r.is_new = false;
+        r.is_viewed = 1;
+        r.is_viewed_by_department = 1;
+        
+        // Update the badge count
+        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+        updateReportBadge();
+        
+        // ============================================================
+        // FIX: Remove NEW badge from the card
+        // ============================================================
+        var card = document.getElementById('report-card-' + id);
+        if (card) {
+            var badge = card.querySelector('.new-badge');
+            if (badge) {
+                badge.remove();
+                console.log('✅ NEW badge removed from report card');
+            }
+            card.classList.remove('search-highlight');
+        }
+        
+        // Also check if it's in uploaded reports grid
+        var uploadedCard = document.getElementById('uploaded-report-card-' + id);
+        if (uploadedCard) {
+            var badge = uploadedCard.querySelector('.new-badge');
+            if (badge) {
+                badge.remove();
+                console.log('✅ NEW badge removed from uploaded report card');
+            }
+            uploadedCard.classList.remove('search-highlight');
+        }
+        
+        showToast('✅ Report marked as viewed', false);
+    }
+    
+    // ============================================================
+    // Show report details
+    // ============================================================
+    var attachmentHtml = '';
+    if (r.file_path) {
+        var fileUrl = getFullReportPath(r.file_path);
+        attachmentHtml = '<div class="mb-3"><button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-sm py-1 px-3 rounded"><i class="fas fa-download mr-1"></i> Download File</button></div>';
+    }
+    
+    var actionHtml = '';
+    if (r.created_by) actionHtml += '<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ' + escapeHtml(r.created_by) + ' | ' + formatDateTime(r.created_at) + '</div>';
+    if (r.updated_by && r.updated_by !== r.created_by) actionHtml += '<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ' + escapeHtml(r.updated_by) + ' | ' + formatDateTime(r.updated_at) + '</div>';
+    if (!actionHtml) actionHtml = '<div>No history available</div>';
+    
+    document.getElementById('viewReportContent').innerHTML =
+        '<div class="bg-purple-100 dark:bg-purple-900 p-3 rounded mb-3"><strong>' + escapeHtml(r.title) + '</strong><span class="float-right">' + r.period + '</span>' +
+        (r.is_sent_report ? ' <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full ml-2"><i class="fas fa-paper-plane mr-1"></i>Sent</span>' : '') +
+        '</div>' +
+        '<div class="generated-report bg-gray-800 text-gray-200 p-4 rounded-lg">' + escapeHtml(r.content || 'No content available') + '</div>' +
+        attachmentHtml;
+    document.getElementById('reportActionHistory').innerHTML = actionHtml;
+    
+    var deptOptions = '';
+    allDepartmentsForSend.forEach(function(d) {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += '<a onclick="sendReportToDept(' + r.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+        }
+    });
+    
+    document.getElementById('viewReportButtons').innerHTML =
+        '<button onclick="exportSingleReportExcel(' + r.id + ')" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>' +
+        '<button onclick="exportSingleReportPDF(' + r.id + ')" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (New Window)</button>' +
+        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    
+    openModal('viewReportModal');
+    loadReports();
+}
 function markRequestViewed(id) { 
     if (viewedRequestIds.indexOf(id) === -1) { 
         viewedRequestIds.push(id); 
