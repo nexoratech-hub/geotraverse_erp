@@ -6,52 +6,43 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
-    exit;
+    exit();
 }
 
 $host = 'localhost';
 $user = 'root';
 $pass = '';
-$db = 'geotraverse_erp';
+$dbname = 'geotraverse_erp';
 
-$conn = new mysqli($host, $user, $pass, $db);
+$conn = new mysqli($host, $user, $pass, $dbname);
+
 if ($conn->connect_error) {
     echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    exit;
+    exit();
 }
 
-$input = json_decode(file_get_contents('php://input'), true);
-$request_id = isset($input['request_id']) ? intval($input['request_id']) : 0;
-$deleted_by = isset($input['deleted_by']) ? $input['deleted_by'] : 'Finance Manager';
+$data = json_decode(file_get_contents('php://input'), true);
 
-if (!$request_id) {
+if (!$data || !isset($data['request_id'])) {
     echo json_encode(['success' => false, 'message' => 'Request ID required']);
-    exit;
+    exit();
 }
 
-// Check if request exists
-$stmt = $conn->prepare("SELECT * FROM fund_requests WHERE id = ?");
-$stmt->bind_param("i", $request_id);
-$stmt->execute();
-$result = $stmt->get_result();
-$request = $result->fetch_assoc();
-$stmt->close();
+$request_id = intval($data['request_id']);
+$deleted_by = isset($data['deleted_by']) ? trim($data['deleted_by']) : 'System';
 
-if (!$request) {
-    echo json_encode(['success' => false, 'message' => 'Request not found']);
-    exit;
-}
-
-// Soft delete
 $stmt = $conn->prepare("UPDATE fund_requests SET is_deleted = 1, deleted_at = NOW() WHERE id = ?");
 $stmt->bind_param("i", $request_id);
 
 if ($stmt->execute()) {
-    echo json_encode([
-        'success' => true,
-        'message' => 'Request deleted successfully',
-        'data' => ['id' => $request_id]
-    ]);
+    // Add to recycle bin
+    $title = "Fund Request ID: " . $request_id;
+    $recycleStmt = $conn->prepare("INSERT INTO recycle_bin (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, deleted_at) VALUES (?, 'fund_request', ?, 2, 0, NOW())");
+    $recycleStmt->bind_param("is", $request_id, $title);
+    $recycleStmt->execute();
+    $recycleStmt->close();
+    
+    echo json_encode(['success' => true, 'message' => 'Fund request deleted successfully']);
 } else {
     echo json_encode(['success' => false, 'message' => 'Failed to delete: ' . $stmt->error]);
 }
