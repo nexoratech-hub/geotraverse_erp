@@ -1,13 +1,11 @@
 <?php
-// download_document.php - FIXED: Handle sent documents
+// backend/api/download_document.php
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-while (ob_get_level()) {
-    ob_end_clean();
-}
-
-error_reporting(0);
-ini_set('display_errors', 0);
-
+// Database connection
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -17,188 +15,298 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch(PDOException $e) {
-    die('Database error');
+    die(json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]));
 }
 
-$docId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+// Get parameters
+$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 $type = isset($_GET['type']) ? $_GET['type'] : 'project';
 
-if (!$docId) {
-    die('Document ID required');
+if ($id <= 0) {
+    die(json_encode(['success' => false, 'message' => 'Invalid document ID']));
 }
 
-try {
-    $doc = null;
-    $fileName = '';
-    $filePath = '';
-    
-    // ============================================================
-    // Get document from appropriate table
-    // ============================================================
-    if ($type === 'project') {
-        $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
-        $stmt->execute([$docId]);
-        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
-    } else {
-        // For sent documents, get from sent_documents
-        $stmt = $pdo->prepare("SELECT * FROM sent_documents WHERE id = ?");
-        $stmt->execute([$docId]);
-        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
+// ============================================
+// FUNCTION: Serve file to browser
+// ============================================
+function serveFile($filePath, $fileName) {
+    if ($filePath && file_exists($filePath)) {
+        // Get mime type
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $filePath);
+        finfo_close($finfo);
         
-        // If found, try to get file info from document_data
-        if ($doc && $doc['document_data']) {
-            $data = json_decode($doc['document_data'], true);
-            if ($data) {
-                if (isset($data['file_path']) && empty($doc['document_file'])) {
-                    $doc['document_file'] = $data['file_path'];
-                }
-                if (isset($data['file_name']) && empty($doc['document_file'])) {
-                    $doc['document_file'] = $data['file_name'];
-                }
-            }
+        if (!$mimeType) {
+            $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            $mimeTypes = [
+                'pdf' => 'application/pdf',
+                'doc' => 'application/msword',
+                'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls' => 'application/vnd.ms-excel',
+                'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'jpg' => 'image/jpeg',
+                'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                'gif' => 'image/gif'
+            ];
+            $mimeType = $mimeTypes[$ext] ?? 'application/octet-stream';
         }
-    }
-
-    if (!$doc) {
-        die('Document not found');
-    }
-
-    // ============================================================
-    // Get file name and path
-    // ============================================================
-    if ($type === 'project') {
-        $fileName = $doc['file_name'] ?? 'document';
-        $filePath = $doc['file_path'] ?? $fileName;
-    } else {
-        // For sent documents, use document_file or from data
-        $fileName = $doc['document_file'] ?? $doc['file_name'] ?? 'document';
-        $filePath = $doc['document_file'] ?? $doc['file_path'] ?? $fileName;
         
-        // If file_path contains path, extract filename
-        if (strpos($filePath, '/') !== false || strpos($filePath, '\\') !== false) {
-            $fileName = basename($filePath);
-        }
+        header('Content-Description: File Transfer');
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: attachment; filename="' . basename($fileName) . '"');
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
     }
-    
-    // Clean
-    $fileName = basename($fileName);
-    $filePath = basename($filePath);
-    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-    
-    // ============================================================
-    // Try to find the file
-    // ============================================================
-    $possiblePaths = [
-        // For sent documents
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/sent_documents/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/sent_documents/' . $filePath,
-        // Original paths
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/project_documents/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/projects/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/project_documents/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/projects/' . $filePath,
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/uploads/' . $filePath,
-        // With timestamp prefix
-        $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/sent_documents/*_' . $docId . '_' . $filePath,
+    return false;
+}
+
+// ============================================
+// FUNCTION: Find file in multiple paths
+// ============================================
+function findFile($fileName, $filePath = '') {
+    // Base paths to search
+    $basePaths = [
+        'C:/xampp/htdocs/geotraverse/frontend/assets/uploads/projects/project_documents/',
+        'C:/xampp/htdocs/geotraverse/frontend/assets/uploads/projects/',
+        'C:/xampp/htdocs/geotraverse/frontend/assets/uploads/reports/',
+        'C:/xampp/htdocs/geotraverse/frontend/assets/uploads/',
+        '../frontend/assets/uploads/projects/project_documents/',
+        '../frontend/assets/uploads/projects/',
+        '../frontend/assets/uploads/reports/',
+        '../../frontend/assets/uploads/projects/project_documents/',
+        '../../frontend/assets/uploads/projects/',
+        '../../frontend/assets/uploads/reports/',
+        __DIR__ . '/../../frontend/assets/uploads/projects/project_documents/',
+        __DIR__ . '/../../frontend/assets/uploads/projects/',
+        __DIR__ . '/../../frontend/assets/uploads/reports/',
     ];
     
-    $fullPath = null;
-    foreach ($possiblePaths as $path) {
-        if (strpos($path, '*') !== false) {
-            // Handle wildcard
-            $dir = dirname($path);
-            $pattern = basename($path);
-            if (file_exists($dir)) {
-                $files = glob($dir . '/' . $pattern);
-                if (!empty($files) && file_exists($files[0])) {
-                    $fullPath = $files[0];
-                    break;
-                }
+    // Clean the file name
+    $cleanFileName = basename($fileName);
+    $cleanFilePath = basename($filePath);
+    
+    // If filePath is provided and contains a path, extract the filename
+    if ($filePath && strpos($filePath, '/') !== false) {
+        $cleanFilePath = basename($filePath);
+    }
+    
+    // Build list of filenames to try
+    $fileNamesToTry = [];
+    if ($cleanFilePath) {
+        $fileNamesToTry[] = $cleanFilePath;
+    }
+    if ($cleanFileName && $cleanFileName !== $cleanFilePath) {
+        $fileNamesToTry[] = $cleanFileName;
+    }
+    // Also try the original full path if provided
+    if ($filePath && strpos($filePath, '/') !== false) {
+        $fileNamesToTry[] = $filePath;
+    }
+    
+    // Search through all base paths
+    foreach ($basePaths as $basePath) {
+        foreach ($fileNamesToTry as $name) {
+            $fullPath = $basePath . $name;
+            if (file_exists($fullPath)) {
+                return $fullPath;
             }
-        } else if (file_exists($path)) {
-            $fullPath = $path;
-            break;
         }
     }
     
-    // If still not found, search in uploads directory
-    if (!$fullPath) {
-        $searchDirs = [
-            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/frontend/assets/uploads/',
-            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/assets/uploads/',
-            $_SERVER['DOCUMENT_ROOT'] . '/geotraverse/backend/uploads/',
-        ];
-        foreach ($searchDirs as $dir) {
-            if (file_exists($dir)) {
-                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
-                foreach ($iterator as $file) {
-                    if ($file->isFile() && $file->getFilename() === $filePath) {
-                        $fullPath = $file->getRealPath();
-                        break 2;
+    // Also try looking in subdirectories
+    foreach ($basePaths as $basePath) {
+        if (is_dir($basePath)) {
+            $files = scandir($basePath);
+            if ($files) {
+                foreach ($files as $file) {
+                    if ($file === '.' || $file === '..') continue;
+                    // Check if filename matches (case insensitive)
+                    if (strtolower($file) === strtolower($cleanFileName) || 
+                        strtolower($file) === strtolower($cleanFilePath)) {
+                        return $basePath . $file;
+                    }
+                    // Check if file contains the name
+                    if (stripos($file, $cleanFileName) !== false || 
+                        stripos($file, $cleanFilePath) !== false) {
+                        return $basePath . $file;
                     }
                 }
             }
         }
     }
     
-    if (!$fullPath || !file_exists($fullPath)) {
-        die('File not found: ' . $filePath);
-    }
+    return null;
+}
 
-    $fileSize = filesize($fullPath);
+// ============================================
+// MAIN LOGIC: Get document and find file
+// ============================================
+try {
+    $fileName = '';
+    $filePath = '';
+    $documentTitle = '';
     
-    // ============================================================
-    // Set MIME type
-    // ============================================================
-    $mimeTypes = [
-        'pdf'  => 'application/pdf',
-        'doc'  => 'application/msword',
-        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'xls'  => 'application/vnd.ms-excel',
-        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'ppt'  => 'application/vnd.ms-powerpoint',
-        'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'txt'  => 'text/plain',
-        'csv'  => 'text/csv',
-        'jpg'  => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'png'  => 'image/png',
-        'gif'  => 'image/gif',
-        'webp' => 'image/webp',
-        'svg'  => 'image/svg+xml',
-        'zip'  => 'application/zip',
-        'rar'  => 'application/x-rar-compressed',
-        '7z'   => 'application/x-7z-compressed',
-        'mp4'  => 'video/mp4',
-        'mp3'  => 'audio/mpeg',
-        'wav'  => 'audio/wav'
-    ];
+    // ========== STEP 1: Check sent_documents table ==========
+    $stmt = $pdo->prepare("SELECT * FROM sent_documents WHERE id = ? AND is_deleted = 0");
+    $stmt->execute([$id]);
+    $sentDoc = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    $mimeType = $mimeTypes[$fileExtension] ?? 'application/octet-stream';
-    
-    // ============================================================
-    // Send headers
-    // ============================================================
-    while (ob_get_level()) {
-        ob_end_clean();
+    if ($sentDoc) {
+        // Try to get file info from document_data JSON
+        $docData = json_decode($sentDoc['document_data'], true);
+        if ($docData) {
+            $fileName = isset($docData['file_name']) ? $docData['file_name'] : '';
+            $filePath = isset($docData['file_path']) ? $docData['file_path'] : '';
+            $documentTitle = isset($docData['title']) ? $docData['title'] : $sentDoc['document_title'];
+        }
+        
+        // If not found in JSON, use sent_document fields
+        if (!$fileName) {
+            $fileName = $sentDoc['document_file'];
+            $filePath = $sentDoc['document_file'];
+        }
+        if (!$documentTitle) {
+            $documentTitle = $sentDoc['document_title'];
+        }
+        
+        // Try to find the file
+        $foundPath = findFile($fileName, $filePath);
+        if ($foundPath && serveFile($foundPath, $fileName)) {
+            exit;
+        }
+        
+        // If not found, try to find original document
+        if ($sentDoc['original_document_id']) {
+            $origId = $sentDoc['original_document_id'];
+            $stmt2 = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
+            $stmt2->execute([$origId]);
+            $origDoc = $stmt2->fetch(PDO::FETCH_ASSOC);
+            if ($origDoc) {
+                $origFileName = $origDoc['file_name'];
+                $origFilePath = $origDoc['file_path'];
+                $foundPath = findFile($origFileName, $origFilePath);
+                if ($foundPath && serveFile($foundPath, $origFileName)) {
+                    exit;
+                }
+            }
+        }
     }
     
-    header('Content-Type: ' . $mimeType);
-    header('Content-Disposition: attachment; filename="' . $fileName . '"');
-    header('Content-Length: ' . $fileSize);
-    header('Content-Transfer-Encoding: binary');
-    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-    header('Pragma: public');
-    header('Expires: 0');
-    header('Content-Encoding: none');
+    // ========== STEP 2: Check project_documents table ==========
+    $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ? AND is_deleted != 1");
+    $stmt->execute([$id]);
+    $doc = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    readfile($fullPath);
-    exit;
+    if ($doc) {
+        $fileName = isset($doc['file_name']) ? $doc['file_name'] : 'document';
+        $filePath = isset($doc['file_path']) ? $doc['file_path'] : $fileName;
+        $foundPath = findFile($fileName, $filePath);
+        if ($foundPath && serveFile($foundPath, $fileName)) {
+            exit;
+        }
+    }
+    
+    // ========== STEP 3: Check uploaded_reports table ==========
+    $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ? AND is_deleted != 1");
+    $stmt->execute([$id]);
+    $doc = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($doc) {
+        $fileName = isset($doc['file_name']) ? $doc['file_name'] : 'report';
+        $filePath = isset($doc['file_path']) ? $doc['file_path'] : $fileName;
+        $foundPath = findFile($fileName, $filePath);
+        if ($foundPath && serveFile($foundPath, $fileName)) {
+            exit;
+        }
+    }
+    
+    // ========== STEP 4: Check sent_uploaded_reports table ==========
+    $stmt = $pdo->prepare("SELECT * FROM sent_uploaded_reports WHERE id = ? AND is_deleted = 0");
+    $stmt->execute([$id]);
+    $sentDoc = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($sentDoc) {
+        $docData = json_decode($sentDoc['uploaded_report_data'], true);
+        if ($docData) {
+            $fileName = isset($docData['file_name']) ? $docData['file_name'] : '';
+            $filePath = isset($docData['file_path']) ? $docData['file_path'] : '';
+        }
+        if (!$fileName) {
+            $fileName = $sentDoc['uploaded_report_file'];
+            $filePath = $sentDoc['uploaded_report_file'];
+        }
+        $foundPath = findFile($fileName, $filePath);
+        if ($foundPath && serveFile($foundPath, $fileName)) {
+            exit;
+        }
+        
+        // Try original uploaded report
+        if ($sentDoc['original_uploaded_report_id']) {
+            $origId = $sentDoc['original_uploaded_report_id'];
+            $stmt2 = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ?");
+            $stmt2->execute([$origId]);
+            $origDoc = $stmt2->fetch(PDO::FETCH_ASSOC);
+            if ($origDoc) {
+                $origFileName = $origDoc['file_name'];
+                $origFilePath = $origDoc['file_path'];
+                $foundPath = findFile($origFileName, $origFilePath);
+                if ($foundPath && serveFile($foundPath, $origFileName)) {
+                    exit;
+                }
+            }
+        }
+    }
+    
+    // ========== STEP 5: Try by title search ==========
+    if ($documentTitle) {
+        // Search project_documents by title
+        $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE title = ? AND is_deleted != 1 ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$documentTitle]);
+        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($doc) {
+            $fileName = isset($doc['file_name']) ? $doc['file_name'] : 'document';
+            $filePath = isset($doc['file_path']) ? $doc['file_path'] : $fileName;
+            $foundPath = findFile($fileName, $filePath);
+            if ($foundPath && serveFile($foundPath, $fileName)) {
+                exit;
+            }
+        }
+        
+        // Search uploaded_reports by title
+        $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE title = ? AND is_deleted != 1 ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$documentTitle]);
+        $doc = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($doc) {
+            $fileName = isset($doc['file_name']) ? $doc['file_name'] : 'report';
+            $filePath = isset($doc['file_path']) ? $doc['file_path'] : $fileName;
+            $foundPath = findFile($fileName, $filePath);
+            if ($foundPath && serveFile($foundPath, $fileName)) {
+                exit;
+            }
+        }
+    }
+    
+    // ========== If file not found ==========
+    http_response_code(404);
+    echo json_encode([
+        'success' => false, 
+        'message' => 'File not found on server. Please check if the file exists.',
+        'debug' => [
+            'document_id' => $id,
+            'document_type' => $type,
+            'file_name' => $fileName,
+            'file_path' => $filePath,
+            'title' => $documentTitle
+        ]
+    ]);
     
 } catch(PDOException $e) {
-    die('Database error');
-} catch(Exception $e) {
-    die('Error: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 ?>

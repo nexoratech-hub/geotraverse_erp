@@ -697,6 +697,70 @@ function initDarkMode() {
     }
 }
 
+// ==================== NOTIFICATION SYSTEM ====================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        var payload = {
+            department_id: parseInt(departmentId),
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle || '',
+            message: message || '',
+            from_department_id: DEPARTMENT_ID
+        };
+        var res = await apiCall('add_notification.php', 'POST', payload);
+        return res;
+    } catch(e) {
+        console.error('Add notification error:', e);
+        return { success: false };
+    }
+}
+
+async function getUnviewedNotificationsCount() {
+    try {
+        var res = await apiCall('get_unviewed_count.php', 'GET');
+        if (res.success && res.data) {
+            var counts = res.data;
+            unviewedReportsCount = counts.reports || 0;
+            unviewedRequestsCount = counts.requests || 0;
+            updateReportBadge();
+            updateRequestBadge();
+        }
+    } catch(e) {
+        console.error('Get unviewed count error:', e);
+    }
+}
+
+async function markNotificationViewed(itemType, itemId) {
+    try {
+        var res = await apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: itemType,
+            item_id: parseInt(itemId)
+        });
+        if (res.success) {
+            await getUnviewedNotificationsCount();
+        }
+    } catch(e) {
+        console.error('Mark notification viewed error:', e);
+    }
+}
+
+async function markAllNotificationsViewed() {
+    try {
+        var res = await apiCall('mark_all_notifications_viewed.php', 'POST', {
+            department_id: DEPARTMENT_ID
+        });
+        if (res.success) {
+            unviewedReportsCount = 0;
+            unviewedRequestsCount = 0;
+            updateReportBadge();
+            updateRequestBadge();
+        }
+    } catch(e) {
+        console.error('Mark all viewed error:', e);
+    }
+}
+
 // ==================== CONFIGURATION ====================
 const API_BASE = '/geotraverse/backend/api/';
 const DEPARTMENT_ID = 6;
@@ -899,12 +963,16 @@ async function fetchReports() {
                 (!r.deleted_by_department || r.deleted_by_department != 1) && 
                 (!r.deleted_by_admin || r.deleted_by_admin != 1)
             ).sort((a,b) => b.id - a.id); 
-            unviewedReportsCount = reportsData.filter(r => 
-                r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
-                r.sent_to_department === DEPARTMENT_ID && 
-                (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
-                !viewedReportIds.includes(r.id)
-            ).length;
+            
+            // Mark unviewed reports
+            reportsData.forEach(r => {
+                r._is_unviewed = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+                    r.sent_to_department === DEPARTMENT_ID && 
+                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
+                    !viewedReportIds.includes(r.id);
+            });
+            
+            unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
         } else { reportsData = []; unviewedReportsCount = 0; }
     } catch(e) { reportsData = []; unviewedReportsCount = 0; }
     updateReportBadge(); 
@@ -917,10 +985,17 @@ async function fetchRequests() {
         if (res.success && res.data) { 
             requestsData = res.data.filter(t => t.department_id === DEPARTMENT_ID && (!t.is_deleted || t.is_deleted != 1))
                                    .sort((a, b) => b.id - a.id);
+            
+            // Mark unviewed requests
+            requestsData.forEach(r => {
+                r._is_unviewed = !viewedRequestIds.includes(r.id) && r.status === 'pending';
+            });
+            
+            unviewedRequestsCount = requestsData.filter(r => r._is_unviewed).length;
         } else { 
             requestsData = []; 
+            unviewedRequestsCount = 0;
         }
-        unviewedRequestsCount = requestsData.filter(r => !viewedRequestIds.includes(r.id)).length;
     } catch(e) { 
         requestsData = []; 
         unviewedRequestsCount = 0;
@@ -965,6 +1040,20 @@ function markReportViewed(id) {
         localStorage.setItem('bricks_viewedReportIds', JSON.stringify(viewedReportIds)); 
         unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
         updateReportBadge(); 
+        
+        const card = document.getElementById('report-card-' + id);
+        if (card) {
+            const badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+            card.classList.remove('unviewed');
+        }
+        
+        const uploadedCard = document.getElementById('uploaded-report-card-' + id);
+        if (uploadedCard) {
+            const badge = uploadedCard.querySelector('.new-badge');
+            if (badge) badge.remove();
+            uploadedCard.classList.remove('unviewed');
+        }
     } 
 }
 
@@ -974,6 +1063,12 @@ function markRequestViewed(id) {
         localStorage.setItem('bricks_viewedRequestIds', JSON.stringify(viewedRequestIds)); 
         unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1); 
         updateRequestBadge(); 
+        
+        const row = document.getElementById(`req-row-${id}`);
+        if (row) {
+            row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+            row.style.backgroundColor = '';
+        }
     } 
 }
 
@@ -1029,7 +1124,167 @@ async function emptyRecycleBin() {
     } 
 }
 
-// ==================== DOCUMENT FUNCTIONS ====================
+// ==================== DOCUMENT FUNCTIONS - WITH MULTIPLE PATH SUPPORT ====================
+// ==================== DOCUMENT FUNCTIONS - FIXED FOR SENT UPLOADED REPORTS ====================
+function getReportFileUrl(fileName) {
+    if (!fileName) return null;
+    
+    // Check if it's already a full URL
+    if (fileName.startsWith('http://') || fileName.startsWith('https://')) {
+        return fileName;
+    }
+    
+    // Check if it starts with data: (base64)
+    if (fileName.startsWith('data:')) {
+        return fileName;
+    }
+    
+    // Clean the filename - remove any path segments
+    let cleanName = fileName;
+    if (cleanName.includes('/')) {
+        cleanName = cleanName.split('/').pop();
+    }
+    if (cleanName.includes('\\')) {
+        cleanName = cleanName.split('\\').pop();
+    }
+    
+    // Try multiple possible paths
+    const possiblePaths = [
+        '/geotraverse/frontend/assets/uploads/reports/' + cleanName,
+        '/geotraverse/assets/uploads/reports/' + cleanName,
+        '/geotraverse/frontend/uploads/reports/' + cleanName,
+        '/geotraverse/uploads/reports/' + cleanName,
+        '/geotraverse/backend/uploads/reports/' + cleanName,
+        '../backend/uploads/reports/' + cleanName,
+        './uploads/reports/' + cleanName,
+        '/geotraverse/backend/api/uploads/reports/' + cleanName
+    ];
+    
+    return {
+        possiblePaths: possiblePaths,
+        cleanName: cleanName
+    };
+}
+
+function downloadReportFile(fileName) {
+    if (!fileName) {
+        showToast('No file specified', true);
+        return;
+    }
+    
+    const fileInfo = getReportFileUrl(fileName);
+    const cleanName = fileInfo.cleanName;
+    
+    // Try to find the file using HEAD requests
+    let found = false;
+    let foundPath = null;
+    
+    // First try the most common paths
+    const pathsToTry = [
+        '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName),
+        '/geotraverse/frontend/assets/uploads/reports/' + cleanName,
+        '/geotraverse/assets/uploads/reports/' + cleanName,
+        '/geotraverse/backend/uploads/reports/' + cleanName
+    ];
+    
+    // Try to download directly using the API with file parameter
+    const apiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName);
+    
+    // Open in new window - API will handle file retrieval
+    window.open(apiUrl, '_blank');
+    showToast('Downloading: ' + cleanName, false);
+}
+
+function viewUploadedReportDocument(docId) {
+    const doc = uploadedReportsData.find(d => d.id === docId);
+    if(doc) {
+        // Mark as viewed if unviewed
+        if (doc._is_unviewed === true) {
+            markReportViewed(docId);
+            doc._is_unviewed = false;
+            doc.is_viewed_by_department = 1;
+            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+            updateReportBadge();
+        }
+        
+        let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+        let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+        let cleanName = doc.file_name ? doc.file_name.split('/').pop().split('\\').pop() : '';
+        
+        document.getElementById('documentInfoContent').innerHTML = `
+            <div class="doc-info-item"><div class="doc-info-label">Report Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">${doc.period}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+            ${doc.sent_from_department ? `<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="from-badge"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}</span></div></div>` : ''}
+        `;
+        
+        let deptOptions = ''; 
+        allDepartmentsForSend.forEach(d => { 
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+            }
+        });
+        
+        // Use the download API with file parameter
+        const downloadApiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName);
+        
+        document.getElementById('documentInfoButtons').innerHTML = `
+            <button onclick="window.open('${downloadApiUrl}', '_blank')" class="btn-download"><i class="fas fa-download"></i> Download</button>
+            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
+        `;
+        openModal('documentInfoModal');
+    }
+}
+function downloadReportFile(fileName) {
+    if (!fileName) {
+        showToast('No file specified', true);
+        return;
+    }
+    
+    const fileInfo = getReportFileUrl(fileName);
+    
+    // First try the download API (most reliable)
+    const apiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(fileInfo.cleanName);
+    
+    fetch(apiUrl, { method: 'HEAD' })
+        .then(response => {
+            if (response.ok) {
+                // API endpoint exists, use it
+                window.open(apiUrl, '_blank');
+                showToast('Downloading: ' + fileInfo.cleanName, false);
+                return;
+            }
+            // Try direct paths
+            let found = false;
+            for (let path of fileInfo.possiblePaths) {
+                fetch(path, { method: 'HEAD' })
+                    .then(res => {
+                        if (res.ok && !found) {
+                            found = true;
+                            window.open(path, '_blank');
+                            showToast('Downloading: ' + fileInfo.cleanName, false);
+                        }
+                    })
+                    .catch(() => {});
+            }
+            // If none found, try the API anyway
+            if (!found) {
+                window.open(apiUrl, '_blank');
+                showToast('Attempting download via API: ' + fileInfo.cleanName, false);
+            }
+        })
+        .catch(() => {
+            // Fallback: try direct download
+            window.open(apiUrl, '_blank');
+            showToast('Downloading via API: ' + fileInfo.cleanName, false);
+        });
+}
+
 function previewUploadedFile() { 
     if(currentUploadedFile) { 
         const fileType = currentUploadedFile.type; 
@@ -1054,9 +1309,20 @@ function removeUploadedFile() {
 function viewUploadedReportDocument(docId) {
     const doc = uploadedReportsData.find(d => d.id === docId);
     if(doc) {
+        // Mark as viewed if unviewed
+        if (doc._is_unviewed === true) {
+            markReportViewed(docId);
+            doc._is_unviewed = false;
+            doc.is_viewed_by_department = 1;
+            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+            updateReportBadge();
+        }
+        
         let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
         let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-        let fileUrl = '/geotraverse/frontend/assets/uploads/reports/' + (doc.file_name || '');
+        let fileInfo = getReportFileUrl(doc.file_name);
+        let downloadUrl = fileInfo ? fileInfo.downloadApiUrl : '#';
+        
         document.getElementById('documentInfoContent').innerHTML = `
             <div class="doc-info-item"><div class="doc-info-label">Report Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
@@ -1076,7 +1342,7 @@ function viewUploadedReportDocument(docId) {
         });
         
         document.getElementById('documentInfoButtons').innerHTML = `
-            <button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
+            <button onclick="downloadReportFile('${escapeHtml(doc.file_name)}')" class="btn-download"><i class="fas fa-download"></i> Download</button>
             <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
         `;
         openModal('documentInfoModal');
@@ -1108,12 +1374,17 @@ async function loadDashboard() {
     });
     let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
     
+    let totalReports = reportsData.length + uploadedReportsData.length;
+    let totalRequests = requestsData.length;
+    let totalBricks = bricksDailyWork.length;
+    let totalTimber = timberDailyWork.length;
+    
     document.getElementById('dashboardPage').innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="stat-card cursor-pointer" onclick="showSection('bricks')"><div class="stat-icon bg-amber-100 text-amber-600"><i class="fas fa-cubes text-lg"></i></div><p class="stat-label">Bricks Records</p><p class="stat-number text-amber-600">${bricksDailyWork.length}</p><p class="text-[10px] text-gray-500 mt-1">Income: ${formatMoney(totalBricksIncome)}</p></div>
-            <div class="stat-card cursor-pointer" onclick="showSection('timber')"><div class="stat-icon bg-emerald-100 text-emerald-600"><i class="fas fa-tree text-lg"></i></div><p class="stat-label">Timber Records</p><p class="stat-number text-emerald-600">${timberDailyWork.length}</p><p class="text-[10px] text-gray-500 mt-1">Income: ${formatMoney(totalTimberIncome)}</p></div>
-            <div class="stat-card cursor-pointer" onclick="showSection('requests')"><div class="stat-icon bg-orange-100 text-orange-600"><i class="fas fa-hand-holding-usd text-lg"></i></div><p class="stat-label">Requests</p><p class="stat-number text-orange-600">${requestsData.length}</p><p class="text-[10px] text-gray-500 mt-1">Pending: ${pendingRequests}</p></div>
-            <div class="stat-card cursor-pointer" onclick="showSection('reports')"><div class="stat-icon bg-purple-100 text-purple-600"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Reports</p><p class="stat-number text-purple-600">${reportsData.length + uploadedReportsData.length}</p>${unviewedReportsCount > 0 ? `<p class="text-[10px] text-red-500 mt-1">${unviewedReportsCount} new</p>` : ''}</div>
+            <div class="stat-card cursor-pointer" onclick="showSection('bricks')"><div class="stat-icon bg-amber-100 text-amber-600"><i class="fas fa-cubes text-lg"></i></div><p class="stat-label">Bricks Records</p><p class="stat-number text-amber-600">${totalBricks}</p><p class="text-[10px] text-gray-500 mt-1">Income: ${formatMoney(totalBricksIncome)}</p></div>
+            <div class="stat-card cursor-pointer" onclick="showSection('timber')"><div class="stat-icon bg-emerald-100 text-emerald-600"><i class="fas fa-tree text-lg"></i></div><p class="stat-label">Timber Records</p><p class="stat-number text-emerald-600">${totalTimber}</p><p class="text-[10px] text-gray-500 mt-1">Income: ${formatMoney(totalTimberIncome)}</p></div>
+            <div class="stat-card cursor-pointer" onclick="showSection('requests')"><div class="stat-icon bg-orange-100 text-orange-600"><i class="fas fa-hand-holding-usd text-lg"></i></div><p class="stat-label">Requests</p><p class="stat-number text-orange-600">${totalRequests}</p><p class="text-[10px] text-gray-500 mt-1">Pending: ${pendingRequests}</p>${unviewedRequestsCount > 0 ? `<p class="text-[10px] text-red-500 mt-1">${unviewedRequestsCount} new</p>` : ''}</div>
+            <div class="stat-card cursor-pointer" onclick="showSection('reports')"><div class="stat-icon bg-purple-100 text-purple-600"><i class="fas fa-chart-line text-lg"></i></div><p class="stat-label">Reports</p><p class="stat-number text-purple-600">${totalReports}</p>${unviewedReportsCount > 0 ? `<p class="text-[10px] text-red-500 mt-1">${unviewedReportsCount} new</p>` : ''}</div>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <div class="bg-white rounded-xl p-4 shadow-sm border"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-amber-600 mr-2"></i>Production Summary</h3><canvas id="productionChart" height="180"></canvas></div>
@@ -1879,17 +2150,18 @@ async function loadRequests(highlightId = null) {
     
     let tableHtml = '';
     for (let r of requestsData) {
+        let isUnviewed = r._is_unviewed || false;
+        let isHighlighted = highlightId && r.id === highlightId;
+        
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-        let isNew = !viewedRequestIds.includes(r.id);
-        let isHighlighted = highlightId && r.id === highlightId;
         let amount = parseFloat(r.amount) || 0;
         let shortDesc = r.description ? r.description.substring(0, 60) : '-';
         if (r.description && r.description.length > 60) shortDesc += '...';
         
         tableHtml += `
-            <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom: 1px solid #e5e7eb;">
+            <tr id="req-row-${r.id}" class="${isUnviewed ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.request_date || r.created_at)}</td>
                 <td style="padding: 12px 10px;">
                     <span class="status-badge ${typeClass}" style="padding: 4px 10px; border-radius: 20px; font-size: 11px; display: inline-block;">${r.type}</span>
@@ -1958,6 +2230,7 @@ async function submitRequest() {
     
     if(res && res.success) { 
         showToast(id ? 'Request updated' : 'Request submitted'); 
+        addToActionHistory(id ? `Fund request updated: ${source}` : `Fund request added: ${source}`, CURRENT_USER);
         closeModal('requestModal'); 
         loadRequests(); 
         loadDashboard(); 
@@ -1967,19 +2240,37 @@ async function submitRequest() {
 async function viewRequestDetails(id) {
     const r = requestsData.find(r => r.id === id);
     if(r) {
-        markRequestViewed(id);
+        if (r._is_unviewed) {
+            markRequestViewed(id);
+            r._is_unviewed = false;
+            r.is_viewed_by_department = 1;
+            unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
+            updateRequestBadge();
+        }
+        
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
         
+        let actionHtml = '';
+        if (r.requested_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Requested by: ${escapeHtml(r.requested_by)} | ${formatDateTime(r.created_at)}</div>`;
+        if (r.reviewed_by) actionHtml += `<div><i class="fas fa-check-circle text-xs mr-1"></i> Reviewed by: ${escapeHtml(r.reviewed_by)} | ${formatDateTime(r.reviewed_at)}</div>`;
+        
         document.getElementById('viewRequestContent').innerHTML = `
-            <div><strong>Date:</strong> ${formatDateTime(r.request_date || r.created_at)}</div>
-            <div><strong>Type:</strong> <span class="status-badge ${typeClass}">${r.type}</span></div>
-            <div><strong>Source:</strong> ${escapeHtml(r.source)}</div>
-            <div><strong>Amount:</strong> <span class="text-orange-600 font-bold">${formatMoney(r.amount)}</span></div>
-            <div><strong>Description:</strong> ${escapeHtml(r.description||'-')}</div>
-            <div><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></div>
-            <div class="user-info">Submitted by: ${escapeHtml(r.requested_by || r.created_by || CURRENT_USER)} on ${formatDateTime(r.created_at)}</div>
+            <div class="space-y-2">
+                <div class="bg-gradient-to-r from-amber-600 to-amber-800 text-white p-4 rounded-lg">
+                    <h3 class="text-lg font-bold">Fund Request #${r.id}</h3>
+                    <p class="text-xs opacity-90 mt-1">Submitted: ${formatDateTime(r.created_at)}</p>
+                </div>
+                <div><strong>Date:</strong> ${formatDateTime(r.request_date || r.created_at)}</div>
+                <div><strong>Type:</strong> <span class="status-badge ${typeClass}">${r.type}</span></div>
+                <div><strong>Source:</strong> ${escapeHtml(r.source)}</div>
+                <div><strong>Amount:</strong> <span class="text-orange-600 font-bold">${formatMoney(r.amount)}</span></div>
+                <div><strong>Description:</strong> ${escapeHtml(r.description||'-')}</div>
+                <div><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></div>
+                ${actionHtml ? `<div class="action-history text-xs text-gray-400 mt-2 pt-2 border-t">${actionHtml}</div>` : ''}
+                <div class="user-info mt-2">Submitted by: ${escapeHtml(r.requested_by || r.created_by || CURRENT_USER)} on ${formatDateTime(r.created_at)}</div>
+            </div>
         `;
         document.getElementById('viewRequestButtons').innerHTML = `
             <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success">Excel</button>
@@ -2012,8 +2303,17 @@ async function deleteRequest(id) {
             is_deleted: 1,
             deleted_by: CURRENT_USER 
         }); 
-        if(res.success) { showToast('Request moved to recycle bin'); loadRequests(); loadDashboard(); }
-        else showToast(res.message||'Failed', true); 
+        if(res.success) { 
+            showToast('Request moved to recycle bin'); 
+            addToActionHistory(`Fund request deleted: ${req?.source}`, CURRENT_USER);
+            loadRequests(); 
+            loadDashboard(); 
+        } else {
+            requestsData = requestsData.filter(r => r.id !== id);
+            loadRequests(); 
+            loadDashboard(); 
+            showToast('Request removed from local view', false);
+        }
     } 
 }
 
@@ -2167,7 +2467,7 @@ function exportAllRequestsToPDF() {
 
 // ==================== REPORTS SECTION ====================
 async function loadReports(highlightId = null) {
-    await Promise.all([fetchReports(), fetchUploadedReports()]);
+    await Promise.all([fetchReports(), fetchUploadedReports(), getUnviewedNotificationsCount()]);
     
     let html = `
         <div class="tab-container">
@@ -2192,14 +2492,21 @@ async function loadReports(highlightId = null) {
         
         let reportsHtml = '';
         for (let r of reportsData) {
-            let isNew = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && r.sent_to_department === DEPARTMENT_ID && (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(r.id);
+            let isNew = r._is_unviewed || false;
             let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
             let isHighlighted = highlightId && r.id === highlightId;
             let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
+            
+            let fromDept = '';
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+                let deptName = departmentNames[r.sent_from_department] || 'Unknown';
+                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
+            
             reportsHtml += `
-                <div class="report-card ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetails(${r.id})">
+                <div class="report-card ${isNew ? 'unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetails(${r.id})" style="position:relative;">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    <div class="report-card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report</p></div>
+                    <div class="report-card-header"><h4>${escapeHtml(r.title)}</h4><p>${r.period} report ${fromDept}</p></div>
                     <div class="p-3"><div class="flex justify-between items-center mb-1"><span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div>
                     <div class="text-[10px] text-gray-600 mb-2 line-clamp-3">${escapeHtml(shortContent)}</div>
                     <div class="flex gap-2 mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
@@ -2225,10 +2532,19 @@ async function loadReports(highlightId = null) {
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+            let isNew = doc._is_unviewed || false;
             let isHighlighted = highlightId && doc.id === highlightId;
+            
+            let fromDept = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                let deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
+            
             reportsHtml += `
-                <div class="uploaded-report-card ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}">
-                    <div class="report-card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'}</p></div>
+                <div class="uploaded-report-card ${isNew ? 'unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}" style="position:relative;">
+                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    <div class="report-card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'} ${fromDept}</p></div>
                     <div class="p-3"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span></div>
                     <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
                     <div class="flex gap-2 mt-2 pt-1 border-t"><button onclick="viewUploadedReportDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
@@ -2238,6 +2554,7 @@ async function loadReports(highlightId = null) {
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
         if (highlightId) { const el = document.getElementById(`uploaded-report-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
     }
+    updateReportBadge();
 }
 
 // ==================== SEND REPORT (Using send_report_advanced.php) ====================
@@ -2276,6 +2593,13 @@ async function sendReportToDept(reportId, deptId) {
             r.is_viewed_by_department = 0;
             r.sent_count = (r.sent_count || 0) + 1;
             r.is_sent = 1;
+            r._is_unviewed = true;
+            
+            // Add notification
+            await addNotification(deptId, 'report', r.id, r.title, 'Report sent to your department');
+            
+            unviewedReportsCount++;
+            updateReportBadge();
             
             await fetchReports();
             await loadReports();
@@ -2328,6 +2652,13 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.is_viewed_by_department = 0;
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
+            doc._is_unviewed = true;
+            
+            // Add notification
+            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, 'Uploaded report sent to your department');
+            
+            unviewedReportsCount++;
+            updateReportBadge();
             
             closeModal('documentInfoModal');
             await loadReports();
@@ -2343,10 +2674,14 @@ async function sendUploadedReportToDept(reportId, deptId) {
 }
 
 // ==================== REPORT CRUD FUNCTIONS ====================
-function viewReportDetails(id) { 
+async function viewReportDetails(id) { 
     const r = reportsData.find(r => r.id === id); 
     if(r) { 
-        if (r.is_viewed_by_department == 0 && r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && !viewedReportIds.includes(id)) markReportViewed(id);
+        if (r._is_unviewed) {
+            markReportViewed(id);
+            await apiCall('mark_report_viewed.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID });
+        }
+        
         document.getElementById('viewReportContent').innerHTML = `
             <div class="bg-purple-800 p-3 rounded mb-3" style="background: linear-gradient(135deg, #b45309, #92400e);">
                 <strong>${escapeHtml(r.title)}</strong> <span class="float-right">${r.period}</span>
@@ -2611,11 +2946,22 @@ async function saveUploadedReport() {
 
 function deleteUploadedReport(id) {
     if(confirm('Delete this uploaded report?')) {
-        apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID })
-            .then(res => {
-                if (res.success) { showToast('Report deleted'); loadReports(); }
-                else { showToast(res.message || 'Failed', true); }
+        const doc = uploadedReportsData.find(d => d.id === id);
+        if(doc) {
+            addToRecycleBin(id, 'uploaded_report', doc.title).then(() => {
+                apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID })
+                    .then(res => {
+                        if (res.success) { 
+                            showToast('Report moved to recycle bin'); 
+                            loadReports(); 
+                        } else { 
+                            uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+                            loadReports(); 
+                            showToast('Report removed from local view', false); 
+                        }
+                    });
             });
+        }
     }
 }
 
@@ -2668,8 +3014,17 @@ async function deleteReport(id) {
         const r = reportsData.find(r=>r.id===id);
         if(r) await addToRecycleBin(id, 'report', r.title);
         let res = await apiCall('delete_report.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID, is_deleted: 1 }); 
-        if(res.success) { showToast('Report moved to recycle bin'); loadReports(); loadDashboard(); }
-        else showToast(res.message || 'Failed', true); 
+        if(res.success) { 
+            showToast('Report moved to recycle bin'); 
+            addToActionHistory(`Report deleted: ${r?.title}`, CURRENT_USER);
+            loadReports(); 
+            loadDashboard(); 
+        } else {
+            reportsData = reportsData.filter(r => r.id !== id);
+            loadReports(); 
+            loadDashboard(); 
+            showToast('Report removed from local view', false);
+        }
     } 
 }
 
@@ -2976,6 +3331,11 @@ window.emptyRecycleBin = emptyRecycleBin;
 window.restoreFromRecycleBin = restoreFromRecycleBin;
 window.permanentlyDeleteItem = permanentlyDeleteItem;
 window.switchReportTab = switchReportTab;
+window.downloadReportFile = downloadReportFile;
+window.markAllNotificationsViewed = markAllNotificationsViewed;
+window.getUnviewedNotificationsCount = getUnviewedNotificationsCount;
+window.addNotification = addNotification;
+window.markNotificationViewed = markNotificationViewed;
 
 init();
 </script>

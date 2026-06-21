@@ -212,7 +212,6 @@
             .stat-number { font-size: 14px; }
         }
 
-        /* Daily Work Summary Cards - Beautiful Styling */
         .dailywork-summary-card {
             background: white;
             border-radius: 12px;
@@ -346,7 +345,7 @@
 <!-- DOCUMENT INFO MODAL -->
 <div id="documentInfoModal" class="modal"><div class="modal-content" style="max-width:600px;"><div class="modal-header"><h3><i class="fas fa-file-alt mr-2"></i>Document Information</h3><button onclick="closeModal('documentInfoModal')">&times;</button></div><div class="modal-body"><div id="documentInfoContent" class="doc-info-container"></div><div id="documentInfoButtons" class="detail-buttons mt-4"></div></div></div></div>
 
-<!-- REQUEST MODAL - USING FUND_REQUESTS TABLE -->
+<!-- REQUEST MODAL -->
 <div id="requestModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Add Fund Request</h3><button onclick="closeModal('requestModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="reqId"><div class="form-group"><label>Date *</label><input type="date" id="reqDate"></div><div class="form-group"><label>Type</label><select id="reqType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Title/Source *</label><input type="text" id="reqTitle" placeholder="Office Supplies" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="reqAmount" class="amount-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="reqDesc" rows="3" placeholder="Reason for request..."></textarea></div><div class="flex gap-3"><button onclick="submitRequest()" class="flex-1 btn-primary py-2 rounded">Submit Request</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
 <div id="viewRequestModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Request Details</h3><button onclick="closeModal('viewRequestModal')">&times;</button></div><div class="modal-body"><div id="viewRequestContent"></div><div id="viewRequestButtons" class="detail-buttons"></div><button onclick="closeModal('viewRequestModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div></div>
@@ -516,8 +515,6 @@ document.addEventListener('DOMContentLoaded', function() {
 // ==================== CONFIGURATION ====================
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 10;
-const PROJECT_IMAGE_PATH = '/geotraverse/frontend/assets/uploads/projects/';
-const REPORT_UPLOAD_PATH = '/geotraverse/frontend/assets/uploads/reports/';
 const CURRENT_USER = "Survey Manager";
 
 let searchTimeout = null, highlightTimer = null;
@@ -1026,32 +1023,6 @@ function getFullImageUrl(imagePath) {
     return '/geotraverse/frontend/assets/uploads/projects/' + cleanPath;
 }
 
-function getFullReportPath(filePath) {
-    if (!filePath) return null;
-    if (filePath.startsWith('http')) return filePath;
-    if (filePath.startsWith('data:')) return filePath;
-    let cleanPath = filePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
-    if (cleanPath.includes('assets/uploads/reports/')) {
-        return '/' + cleanPath;
-    }
-    return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath.split('/').pop();
-}
-
-function downloadReportFile(fileUrl, fileName) {
-    if (!fileUrl) {
-        showToast('File URL not available', true);
-        return;
-    }
-    const link = document.createElement('a');
-    link.href = fileUrl;
-    link.download = fileName;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast(`Downloading: ${fileName}`, false);
-}
-
 async function uploadProjectImage(file) {
     if (!file || !(file instanceof File)) return '';
     if (file.size > 2 * 1024 * 1024) { showToast('Image too large. Max 2MB', true); return ''; }
@@ -1076,7 +1047,6 @@ async function fetchProjects() {
             (!p.deleted_by_admin || p.deleted_by_admin != 1)
         ).sort((a,b) => b.id - a.id); 
         
-        // Mark unviewed projects
         projectsData.forEach(p => {
             p._is_unviewed = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
                 p.sent_to_dept === DEPARTMENT_ID && 
@@ -1091,12 +1061,79 @@ async function fetchProjects() {
 
 async function fetchProjectDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
-    projectDocuments = (res.success && res.data) ? res.data : []; 
+    projectDocuments = (res.success && res.data) ? res.data : [];
+    await fetchSentDocuments();
 }
 
 async function fetchUploadedReports() { 
     const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`); 
-    uploadedReportsData = (res.success && res.data) ? res.data : []; 
+    uploadedReportsData = (res.success && res.data) ? res.data : [];
+    await fetchSentDocuments();
+}
+
+async function fetchSentDocuments() {
+    try {
+        // Fetch sent project documents
+        const docRes = await apiCall(`get_sent_documents.php?department_id=${DEPARTMENT_ID}`);
+        if (docRes.success && docRes.data) {
+            const sentDocs = docRes.data.map(doc => {
+                let docData = doc.document_data;
+                if (typeof docData === 'string') {
+                    try { docData = JSON.parse(docData); } catch(e) { docData = {}; }
+                }
+                return {
+                    id: doc.id,
+                    title: docData.title || doc.document_title || 'Untitled',
+                    file_name: docData.file_name || doc.document_file || 'unknown',
+                    file_path: docData.file_path || '',
+                    file_size: docData.file_size || 0,
+                    description: docData.description || '',
+                    uploaded_by: docData.uploaded_by || doc.sent_by || 'System',
+                    created_at: doc.sent_at || doc.created_at,
+                    sent_from_department: doc.from_department_id,
+                    sent_to_department: doc.to_department_id,
+                    is_sent: true,
+                    _is_unviewed: doc.is_viewed_by_department == 0 || doc.is_viewed == 0,
+                    doc_type: 'project'
+                };
+            });
+            const existingIds = new Set(projectDocuments.map(d => d.id));
+            const newDocs = sentDocs.filter(d => !existingIds.has(d.id));
+            projectDocuments = [...projectDocuments, ...newDocs];
+        }
+        
+        // Fetch sent uploaded reports
+        const reportRes = await apiCall(`get_sent_uploaded_reports.php?department_id=${DEPARTMENT_ID}`);
+        if (reportRes.success && reportRes.data) {
+            const sentReports = reportRes.data.map(doc => {
+                let docData = doc.uploaded_report_data;
+                if (typeof docData === 'string') {
+                    try { docData = JSON.parse(docData); } catch(e) { docData = {}; }
+                }
+                return {
+                    id: doc.id,
+                    title: docData.title || doc.uploaded_report_title || 'Untitled',
+                    file_name: docData.file_name || doc.uploaded_report_file || 'unknown',
+                    file_path: docData.file_path || '',
+                    file_size: docData.file_size || 0,
+                    description: docData.description || '',
+                    period: docData.period || doc.uploaded_report_period || 'monthly',
+                    uploaded_by: docData.uploaded_by || doc.sent_by || 'System',
+                    created_at: doc.sent_at || doc.created_at,
+                    sent_from_department: doc.from_department_id,
+                    sent_to_department: doc.to_department_id,
+                    is_sent: true,
+                    _is_unviewed: doc.is_viewed == 0,
+                    is_uploaded_report: true
+                };
+            });
+            const existingIds = new Set(uploadedReportsData.map(d => d.id));
+            const newReports = sentReports.filter(d => !existingIds.has(d.id));
+            uploadedReportsData = [...uploadedReportsData, ...newReports];
+        }
+    } catch(e) {
+        console.error('Error fetching sent documents:', e);
+    }
 }
 
 async function fetchReports() { 
@@ -1121,7 +1158,6 @@ async function fetchReports() {
     updateReportBadge();
 }
 
-// ==================== FUND REQUESTS - USING fund_requests TABLE ====================
 async function fetchRequests() { 
     try {
         const res = await apiCall(`get_fund_requests.php?department_id=${DEPARTMENT_ID}`); 
@@ -1150,7 +1186,6 @@ function markProjectViewed(id) {
         unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
         updateProjectBadge(); 
         
-        // Remove NEW badge from card
         const card = document.getElementById(`proj-card-${id}`);
         if (card) {
             const badge = card.querySelector('.new-badge');
@@ -1197,21 +1232,42 @@ function markRequestViewed(id) {
     } 
 }
 
-// ==================== DOCUMENT FUNCTIONS ====================
+// ==================== DOWNLOAD FUNCTIONS - FIXED ====================
 function showDocumentInfo(doc, type) {
     let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
     let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    let fileUrl = type === 'project' ? `/geotraverse/backend/api/download_document.php?id=${doc.id}&type=project` : `/geotraverse/backend/api/download_report_document.php?id=${doc.id}`;
+    
+    let downloadUrl = '';
+    let isSentDocument = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+    
+    let isUploadedReport = type === 'uploaded_report' || doc.is_uploaded_report === true;
+    
+    if (isUploadedReport) {
+        downloadUrl = `../backend/api/download_report_document.php?id=${doc.id}`;
+        if (isSentDocument) {
+            downloadUrl += `&sent=1`;
+        }
+    } else {
+        downloadUrl = `../backend/api/download_document.php?id=${doc.id}`;
+        if (isSentDocument) {
+            downloadUrl += `&sent=1`;
+        }
+    }
+    
+    let fileName = doc.file_name || 'document';
+    let filePath = doc.file_path || '';
     
     let infoHtml = `
         <div class="doc-info-container">
             <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(fileName)}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+            ${doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 
+                `<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}</span></div></div>` : ''}
         </div>
     `;
     document.getElementById('documentInfoContent').innerHTML = infoHtml;
@@ -1224,13 +1280,66 @@ function showDocumentInfo(doc, type) {
     });
     
     document.getElementById('documentInfoButtons').innerHTML = `
-        <button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
+        <button onclick="downloadDocument('${downloadUrl}', '${escapeHtml(fileName)}', '${escapeHtml(filePath)}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
         <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
     `;
     openModal('documentInfoModal');
 }
 
-// ==================== SEND FUNCTIONS - WITH DUPLICATE_SUPPORT & BADGE UPDATE ====================
+function downloadDocument(url, fileName, filePath) {
+    if (!url) {
+        showToast('Download URL not available', true);
+        return;
+    }
+    
+    const downloadWindow = window.open(url, '_blank');
+    if (downloadWindow) {
+        showToast(`Downloading: ${fileName || 'document'}...`, false);
+        setTimeout(() => {
+            try { downloadWindow.close(); } catch(e) {}
+        }, 5000);
+        return;
+    }
+    
+    showToast('Popup blocked. Trying alternative download method...', false);
+    
+    if (filePath) {
+        const possiblePaths = [
+            filePath,
+            fileName,
+            '../frontend/assets/uploads/projects/projects_documents/' + fileName,
+            '../frontend/assets/uploads/reports/' + fileName,
+            '/geotraverse/frontend/assets/uploads/projects/projects_documents/' + fileName,
+            '/geotraverse/frontend/assets/uploads/reports/' + fileName
+        ];
+        
+        let found = false;
+        for (let path of possiblePaths) {
+            fetch(path, { method: 'HEAD' })
+                .then(response => {
+                    if (response.ok) {
+                        const link = document.createElement('a');
+                        link.href = path;
+                        link.download = fileName || 'document';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        showToast(`Downloading: ${fileName}`, false);
+                        found = true;
+                    }
+                })
+                .catch(() => {});
+        }
+        
+        if (!found) {
+            showToast('Could not find file. Please try again or contact support.', true);
+        }
+    } else {
+        showToast('File path not available. Please contact support.', true);
+    }
+}
+
+// ==================== SEND FUNCTIONS ====================
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p=>p.id===projectId); 
     if(!p) { showToast('Project not found', true); return; }
@@ -1250,13 +1359,10 @@ async function sendProjectToDept(projectId, deptId) {
         await fetchDailyWork();
         const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
         
-        let totalBudget = 0, totalExpenses = 0, completed = 0, partial = 0, pending = 0;
+        let totalBudget = 0, totalExpenses = 0;
         for (let w of projectDailyWork) {
             totalBudget += parseFloat(w.budget) || 0;
             totalExpenses += parseFloat(w.amount) || 0;
-            if (w.status === 'completed') completed++;
-            else if (w.status === 'partial') partial++;
-            else pending++;
         }
         let remainingBudget = totalBudget - totalExpenses;
         
@@ -1279,19 +1385,16 @@ async function sendProjectToDept(projectId, deptId) {
                 total_budget: totalBudget,
                 total_expenses: totalExpenses,
                 remaining_budget: remainingBudget,
-                records_count: projectDailyWork.length,
-                completed_count: completed,
-                partial_count: partial,
-                pending_count: pending
+                records_count: projectDailyWork.length
             },
-            sent_by: CURRENT_USER || 'Survey Manager',
+            sent_by: CURRENT_USER,
             duplicate_send: true
         };
         
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
         
         if (res && res.success) {
-            showToast(`✅ Project "${p.name}" sent to ${deptName} with summary of ${projectDailyWork.length} daily work records`, false);
+            showToast(`✅ Project "${p.name}" sent to ${deptName}`, false);
             addLog(`Project sent: "${p.name}" to ${deptName}`);
             
             p.sent_to_dept = parseInt(deptId);
@@ -1301,6 +1404,8 @@ async function sendProjectToDept(projectId, deptId) {
             p.sent_count = (p.sent_count || 0) + 1;
             p.last_sent_at = new Date().toISOString();
             p._is_unviewed = true;
+            
+            await addNotification(deptId, 'project', p.id, p.name, `Project "${p.name}" sent to ${deptName}`);
             
             unviewedProjectsCount++;
             updateProjectBadge();
@@ -1365,7 +1470,7 @@ async function sendReportToDept(reportId, deptId) {
             report_period: r.period,
             report_content: r.content,
             daily_summary: dailySummary,
-            sent_by: CURRENT_USER || 'Survey Manager',
+            sent_by: CURRENT_USER,
             duplicate_send: true
         };
         
@@ -1382,6 +1487,8 @@ async function sendReportToDept(reportId, deptId) {
             r.sent_count = (r.sent_count || 0) + 1;
             r.last_sent_at = new Date().toISOString();
             r._is_unviewed = true;
+            
+            await addNotification(deptId, 'report', r.id, r.title, `Report "${r.title}" sent to ${deptName}`);
             
             unviewedReportsCount++;
             updateReportBadge();
@@ -1420,27 +1527,31 @@ async function sendDocumentToDept(docId, deptId, type) {
     }
     
     try {
+        let filePath = doc.file_path || doc.file_name || '';
+        let fileName = doc.file_name || '';
+        
         const payload = {
             document_id: parseInt(docId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
             document_title: doc.title,
-            document_file: doc.file_name,
+            document_file: fileName,
             description: doc.description || '',
             doc_type: type || 'project',
+            file_path: filePath,
             doc_data: {
                 id: doc.id,
                 title: doc.title,
                 description: doc.description || '',
-                file_name: doc.file_name || '',
-                file_path: doc.file_path || '',
+                file_name: fileName,
+                file_path: filePath,
                 file_size: doc.file_size || 0,
                 uploaded_by: doc.uploaded_by || CURRENT_USER,
                 department_id: doc.department_id || DEPARTMENT_ID,
                 created_at: doc.created_at || new Date().toISOString()
             },
-            sent_by: CURRENT_USER || 'Survey Manager',
+            sent_by: CURRENT_USER,
             duplicate_send: true
         };
         
@@ -1457,6 +1568,8 @@ async function sendDocumentToDept(docId, deptId, type) {
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
+            
+            await addNotification(deptId, 'document', doc.id, doc.title, `Document "${doc.title}" sent to ${deptName}`);
             
             unviewedProjectsCount++;
             updateProjectBadge();
@@ -1496,25 +1609,29 @@ async function sendUploadedReportToDept(reportId, deptId) {
     }
     
     try {
+        let filePath = doc.file_path || doc.file_name || '';
+        let fileName = doc.file_name || '';
+        
         const payload = {
             document_id: parseInt(reportId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
             doc_type: 'uploaded_report',
+            file_path: filePath,
             doc_data: {
                 id: doc.id,
                 title: doc.title,
                 description: doc.description || '',
-                file_name: doc.file_name || '',
-                file_path: doc.file_path || '',
+                file_name: fileName,
+                file_path: filePath,
                 file_size: doc.file_size || 0,
                 period: doc.period || 'monthly',
                 uploaded_by: doc.uploaded_by || CURRENT_USER,
                 department_id: doc.department_id || DEPARTMENT_ID,
                 created_at: doc.created_at || new Date().toISOString()
             },
-            sent_by: CURRENT_USER || 'Survey Manager',
+            sent_by: CURRENT_USER,
             duplicate_send: true
         };
         
@@ -1531,6 +1648,8 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
+            
+            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, `Uploaded report "${doc.title}" sent to ${deptName}`);
             
             unviewedReportsCount++;
             updateReportBadge();
@@ -1554,55 +1673,63 @@ async function sendUploadedReportToDept(reportId, deptId) {
     }
 }
 
-function viewUploadedDocument(docId) {
-    const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
-        // Mark as viewed if unviewed
-        if (doc._is_unviewed === true) {
-            markProjectViewed(docId);
-            doc._is_unviewed = false;
-            doc.is_viewed_by_department = 1;
-            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
-            updateProjectBadge();
-        }
-        showDocumentInfo(doc, 'project');
+// ==================== NOTIFICATION SYSTEM ====================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        const payload = {
+            department_id: parseInt(departmentId),
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle,
+            message: message || '',
+            from_department_id: DEPARTMENT_ID
+        };
+        const res = await apiCall('add_notification.php', 'POST', payload);
+        return res;
+    } catch(e) {
+        console.error('Add notification error:', e);
+        return { success: false };
     }
 }
 
-function viewUploadedReportDocument(docId) {
-    const doc = uploadedReportsData.find(d => d.id === docId);
-    if(doc) {
-        // Mark as viewed if unviewed
-        if (doc._is_unviewed === true) {
-            markReportViewed(docId);
-            doc._is_unviewed = false;
-            doc.is_viewed_by_department = 1;
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
-            updateReportBadge();
+async function getUnviewedNotificationsCount() {
+    try {
+        const res = await apiCall('get_unviewed_count.php', 'GET');
+        if (res.success && res.data) {
+            if (res.data.projects !== undefined) {
+                unviewedProjectsCount = res.data.projects || 0;
+                updateProjectBadge();
+            }
+            if (res.data.reports !== undefined) {
+                unviewedReportsCount = res.data.reports || 0;
+                updateReportBadge();
+            }
+            if (res.data.requests !== undefined) {
+                unviewedRequestsCount = res.data.requests || 0;
+                updateRequestBadge();
+            }
         }
-        showDocumentInfo(doc, 'uploaded_report');
+        return res;
+    } catch(e) {
+        console.error('Get unviewed count error:', e);
+        return { success: false };
     }
 }
 
-function previewUploadedFile() { 
-    if(currentUploadedFile) { 
-        const fileType = currentUploadedFile.type; 
-        if(fileType.startsWith('image/')) { 
-            const reader = new FileReader(); 
-            reader.onload = ev => showFullImage(ev.target.result); 
-            reader.readAsDataURL(currentUploadedFile); 
-        } else { 
-            const url = URL.createObjectURL(currentUploadedFile); 
-            window.open(url, '_blank'); 
-            URL.revokeObjectURL(url); 
-        } 
-    } 
-}
-
-function removeUploadedFile() { 
-    currentUploadedFile = null; 
-    document.getElementById('reportFileInput').value = ''; 
-    document.getElementById('uploadedFilePreview').classList.add('hidden'); 
+async function markNotificationViewed(itemType, itemId) {
+    try {
+        const res = await apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: itemType,
+            item_id: parseInt(itemId)
+        });
+        if (res.success) {
+            await getUnviewedNotificationsCount();
+        }
+        return res;
+    } catch(e) {
+        console.error('Mark notification viewed error:', e);
+        return { success: false };
+    }
 }
 
 // ==================== PROJECT FUNCTIONS ====================
@@ -1740,259 +1867,13 @@ async function deleteProject(id) {
     } 
 }
 
-// ==================== EXPORT PROJECT TO PDF ====================
-async function exportProjectToPDF(projectId) {
-    const p = projectsData.find(p => p.id === projectId);
-    if (!p) { showToast('Project not found', true); return; }
-    
-    let imageUrl = getFullImageUrl(p.image);
-    let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
-    let statusClass = getProjectStatusClass(p.status);
-    let statusText = getProjectStatusText(p.status);
-    
-    const projectWork = dailyworkData.filter(w => w.project_id == projectId);
-    let totalBudget = 0, totalAmount = 0;
-    projectWork.forEach(w => { totalBudget += parseFloat(w.budget) || 0; totalAmount += parseFloat(w.amount) || 0; });
-    let remaining = totalBudget - totalAmount;
-    
-    let dailyWorkRows = '';
-    if (projectWork.length > 0) {
-        for (let w of projectWork) {
-            let budget = parseFloat(w.budget) || 0;
-            let amount = parseFloat(w.amount) || 0;
-            dailyWorkRows += '<tr><td style="border:1px solid #cbd5e1;padding:10px 8px;">' + new Date(w.date).toLocaleString() + '</td>' +
-                '<td style="border:1px solid #cbd5e1;padding:10px 8px;">' + escapeHtml(w.work_description || '-') + '</td>' +
-                '<td style="border:1px solid #cbd5e1;padding:10px 8px;text-align:right;">' + formatNumberWithCommas(budget) + '</td>' +
-                '<td style="border:1px solid #cbd5e1;padding:10px 8px;text-align:right;">' + formatNumberWithCommas(amount) + '</td>' +
-                '<td style="border:1px solid #cbd5e1;padding:10px 8px;text-align:center;">' + (w.status || 'pending') + '</td></tr>';
-        }
-    } else {
-        dailyWorkRows = '<tr><td colspan="5" style="text-align:center;padding:40px;">No daily work records found</td></tr>';
-    }
-    
-    let printWindow = window.open('', '_blank');
-    if (!printWindow) { showToast("Please allow popups", true); return; }
-    
-    printWindow.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>${escapeHtml(p.name)} - Project Report</title>
-    <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Inter',Arial,sans-serif; background:#f1f5f9; padding:40px 20px; }
-        .container { max-width:1100px; margin:0 auto; background:white; border-radius:20px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,0.15); border:2px solid #0d9488; }
-        .header { background:linear-gradient(135deg,#0d9488,#0f766e); color:white; padding:30px; text-align:center; }
-        .header h1 { font-size:24px; margin:0; }
-        .header p { font-size:12px; opacity:0.85; }
-        .info-bar { background:#f8fafc; padding:12px 25px; display:flex; justify-content:space-between; font-size:12px; border-bottom:1px solid #e2e8f0; flex-wrap:wrap; }
-        .image-section { text-align:center; padding:20px; background:#fafcff; border-bottom:1px solid #e2e8f0; }
-        .image-section img { max-width:200px; max-height:150px; border-radius:8px; object-fit:cover; }
-        .details-table { width:100%; border-collapse:collapse; }
-        .details-table tr { border-bottom:1px solid #e2e8f0; }
-        .details-table td:first-child { width:180px; background:#f8fafc; padding:14px 20px; font-weight:700; color:#0d9488; border-right:1px solid #e2e8f0; }
-        .details-table td:last-child { padding:14px 20px; color:#1e293b; }
-        .section-title { background:#0d9488; color:white; padding:12px 25px; font-size:14px; font-weight:700; }
-        .daily-table { width:100%; border-collapse:collapse; font-size:12px; }
-        .daily-table th { background:#0d9488; color:white; padding:10px 8px; border:1px solid #0f766e; }
-        .daily-table td { padding:8px; border:1px solid #e2e8f0; }
-        .summary-cards { display:flex; gap:15px; padding:15px 25px; background:#f0fdf4; border-bottom:1px solid #e2e8f0; }
-        .summary-card { flex:1; background:white; border-radius:10px; padding:12px; text-align:center; border:1px solid #e2e8f0; }
-        .summary-card .label { font-size:10px; font-weight:600; color:#64748b; margin-bottom:6px; }
-        .summary-card .value { font-size:14px; font-weight:800; color:#0d9488; }
-        .footer { text-align:center; font-size:10px; color:#6b7280; padding:15px; border-top:1px solid #e2e8f0; }
-        .print-btn { text-align:center; padding:15px; border-top:1px solid #e2e8f0; }
-        .print-btn button { background:#0d9488; color:white; border:none; padding:10px 28px; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; }
-        @media print { .print-btn { display:none; } body { background:white; padding:0; } .header { background:#0d9488 !important; } }
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>${escapeHtml(p.name)}</h1><p>Project Report - Generated on ${new Date().toLocaleString()}</p></div>
-            <div class="info-bar">
-                <span><strong>Project ID:</strong> #${p.id}</span>
-                <span><strong>Department:</strong> Survey</span>
-                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
-            </div>
-            <div class="image-section">${imageUrl && isImage ? `<img src="${imageUrl}?t=${Date.now()}" onerror="this.parentElement.innerHTML='<div>No Image Available</div>'">` : '<div>No Image Available</div>'}</div>
-            <div class="section-title"><i class="fas fa-info-circle"></i> PROJECT DETAILS</div>
-            <table class="details-table">
-                <tr><td>📌 Project Name:</td><td><strong>${escapeHtml(p.name)}</strong></td></tr>
-                <tr><td>👤 Client Name:</td><td>${escapeHtml(p.client_name || 'N/A')}</td></tr>
-                <tr><td>💰 Amount:</td><td><strong>${formatCurrency(p.amount)}</strong></td></tr>
-                <tr><td>📊 Status:</td><td><span class="status-badge ${statusClass}">${statusText}</span></td></tr>
-                <tr><td>📈 Progress:</td><td>${p.progress || 0}%</td></tr>
-                <tr><td>📍 Location:</td><td>${escapeHtml(p.location || 'N/A')}</td></tr>
-                <tr><td>📅 Start Date:</td><td>${p.start_date || 'Not specified'}</td></tr>
-                <tr><td>📅 End Date:</td><td>${p.end_date || 'Not specified'}</td></tr>
-                <tr><td>📝 Description:</td><td>${escapeHtml(p.description || 'No description')}</td></tr>
-                <tr><td>👤 Created By:</td><td>${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td></tr>
-            </table>
-            
-            <div class="section-title"><i class="fas fa-calendar-day"></i> DAILY WORK RECORDS</div>
-            ${projectWork.length > 0 ? `
-            <div class="summary-cards">
-                <div class="summary-card"><div class="label">Total Budget</div><div class="value">${formatCurrency(totalBudget)}</div></div>
-                <div class="summary-card"><div class="label">Total Amount Spent</div><div class="value">${formatCurrency(totalAmount)}</div></div>
-                <div class="summary-card"><div class="label">Remaining Budget</div><div class="value">${formatCurrency(remaining)}</div></div>
-            </div>` : ''}
-            <div style="padding:20px 25px;overflow-x:auto;">
-                <table class="daily-table">
-                    <thead><tr><th>Date/Time</th><th>Description</th><th>Budget (TZS)</th><th>Amount Spent (TZS)</th><th>Status</th></tr></thead>
-                    <tbody>${dailyWorkRows}</tbody>
-                </table>
-            </div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Official Project Document</div>
-            <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1500);">🖨️ Save as PDF / Print</button></div>
-        </div>
-    </body>
-    </html>`);
-    printWindow.document.close();
-    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
-}
-
-function exportSingleProjectExcel(id) { 
-    const p = projectsData.find(p=>p.id===id); 
-    if(p) { 
-        let ws = [['Name','Client','Amount','Status','Progress','Location','Start Date','End Date']]; 
-        ws.push([p.name, p.client_name||'-', formatNumberWithCommas(p.amount), p.status, p.progress, p.location||'-', p.start_date||'', p.end_date||'']); 
-        let wb = XLSX.utils.book_new(); 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Project'); 
-        XLSX.writeFile(wb, `project_${p.id}.xlsx`); 
-        showToast('Exported to Excel'); 
-    } 
-}
-
-function exportAllProjectsToExcel() { 
-    let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Start Date','End Date']]; 
-    projectsData.forEach(p => ws.push([p.id, p.name, p.client_name||'-', formatNumberWithCommas(p.amount), p.status, p.progress, p.location||'-', p.start_date||'', p.end_date||''])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Projects'); 
-    XLSX.writeFile(wb, `all_projects_${new Date().toISOString().slice(0,10)}.xlsx`); 
-    showToast('All projects exported to Excel'); 
-}
-
-function exportAllProjectsToPDF() {
-    if (projectsData.length === 0) { showToast('No projects to export', true); return; }
-    if (dailyworkData.length === 0) { fetchDailyWork(); }
-    
-    let totalAmount = 0, pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
-    let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
-    
-    for (let p of projectsData) {
-        totalAmount += parseFloat(p.amount) || 0;
-        if (p.status === 'pending') pendingCount++;
-        else if (p.status === 'in_progress') inProgressCount++;
-        else if (p.status === 'completed') completedCount++;
-        else if (p.status === 'approved') approvedCount++;
-        
-        const projectWork = dailyworkData.filter(w => w.project_id == p.id || w.project_name === p.name);
-        totalDailyRecords += projectWork.length;
-        for (let w of projectWork) {
-            totalBudgetAll += parseFloat(w.budget) || 0;
-            totalExpensesAll += parseFloat(w.amount) || 0;
-        }
-    }
-    let totalRemainingAll = totalBudgetAll - totalExpensesAll;
-    
-    let rows = '';
-    for (let p of projectsData) {
-        let imageUrl = getFullImageUrl(p.image);
-        let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
-        let statusClass = getProjectStatusClass(p.status);
-        let statusText = getProjectStatusText(p.status);
-        const projectWork = dailyworkData.filter(w => w.project_id == p.id || w.project_name === p.name);
-        
-        let dailyRows = '';
-        if (projectWork.length > 0) {
-            for (let w of projectWork) {
-                let budget = parseFloat(w.budget) || 0;
-                let amount = parseFloat(w.amount) || 0;
-                dailyRows += '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 6px;border:1px solid #cbd5e1;">' + new Date(w.date).toLocaleString() + '</td><td style="padding:8px 6px;border:1px solid #cbd5e1;">' + escapeHtml(w.work_description || '-') + '</td><td style="padding:8px 6px;border:1px solid #cbd5e1;text-align:right;">' + formatNumberWithCommas(budget) + '</td><td style="padding:8px 6px;border:1px solid #cbd5e1;text-align:right;">' + formatNumberWithCommas(amount) + '</td><td style="padding:8px 6px;border:1px solid #cbd5e1;text-align:center;">' + (w.status || 'pending') + '</td><td style="padding:8px 6px;border:1px solid #cbd5e1;text-align:center;">' + escapeHtml(w.created_by || 'System') + '</td></tr>';
-            }
-        } else {
-            dailyRows = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#94a3b8;">No daily work records</td></tr>';
-        }
-        
-        rows += '<div style="margin-bottom:40px;border:2px solid #0d9488;border-radius:16px;overflow:hidden;page-break-inside:avoid;background:white;">' +
-            '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);color:white;padding:15px 20px;"><h3 style="margin:0;font-size:18px;">' + escapeHtml(p.name) + '</h3><p style="margin:4px 0 0;font-size:11px;opacity:0.85;">Project ID: #' + p.id + ' | Client: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + ' | Records: ' + projectWork.length + '</p></div>' +
-            '<div style="text-align:center;padding:15px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">' + (imageUrl && isImage ? '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width:200px;max-height:150px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb;" onerror="this.style.display=\'none\'">' : '<div style="color:#999;padding:10px;">No Image Available</div>') + '</div>' +
-            '<div style="padding:15px 20px;background:white;border-bottom:1px solid #e5e7eb;"><table style="width:100%;border-collapse:collapse;font-size:13px;">' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;width:35%;font-weight:600;color:#0d9488;">💰 Amount:</td><td style="padding:8px 12px;"><span style="color:#059669;font-weight:bold;">' + formatCurrency(p.amount) + '</span></td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📊 Status:</td><td style="padding:8px 12px;"><span class="status-badge ' + statusClass + '">' + statusText + '</span></td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📈 Progress:</td><td style="padding:8px 12px;">' + (p.progress || 0) + '%</td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📍 Location:</td><td style="padding:8px 12px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📅 Start Date:</td><td style="padding:8px 12px;">' + (p.start_date || 'Not specified') + '</td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📅 End Date:</td><td style="padding:8px 12px;">' + (p.end_date || 'Not specified') + '</td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">📝 Description:</td><td style="padding:8px 12px;">' + escapeHtml(p.description || 'No description') + '</td></tr>' +
-            '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:8px 12px;font-weight:600;color:#0d9488;">👤 Created By:</td><td style="padding:8px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>' +
-            '</table></div>' +
-            '<div style="background:#f8fafc;padding:15px 20px;border-top:2px solid #0d9488;"><h4 style="margin:0 0 12px 0;font-size:14px;color:#0d9488;"> Daily Work Records (' + projectWork.length + ')</h4>' +
-            (projectWork.length > 0 ? '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="background:#0d9488;color:white;"><th style="padding:10px 8px;border:1px solid #0f766e;width:16%;">Date/Time</th><th style="padding:10px 8px;border:1px solid #0f766e;width:30%;">Description</th><th style="padding:10px 8px;border:1px solid #0f766e;width:12%;text-align:right;">Budget (TZS)</th><th style="padding:10px 8px;border:1px solid #0f766e;width:12%;text-align:right;">Amount Spent (TZS)</th><th style="padding:10px 8px;border:1px solid #0f766e;width:12%;text-align:center;">Status</th><th style="padding:10px 8px;border:1px solid #0f766e;width:18%;text-align:center;">Created By</th></tr></thead><tbody>' + dailyRows + '</tbody></table></div>' : '<div style="text-align:center;padding:20px;color:#94a3b8;">No daily work records</div>') +
-            '</div></div>';
-    }
-    
-    let w = window.open('', '_blank');
-    if (!w) { showToast("Please allow popups", true); return; }
-    
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>All Projects Report - Survey Department</title>
-    <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:"Inter","Segoe UI",Arial,sans-serif; background:#f0f2f5; padding:30px; }
-        .container { max-width:1300px; margin:0 auto; background:white; border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.1); border:2px solid #0d9488; }
-        .header { background:linear-gradient(135deg,#0d9488,#0f766e); color:white; padding:25px; text-align:center; }
-        .header h1 { font-size:24px; margin:0; }
-        .header p { font-size:12px; opacity:0.85; margin-top:6px; }
-        .info-bar { background:#f8fafc; padding:12px 25px; display:flex; justify-content:space-between; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; gap:10px; font-size:12px; }
-        .summary-cards { display:grid; grid-template-columns:repeat(6,1fr); gap:15px; padding:20px 25px; background:#f9fafb; border-bottom:1px solid #e5e7eb; }
-        .summary-card { background:white; border-radius:10px; padding:12px; text-align:center; border:1px solid #e5e7eb; }
-        .summary-card .label { font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; }
-        .summary-card .value { font-size:16px; font-weight:800; margin-top:5px; }
-        .summary-card.total .value { color:#0d9488; }
-        .summary-card.amount .value { color:#059669; }
-        .summary-card.budget .value { color:#3b82f6; }
-        .summary-card.expenses .value { color:#dc2626; }
-        .summary-card.records .value { color:#8b5cf6; }
-        .projects-section { padding:20px 25px; }
-        .print-btn { text-align:center; padding:15px; background:#f9fafb; border-top:1px solid #e5e7eb; }
-        .print-btn button { background:#0d9488; color:white; border:none; padding:10px 24px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
-        @media print { .print-btn { display:none; } body { background:white; padding:0; } .header { background:#0d9488 !important; } }
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>📊 All Projects Report</h1><p>Survey Department - Complete Project Overview</p></div>
-            <div class="info-bar">
-                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                <span><strong>Total Projects:</strong> ${projectsData.length}</span>
-                <span><strong>Total Daily Records:</strong> ${totalDailyRecords}</span>
-                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
-                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
-            </div>
-            <div class="summary-cards">
-                <div class="summary-card total"><div class="label">Total Projects</div><div class="value">${projectsData.length}</div></div>
-                <div class="summary-card amount"><div class="label">Total Amount</div><div class="value">${formatCurrency(totalAmount)}</div></div>
-                <div class="summary-card budget"><div class="label">Total Budget</div><div class="value">${formatCurrency(totalBudgetAll)}</div></div>
-                <div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">${formatCurrency(totalExpensesAll)}</div></div>
-                <div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">${totalDailyRecords}</div></div>
-            </div>
-            <div class="projects-section">${rows}</div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">🖨️ Save as PDF / Print</button>
-                <button onclick="window.close();" style="background:#6b7280;margin-left:10px;">❌ Close</button>
-            </div>
-        </div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
-}
-
+// ==================== EXPORT FUNCTIONS ====================
 async function viewProject(id) {
     const p = projectsData.find(p => p.id === id);
     if(p) {
         if (p._is_unviewed) {
             markProjectViewed(id);
+            await markNotificationViewed('project', id);
             await apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
         }
         currentProjectId = id;
@@ -2040,214 +1921,60 @@ async function viewProject(id) {
     }
 }
 
-// ==================== PROJECT DOCUMENT UPLOAD ====================
-function openUploadProjectDocModal() { 
-    document.getElementById('projectDocTitle').value = ''; 
-    document.getElementById('projectDocDesc').value = ''; 
-    document.getElementById('projectDocFile').value = ''; 
-    document.getElementById('projectDocPreview').classList.add('hidden'); 
-    currentProjectDocFile = null; 
-    openModal('projectDocUploadModal'); 
+function openAddRequestModal() {
+    document.getElementById('reqId').value = '';
+    document.getElementById('reqDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('reqType').value = 'expense';
+    document.getElementById('reqTitle').value = 'Office';
+    document.getElementById('reqAmount').value = '';
+    document.getElementById('reqDesc').value = '';
+    openModal('requestModal');
 }
 
-document.getElementById('projectDocFile')?.addEventListener('change', function(e) { 
-    if(e.target.files && e.target.files[0]) { 
-        currentProjectDocFile = e.target.files[0]; 
-        document.getElementById('projectDocFileName').innerText = currentProjectDocFile.name; 
-        document.getElementById('projectDocPreview').classList.remove('hidden'); 
-    } 
-});
-
-function removeProjectDocument() { 
-    currentProjectDocFile = null; 
-    document.getElementById('projectDocFile').value = ''; 
-    document.getElementById('projectDocPreview').classList.add('hidden'); 
-}
-
-async function saveProjectDocument() {
-    const title = document.getElementById('projectDocTitle').value.trim();
-    const description = document.getElementById('projectDocDesc').value;
-    if (!title) { showToast('Document title required', true); return; }
-    if (!currentProjectDocFile) { showToast('Please select a file', true); return; }
-    if (currentProjectDocFile.size > 10 * 1024 * 1024) { showToast('File too large. Max size is 10MB', true); return; }
+async function submitRequest() {
+    let id = document.getElementById('reqId').value;
+    let request_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
+    let type = document.getElementById('reqType').value;
+    let title = document.getElementById('reqTitle').value.trim();
+    let amount = parseAmount(document.getElementById('reqAmount').value);
+    let description = document.getElementById('reqDesc').value;
     
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('department_id', DEPARTMENT_ID);
-    formData.append('uploaded_by', CURRENT_USER);
-    formData.append('document_file', currentProjectDocFile);
+    if (!title || amount <= 0) { showToast('Title/Source and amount required', true); return; }
     
-    const sendBtn = document.querySelector('#projectDocUploadModal .btn-primary');
+    let data = { 
+        title: title,
+        request_date: request_date,
+        type: type,
+        source: title,
+        amount: amount,
+        description: description,
+        status: 'pending',
+        department_id: DEPARTMENT_ID,
+        requested_by: CURRENT_USER
+    };
+    
+    const sendBtn = document.querySelector('#requestModal .btn-primary');
     const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
     sendBtn.disabled = true;
     
     try {
-        const response = await fetch(API_BASE + 'upload_project_document.php', { method: 'POST', body: formData });
-        const result = await response.json();
-        if (result.success) { 
-            showToast('✅ Document uploaded successfully'); 
-            addLog(`Document uploaded: ${title}`);
-            closeModal('projectDocUploadModal'); 
-            await loadProjects(); 
+        let res = id ? 
+            await apiCall('update_fund_request.php', 'POST', { ...data, id: parseInt(id) }) : 
+            await apiCall('add_fund_request.php', 'POST', data);
+        if(res && res.success) { 
+            showToast(id ? 'Request updated' : 'Request submitted'); 
+            addLog(id ? `Fund request updated: ${title}` : `Fund request added: ${title}`);
+            closeModal('requestModal'); 
+            await loadRequests(); 
             await loadDashboard(); 
-        } else { 
-            showToast('❌ ' + (result.message || 'Upload failed'), true); 
-        }
-    } catch (error) { 
-        showToast('❌ Network error: ' + error.message, true); 
+        } else showToast(res?.message || 'Failed', true);
+    } catch(e) { 
+        showToast('Network error: ' + e.message, true); 
     } finally { 
         sendBtn.innerHTML = originalText; 
         sendBtn.disabled = false; 
     }
-}
-
-async function deleteProjectDocument(docId) {
-    if (confirm('Delete this document?')) {
-        const doc = projectDocuments.find(d => d.id === docId);
-        if(doc) await addToRecycleBin(docId, 'project_document', doc.title);
-        const res = await apiCall('delete_project_document.php', 'POST', { id: docId, deleted_by: CURRENT_USER });
-        if (res.success) { 
-            showToast('Document moved to recycle bin'); 
-            await loadProjects(); 
-        } else { 
-            showToast(res.message || 'Failed', true); 
-        }
-    }
-}
-
-// ==================== EXPORT FUNCTIONS ====================
-
-// === PROJECT DOCUMENTS EXPORT ===
-function exportAllProjectDocsToExcel() { 
-    if(projectDocuments.length===0) { showToast('No documents', true); return; } 
-    let ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']]; 
-    projectDocuments.forEach(d => { 
-        let fileSize = d.file_size ? (d.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'; 
-        ws.push([d.title, d.description||'-', d.file_name, d.uploaded_by, d.created_at, fileSize]); 
-    }); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Documents'); 
-    XLSX.writeFile(wb, `all_documents_${new Date().toISOString().slice(0,10)}.xlsx`); 
-    showToast('Exported'); 
-}
-
-// === UPLOADED REPORTS EXPORT - EXCEL ===
-function exportAllUploadedReportsToExcel() {
-    if (uploadedReportsData.length === 0) {
-        showToast('No uploaded reports to export', true);
-        return;
-    }
-    
-    let wsData = [
-        ['ID', 'Title', 'File Name', 'Description', 'Period', 'Uploaded By', 'Uploaded At', 'File Size (KB)']
-    ];
-    
-    for (let doc of uploadedReportsData) {
-        let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) : 'Unknown';
-        let fileSizeDisplay = doc.file_size ? fileSize + ' KB' : 'Unknown';
-        
-        wsData.push([
-            doc.id || '',
-            doc.title || '',
-            doc.file_name || '',
-            doc.description || '',
-            doc.period || 'Not specified',
-            doc.uploaded_by || doc.created_by || 'System',
-            doc.created_at ? new Date(doc.created_at).toLocaleString() : '',
-            fileSizeDisplay
-        ]);
-    }
-    
-    let wb = XLSX.utils.book_new();
-    let ws = XLSX.utils.aoa_to_sheet(wsData);
-    
-    ws['!cols'] = [
-        { wch: 8 }, { wch: 30 }, { wch: 25 }, { wch: 35 },
-        { wch: 15 }, { wch: 20 }, { wch: 22 }, { wch: 15 }
-    ];
-    
-    XLSX.utils.book_append_sheet(wb, ws, 'UploadedReports');
-    XLSX.writeFile(wb, `uploaded_reports_${new Date().toISOString().slice(0,10)}.xlsx`);
-    showToast(`✅ ${uploadedReportsData.length} uploaded reports exported to Excel`, false);
-    addLog(`Uploaded reports exported to Excel (${uploadedReportsData.length} files)`);
-}
-
-// === UPLOADED REPORTS EXPORT - PDF ===
-function exportAllUploadedReportsToPDF() {
-    if (uploadedReportsData.length === 0) {
-        showToast('No uploaded reports to export', true);
-        return;
-    }
-    
-    let rows = '';
-    for (let doc of uploadedReportsData) {
-        let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
-        rows += `<div style="margin-bottom:20px;border-bottom:1px solid #0d9488;padding-bottom:15px;">
-            <h3 style="color:#0d9488;">${escapeHtml(doc.title)}</h3>
-            <p><strong>File:</strong> ${escapeHtml(doc.file_name)}</p>
-            <p><strong>Period:</strong> ${doc.period || 'Not specified'}</p>
-            <p><strong>Description:</strong> ${escapeHtml(doc.description || '-')}</p>
-            <p><strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by || 'System')}</p>
-            <p><strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}</p>
-            <p><strong>File Size:</strong> ${fileSize}</p>
-        </div>`;
-    }
-    
-    let w = window.open('', '_blank');
-    if (!w) { showToast("Please allow popups", true); return; }
-    
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>All Uploaded Reports - Survey Department</title>
-        <style>
-            * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family:'Inter','Segoe UI',Arial,sans-serif; background:#f0f2f5; padding:30px; }
-            .container { max-width:1000px; margin:0 auto; background:white; border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.1); border:2px solid #0d9488; }
-            .header { background:linear-gradient(135deg,#0d9488,#0f766e); color:white; padding:25px; text-align:center; }
-            .header h1 { font-size:22px; margin:0; }
-            .header p { font-size:12px; opacity:0.85; margin-top:5px; }
-            .info-bar { background:#f8fafc; padding:12px 25px; display:flex; justify-content:space-between; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; gap:10px; font-size:12px; }
-            .reports-section { padding:25px; }
-            .footer { text-align:center; font-size:10px; color:#6b7280; padding:15px; border-top:1px solid #e5e7eb; background:#f9fafb; }
-            .print-btn { text-align:center; padding:15px; background:#f9fafb; border-top:1px solid #e5e7eb; }
-            .print-btn button { background:#0d9488; color:white; border:none; padding:10px 24px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
-            .print-btn button.close-btn { background:#6b7280; margin-left:10px; }
-            @media print { .print-btn { display:none; } body { background:white; padding:0; } .header { background:#0d9488 !important; } }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>📁 All Uploaded Reports</h1>
-                <p>Survey Department - Uploaded Reports Archive</p>
-            </div>
-            <div class="info-bar">
-                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                <span><strong>Total Uploaded Reports:</strong> ${uploadedReportsData.length}</span>
-                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
-                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
-            </div>
-            <div class="reports-section">
-                ${rows}
-            </div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Uploaded Reports Archive</div>
-            <div class="print-btn">
-                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">
-                    🖨️ Save as PDF / Print
-                </button>
-                <button class="close-btn" onclick="window.close();">
-                    ❌ Close
-                </button>
-            </div>
-        </div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
 
 // ==================== LOAD PROJECTS SECTION ====================
@@ -2296,7 +2023,6 @@ async function loadProjects() {
             let statusClass = getProjectStatusClass(p.status);
             let statusText = getProjectStatusText(p.status);
             
-            // Check if project was sent from another department
             let fromDept = '';
             if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
                 let deptName = departmentNames[p.sent_from_dept] || 'Unknown';
@@ -2365,13 +2091,18 @@ async function loadProjects() {
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
             let fileIcon = fileExt === 'pdf' ? 'fa-file-pdf' : (fileExt === 'doc' || fileExt === 'docx' ? 'fa-file-word' : (fileExt === 'xls' || fileExt === 'xlsx' ? 'fa-file-excel' : (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' ? 'fa-file-image' : 'fa-file-alt')));
             let isNew = doc._is_unviewed || false;
+            let fromDept = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                let deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+            }
             
             docsHtml += `
                 <div class="document-card ${isNew ? 'unviewed' : ''}" id="doc-card-${doc.id}" style="position:relative;">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     <div class="card-header">
                         <h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4>
-                        <p>${doc.file_name || 'Document'}</p>
+                        <p>${doc.file_name || 'Document'} ${fromDept}</p>
                     </div>
                     <div class="p-3">
                         <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
@@ -2393,7 +2124,7 @@ function switchProjectTab(tab) {
     loadProjects(); 
 }
 
-// ==================== REQUESTS SECTION - USING fund_requests TABLE ====================
+// ==================== REQUESTS SECTION ====================
 async function loadRequests(highlightId = null) {
     await fetchRequests();
     
@@ -2471,327 +2202,6 @@ async function loadRequests(highlightId = null) {
         } 
     }
     updateRequestBadge();
-}
-
-function openAddRequestModal() {
-    document.getElementById('reqId').value = '';
-    document.getElementById('reqDate').value = new Date().toISOString().split('T')[0];
-    document.getElementById('reqType').value = 'expense';
-    document.getElementById('reqTitle').value = 'Office';
-    document.getElementById('reqAmount').value = '';
-    document.getElementById('reqDesc').value = '';
-    openModal('requestModal');
-}
-
-async function submitRequest() {
-    let id = document.getElementById('reqId').value;
-    let request_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
-    let type = document.getElementById('reqType').value;
-    let title = document.getElementById('reqTitle').value.trim();
-    let amount = parseAmount(document.getElementById('reqAmount').value);
-    let description = document.getElementById('reqDesc').value;
-    
-    if (!title || amount <= 0) { showToast('Title/Source and amount required', true); return; }
-    
-    let data = { 
-        title: title,
-        request_date: request_date,
-        type: type,
-        source: title,
-        amount: amount,
-        description: description,
-        status: 'pending',
-        department_id: DEPARTMENT_ID,
-        requested_by: CURRENT_USER
-    };
-    
-    const sendBtn = document.querySelector('#requestModal .btn-primary');
-    const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
-    sendBtn.disabled = true;
-    
-    try {
-        let res = id ? 
-            await apiCall('update_fund_request.php', 'POST', { ...data, id: parseInt(id) }) : 
-            await apiCall('add_fund_request.php', 'POST', data);
-        if(res && res.success) { 
-            showToast(id ? 'Request updated' : 'Request submitted'); 
-            addLog(id ? `Fund request updated: ${title}` : `Fund request added: ${title}`);
-            closeModal('requestModal'); 
-            await loadRequests(); 
-            await loadDashboard(); 
-        } else showToast(res?.message || 'Failed', true);
-    } catch(e) { 
-        showToast('Network error: ' + e.message, true); 
-    } finally { 
-        sendBtn.innerHTML = originalText; 
-        sendBtn.disabled = false; 
-    }
-}
-
-async function viewRequestDetails(id) {
-    const r = requestsData.find(req => req.id === id);
-    if(r) {
-        markRequestViewed(id);
-        
-        let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
-        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-        let amount = parseFloat(r.amount) || 0;
-        
-        let actionHtml = '';
-        if (r.requested_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Requested by: ${escapeHtml(r.requested_by)} | ${formatDateTime(r.created_at)}</div>`;
-        if (r.reviewed_by) actionHtml += `<div><i class="fas fa-check-circle text-xs mr-1"></i> Reviewed by: ${escapeHtml(r.reviewed_by)} | ${formatDateTime(r.reviewed_at)}</div>`;
-        
-        document.getElementById('viewRequestContent').innerHTML = `
-            <div class="space-y-2">
-                <div class="bg-gradient-to-r from-orange-600 to-orange-800 text-white p-4 rounded-lg">
-                    <h3 class="text-lg font-bold">Fund Request #${r.id}</h3>
-                    <p class="text-xs opacity-90 mt-1">Submitted: ${formatDateTime(r.created_at)}</p>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div><span class="font-semibold">Date:</span></div><div>${formatDateTime(r.request_date)}</div>
-                    <div><span class="font-semibold">Type:</span></div><div><span class="status-badge ${typeClass}">${r.type}</span></div>
-                    <div><span class="font-semibold">Title/Source:</span></div><div><strong>${escapeHtml(r.title || r.source)}</strong></div>
-                    <div><span class="font-semibold">Amount:</span></div><div class="font-bold text-orange-600">${formatCurrency(amount)}</div>
-                    <div><span class="font-semibold">Description:</span></div><div>${escapeHtml(r.description || 'No description provided')}</div>
-                    <div><span class="font-semibold">Status:</span></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
-                    <div><span class="font-semibold">Requested By:</span></div><div>${escapeHtml(r.requested_by || r.created_by || CURRENT_USER)}</div>
-                </div>
-                ${actionHtml ? `<div class="action-history text-xs text-gray-400 mt-2 pt-2 border-t">${actionHtml}</div>` : ''}
-                ${r.status === 'approved' ? `<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg"><i class="fas fa-check-circle text-green-600 mr-2"></i> This request has been approved</div>` : ''}
-                ${r.status === 'pending' ? `<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg"><i class="fas fa-clock text-yellow-600 mr-2"></i> This request is pending approval</div>` : ''}
-                ${r.status === 'cancelled' ? `<div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg"><i class="fas fa-times-circle text-red-600 mr-2"></i> This request has been cancelled</div>` : ''}
-            </div>
-        `;
-        document.getElementById('viewRequestButtons').innerHTML = `
-            <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-            <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>
-        `;
-        openModal('viewRequestModal');
-        loadRequests();
-    }
-}
-
-function editRequest(id) { 
-    const r = requestsData.find(req => req.id === id); 
-    if(r) { 
-        document.getElementById('reqId').value = r.id; 
-        document.getElementById('reqDate').value = r.request_date; 
-        document.getElementById('reqType').value = r.type; 
-        document.getElementById('reqTitle').value = r.title || r.source; 
-        document.getElementById('reqAmount').value = formatNumberWithCommas(r.amount); 
-        document.getElementById('reqDesc').value = r.description || ''; 
-        openModal('requestModal'); 
-    } 
-}
-
-async function deleteRequest(id) { 
-    if(confirm('Delete this request?')) { 
-        const r = requestsData.find(req=>req.id===id);
-        if(r) await addToRecycleBin(id, 'fund_request', r.title);
-        let res = await apiCall('delete_fund_request.php', 'POST', { 
-            request_id: parseInt(id), 
-            is_deleted: 1,
-            deleted_by: CURRENT_USER 
-        }); 
-        if(res && res.success) { 
-            showToast('Request moved to recycle bin'); 
-            addLog(`Fund request deleted: ${r?.title}`);
-            await loadRequests(); 
-            await loadDashboard(); 
-        } else { 
-            requestsData = requestsData.filter(req => req.id !== id);
-            await loadRequests(); 
-            await loadDashboard(); 
-            showToast('Request removed from local view', false);
-        }
-    } 
-}
-
-function exportSingleRequestExcel(id) { 
-    const r = requestsData.find(req=>req.id===id); 
-    if(r) { 
-        let ws = [['Date','Type','Title/Source','Amount','Description','Status','Requested By']]; 
-        ws.push([
-            formatDate(r.request_date), 
-            r.type, 
-            r.title || r.source, 
-            formatNumberWithCommas(r.amount), 
-            r.description||'', 
-            r.status, 
-            r.requested_by || r.created_by || CURRENT_USER
-        ]); 
-        let wb = XLSX.utils.book_new(); 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Request'); 
-        XLSX.writeFile(wb, `request_${r.id}.xlsx`); 
-        showToast('Exported to Excel'); 
-    } 
-}
-
-function exportSingleRequestPDF(id) { 
-    const r = requestsData.find(req=>req.id===id); 
-    if(r) { 
-        let printWindow = window.open('', '_blank');
-        if (!printWindow) { showToast("Please allow popups to generate PDF", true); return; }
-        printWindow.document.write(`<!DOCTYPE html>
-        <html><head><title>Request Details - ${escapeHtml(r.title || r.source)}</title>
-        <style>
-            *{margin:0;padding:0;box-sizing:border-box;}
-            body{font-family:'Inter',Arial,sans-serif;background:#f0f2f5;padding:30px;}
-            .container{max-width:900px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #f59e0b;}
-            .header{background:linear-gradient(135deg,#f59e0b,#d97706);color:white;padding:20px 25px;text-align:center;}
-            .header h1{font-size:22px;margin:0;}
-            .info-bar{background:#fef3c7;padding:10px 20px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;font-size:11px;}
-            .details-table{width:100%;border-collapse:collapse;margin:20px 0;}
-            .details-table tr{border-bottom:1px solid #e5e7eb;}
-            .details-table th{width:35%;background:#fffbeb;padding:12px 20px;text-align:left;font-weight:600;color:#92400e;border-right:1px solid #e5e7eb;}
-            .details-table td{padding:12px 20px;text-align:left;color:#1f2937;}
-            .status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:500;}
-            .footer{text-align:center;font-size:9px;color:#6b7280;padding:12px;border-top:1px solid #e5e7eb;background:#f9fafb;}
-            .print-btn{text-align:center;padding:15px;background:#f9fafb;border-top:1px solid #e5e7eb;}
-            .print-btn button{background:#f59e0b;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold;}
-            @media print{body{background:white;padding:0;}.print-btn{display:none;}.header{background:#f59e0b !important;}}
-        </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header"><h1>Fund Request Details</h1><p>Request ID: #${r.id}</p></div>
-                <div class="info-bar"><span><strong>Department:</strong> Survey</span><span><strong>Requested By:</strong> ${escapeHtml(r.requested_by || r.created_by || 'System')}</span></div>
-                <table class="details-table">
-                    <tr><th>📅 Date</th><td>${formatDate(r.request_date)}</td</tr
-                    <tr><th>📌 Type</th><td><span class="status-badge ${r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${r.type}</span></td</tr
-                    <tr><th>📝 Title/Source</th><td><strong>${escapeHtml(r.title || r.source)}</strong></td</tr
-                    <tr><th>💰 Amount</th><td style="color:#ea580c;font-weight:bold;font-size:16px;">${formatCurrency(r.amount)}</td</tr
-                    <tr><th>📝 Description</th><td>${escapeHtml(r.description || 'No description')}</td</tr
-                    <tr><th>📊 Status</th><td><span class="status-badge ${r.status === 'approved' ? 'bg-green-100 text-green-700' : r.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">${r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending'}</span></td</tr
-                    <tr><th>👤 Requested By</th><td>${escapeHtml(r.requested_by || r.created_by || 'System')}</td</tr
-                    <tr><th>📅 Submitted At</th><td>${formatDateTime(r.created_at)}</td</tr
-                </table>
-                <div class="footer">GeoTraverse ERP System - Survey Department | Official Request Document</div>
-                <div class="print-btn"><button onclick="window.print(); setTimeout(()=>window.close(),1000);"><i class="fas fa-print"></i> Save as PDF</button></div>
-            </div>
-        </body>
-        </html>`);
-        printWindow.document.close();
-        showToast("PDF preview opened - Click Print to save");
-    } 
-}
-
-function exportAllRequestsToExcel() { 
-    let ws = [['ID','Date','Type','Title/Source','Amount','Description','Status','Requested By']]; 
-    requestsData.forEach(r => ws.push([
-        r.id, formatDate(r.request_date), r.type, r.title || r.source, 
-        formatNumberWithCommas(r.amount), r.description||'', r.status, 
-        r.requested_by || r.created_by || CURRENT_USER
-    ])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Requests'); 
-    XLSX.writeFile(wb, `all_requests_${new Date().toISOString().slice(0,10)}.xlsx`); 
-    showToast('All requests exported to Excel'); 
-}
-
-function exportAllRequestsToPDF() {
-    if (requestsData.length === 0) { showToast('No requests to export', true); return; }
-    
-    let totalAmount = 0, pendingCount = 0, approvedCount = 0, cancelledCount = 0;
-    let totalIncome = 0, totalExpense = 0;
-    for (let r of requestsData) {
-        let amount = parseFloat(r.amount) || 0;
-        totalAmount += amount;
-        if (r.type === 'income') totalIncome += amount;
-        else totalExpense += amount;
-        if (r.status === 'pending') pendingCount++;
-        else if (r.status === 'approved') approvedCount++;
-        else if (r.status === 'cancelled') cancelledCount++;
-    }
-    let netProfit = totalIncome - totalExpense;
-    
-    let rows = '';
-    for (let r of requestsData) {
-        let amount = parseFloat(r.amount) || 0;
-        let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        let typeText = r.type === 'income' ? 'Income' : 'Expense';
-        let typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
-        let typeColor = r.type === 'income' ? '#059669' : '#dc2626';
-        let statusBg = r.status === 'approved' ? '#d1fae5' : r.status === 'cancelled' ? '#fee2e2' : '#fef3c7';
-        let statusColor = r.status === 'approved' ? '#059669' : r.status === 'cancelled' ? '#dc2626' : '#d97706';
-        
-        rows += '<tr style="border-bottom:1px solid #e2e8f0;">' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;">' + formatDate(r.request_date) + '</td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;text-align:center;"><span style="background:' + typeBg + ';color:' + typeColor + ';padding:4px 12px;border-radius:20px;font-size:11px;display:inline-block;">' + typeText + '</span></td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;font-weight:500;">' + escapeHtml(r.title || r.source) + '</td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:700;color:#ea580c;font-family:monospace;">' + formatCurrency(amount) + '</td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;">' + escapeHtml(r.description || '-') + '</td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;text-align:center;"><span style="background:' + statusBg + ';color:' + statusColor + ';padding:4px 12px;border-radius:20px;font-size:11px;display:inline-block;">' + statusText + '</span></td>' +
-            '<td style="padding:10px 8px;border:1px solid #cbd5e1;text-align:center;">' + escapeHtml(r.requested_by || r.created_by || 'System') + '</td>' +
-            '</tr>';
-    }
-    
-    let w = window.open('', '_blank');
-    if (!w) { showToast("Please allow popups", true); return; }
-    
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>All Fund Requests Report - Survey Department</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box;}
-        body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:30px;}
-        .container{max-width:1300px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #0d9488;}
-        .header{background:linear-gradient(135deg,#0d9488,#0f766e);color:white;padding:25px;text-align:center;}
-        .header h1{font-size:22px;margin:0;}
-        .header p{font-size:12px;opacity:0.85;margin-top:5px;}
-        .info-bar{background:#f8fafc;padding:12px 25px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:10px;font-size:12px;}
-        .summary-cards{display:grid;grid-template-columns:repeat(6,1fr);gap:15px;padding:20px 25px;background:#f9fafb;border-bottom:1px solid #e5e7eb;}
-        .summary-card{background:white;border-radius:10px;padding:12px;text-align:center;border:1px solid #e5e7eb;}
-        .summary-card .label{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;}
-        .summary-card .value{font-size:16px;font-weight:800;margin-top:5px;font-family:monospace;}
-        .summary-card.total .value{color:#0d9488;}
-        .summary-card.income .value{color:#059669;}
-        .summary-card.expense .value{color:#dc2626;}
-        .summary-card.profit .value{color:#3b82f6;}
-        .summary-card.pending .value{color:#d97706;}
-        .summary-card.approved .value{color:#059669;}
-        .table-container{overflow-x:auto;padding:20px 25px;}
-        table{width:100%;border-collapse:collapse;font-size:11px;}
-        th{background:#0d9488;color:white;padding:12px 8px;font-weight:700;text-align:left;border:1px solid #0f766e;}
-        td{padding:10px 8px;border:1px solid #cbd5e1;vertical-align:middle;}
-        .footer{text-align:center;font-size:10px;color:#6b7280;padding:15px;border-top:1px solid #e5e7eb;background:#f9fafb;}
-        .print-btn{text-align:center;padding:15px;background:#f9fafb;border-top:1px solid #e5e7eb;}
-        .print-btn button{background:#0d9488;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
-        @media print{.print-btn{display:none;}body{background:white;padding:0;}.header{background:#0d9488 !important;}th{background:#0d9488 !important;}}
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>📋 All Fund Requests Report</h1><p>Survey Department - Complete Fund Requests Overview</p></div>
-            <div class="info-bar">
-                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                <span><strong>Total Requests:</strong> ${requestsData.length}</span>
-                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
-            </div>
-            <div class="summary-cards">
-                <div class="summary-card total"><div class="label">📊 Total Requests</div><div class="value">${requestsData.length}</div></div>
-                <div class="summary-card income"><div class="label">💰 Total Income</div><div class="value">${formatCurrency(totalIncome)}</div></div>
-                <div class="summary-card expense"><div class="label">💸 Total Expenses</div><div class="value">${formatCurrency(totalExpense)}</div></div>
-                <div class="summary-card profit"><div class="label">📈 Net Profit</div><div class="value" style="color:${netProfit>=0?'#059669':'#dc2626'};">${formatCurrency(netProfit)}</div></div>
-                <div class="summary-card pending"><div class="label">⏳ Pending</div><div class="value">${pendingCount}</div></div>
-                <div class="summary-card approved"><div class="label">✅ Approved</div><div class="value">${approvedCount}</div></div>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead><tr><th style="width:12%;">Date</th><th style="width:8%;text-align:center;">Type</th><th style="width:18%;">Title/Source</th><th style="width:12%;text-align:right;">Amount (TZS)</th><th style="width:22%;">Description</th><th style="width:10%;text-align:center;">Status</th><th style="width:18%;text-align:center;">Requested By</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                    <tfoot><tr style="background:#fef3c7;font-weight:bold;"><td colspan="3" style="text-align:right;">TOTAL:</td><td style="text-align:right;font-family:monospace;"><strong>${formatCurrency(totalAmount)}</strong></td><td colspan="3"></td></tr></tfoot>
-                </table>
-            </div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Official Fund Requests Report</div>
-            <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1500);">🖨️ Save as PDF / Print</button></div>
-        </div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("📄 All Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
 // ==================== REPORTS SECTION ====================
@@ -2918,443 +2328,43 @@ function switchReportTab(tab) {
     loadReports(); 
 }
 
-function openAddReportModal() {
-    document.getElementById('reportId').value = '';
-    document.getElementById('reportTitle').value = '';
-    document.getElementById('reportPeriod').value = 'monthly';
-    document.getElementById('reportContent').value = '';
-    openModal('addReportModal');
-}
-
-async function saveReport() { 
-    let id = document.getElementById('reportId').value; 
-    let data = { 
-        title: document.getElementById('reportTitle').value.trim(), 
-        period: document.getElementById('reportPeriod').value, 
-        content: document.getElementById('reportContent').value.trim(), 
-        department_id: DEPARTMENT_ID, 
-        status: 'draft', 
-        created_by: CURRENT_USER,
-        updated_by: id ? CURRENT_USER : null
-    }; 
-    if(!data.title) { showToast('Title required', true); return; } 
-    if(!data.content) { showToast('Content required', true); return; }
-    
-    let res = id ? 
-        await apiCall('update_report.php', 'POST', { ...data, id: parseInt(id) }) : 
-        await apiCall('add_report.php', 'POST', data); 
-    if(res.success) { 
-        showToast(id ? 'Report updated' : 'Report added'); 
-        addLog(id ? `Report updated: ${data.title}` : `Report added: ${data.title}`);
-        closeModal('addReportModal'); 
-        await loadReports(); 
-        await loadDashboard(); 
-    } else showToast(res.message || 'Failed', true); 
-}
-
-function editReport(id) { 
-    const r = reportsData.find(r => r.id === id); 
-    if(r) { 
-        document.getElementById('reportId').value = r.id; 
-        document.getElementById('reportTitle').value = r.title; 
-        document.getElementById('reportPeriod').value = r.period; 
-        document.getElementById('reportContent').value = r.content; 
-        openModal('addReportModal'); 
-    } 
-}
-
-async function deleteReport(id) { 
-    if(!confirm('Delete this report?')) return;
-    const r = reportsData.find(r => r.id === id);
-    if(!r) { showToast('Report not found', true); return; }
-    
-    try {
-        await addToRecycleBin(id, 'report', r.title);
-        const res = await apiCall('delete_report.php', 'POST', { 
-            report_id: id, 
-            department_id: DEPARTMENT_ID, 
-            deleted_by_department: 1 
-        }); 
-        if(res && res.success) { 
-            showToast('Report deleted successfully'); 
-            addLog(`Report deleted: ${r.title}`);
-            reportsData = reportsData.filter(report => report.id !== id);
-            await loadReports(); 
-            await loadDashboard(); 
-        } else { 
-            reportsData = reportsData.filter(report => report.id !== id);
-            await loadReports(); 
-            await loadDashboard(); 
-            showToast('Report removed from local view', false);
+// ==================== VIEW FUNCTIONS ====================
+function viewUploadedDocument(docId) {
+    const doc = projectDocuments.find(d => d.id === docId);
+    if(doc) {
+        if (doc._is_unviewed === true) {
+            markProjectViewed(docId);
+            doc._is_unviewed = false;
+            doc.is_viewed_by_department = 1;
+            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+            updateProjectBadge();
         }
-    } catch(e) {
-        reportsData = reportsData.filter(report => report.id !== id);
-        await loadReports(); 
-        await loadDashboard(); 
-        showToast('Report removed from local view', false);
+        showDocumentInfo(doc, 'project');
+    } else {
+        showToast('Document not found', true);
     }
 }
 
-async function viewReportDetails(id) { 
-    const r = reportsData.find(r => r.id === id); 
-    if(r) { 
-        if (r._is_unviewed) {
-            markReportViewed(id);
-            await apiCall('mark_report_viewed.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID });
+function viewUploadedReportDocument(docId) {
+    const doc = uploadedReportsData.find(d => d.id === docId);
+    if(doc) {
+        if (doc._is_unviewed === true) {
+            markReportViewed(docId);
+            doc._is_unviewed = false;
+            doc.is_viewed_by_department = 1;
+            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+            updateReportBadge();
         }
-        
-        let deptOptions = '';
-        allDepartmentsForSend.forEach(d => {
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += `<a onclick="sendReportToDept(${r.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
-            }
-        });
-        
-        document.getElementById('viewReportContent').innerHTML = `
-            <div class="bg-teal-700 p-3 rounded mb-3 text-white"><strong>${escapeHtml(r.title)}</strong><span class="float-right">${r.period}</span></div>
-            <div class="report-content-view">${escapeHtml(r.content || 'No content available')}</div>
-            <div class="user-info mt-3">Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)} | Status: ${r.status === 'sent' ? 'Sent' : 'Draft'}</div>
-        `;
-        document.getElementById('viewReportButtons').innerHTML = `
-            <button onclick="exportSingleReportExcel(${r.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-            <button onclick="exportSingleReportPDF(${r.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>
-            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content">${deptOptions}</div></div>
-        `;
-        openModal('viewReportModal'); 
-    } 
-}
-
-function exportSingleReportExcel(id) { 
-    const r = reportsData.find(r=>r.id===id); 
-    if(r) { 
-        let ws = [['Title','Period','Content','Created','Status','Created By']]; 
-        ws.push([r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System']); 
-        let wb = XLSX.utils.book_new(); 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Report'); 
-        XLSX.writeFile(wb, `report_${r.id}.xlsx`); 
-        showToast('Exported'); 
-    } 
-}
-
-function exportSingleReportPDF(id) {
-    const r = reportsData.find(item => item.id === id);
-    if (!r) { showToast('Report not found', true); return; }
-    
-    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
-    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
-    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
-    let fullContent = r.content || 'No content available';
-    let periodLabel = r.period || 'Not specified';
-    periodLabel = periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1);
-    
-    let w = window.open('', '_blank');
-    if (!w) { showToast("Please allow popups", true); return; }
-    
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>${escapeHtml(r.title)} - Report</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box;}
-        body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:30px;}
-        .container{max-width:1000px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #0d9488;}
-        .header{background:linear-gradient(135deg,#0d9488,#0f766e);color:white;padding:25px;text-align:center;}
-        .header h1{font-size:24px;margin:0;}
-        .header p{font-size:12px;opacity:0.85;margin-top:6px;}
-        .info-bar{background:#f0fdfa;padding:12px 25px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:10px;font-size:12px;}
-        .status-badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:500;background:${statusBg};color:${statusColor};}
-        .section-title{background:#0d9488;color:white;padding:12px 25px;font-size:14px;font-weight:700;margin-top:20px;}
-        .details-vertical{padding:20px 25px;}
-        .details-vertical table{width:100%;border-collapse:collapse;font-size:13px;}
-        .details-vertical tr{border-bottom:1px solid #e5e7eb;}
-        .details-vertical td:first-child{width:35%;padding:12px 16px;background:#f8fafc;font-weight:600;color:#0d9488;border-right:1px solid #e5e7eb;}
-        .details-vertical td:last-child{padding:12px 16px;color:#1e293b;font-weight:500;}
-        .content-section{padding:20px 25px;}
-        .content-box{background:#f8fafc;padding:20px;border-radius:12px;border:1px solid #e2e8f0;min-height:200px;white-space:pre-wrap;line-height:1.8;font-size:14px;color:#1e293b;max-height:none;overflow-y:visible;}
-        .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;padding:15px 25px;background:#f9fafb;border-bottom:1px solid #e5e7eb;}
-        .stat-item{text-align:center;}
-        .stat-item .label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase;}
-        .stat-item .value{font-size:16px;font-weight:800;margin-top:4px;color:#0d9488;}
-        .footer{text-align:center;font-size:10px;color:#6b7280;padding:15px;border-top:1px solid #e5e7eb;background:#f9fafb;margin-top:20px;}
-        .print-btn{text-align:center;padding:15px;background:#f9fafb;border-top:1px solid #e5e7eb;}
-        .print-btn button{background:#0d9488;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
-        @media print{.print-btn{display:none;}body{background:white;padding:0;}.header{background:#0d9488 !important;}}
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>${escapeHtml(r.title)}</h1><p>Official Report - Generated: ${new Date().toLocaleString()}</p></div>
-            <div class="info-bar">
-                <span><strong>Report ID:</strong> #${r.id}</span>
-                <span><strong>Status:</strong> <span class="status-badge">${statusText}</span></span>
-                <span><strong>Period:</strong> ${periodLabel}</span>
-                <span><strong>Department:</strong> Survey</span>
-            </div>
-            <div class="stats-grid">
-                <div class="stat-item"><div class="label">📝 Characters</div><div class="value">${r.content ? r.content.length : 0}</div></div>
-                <div class="stat-item"><div class="label">📊 Words</div><div class="value">${fullContent.split(/\s+/).filter(function(w){return w.length>0;}).length}</div></div>
-                <div class="stat-item"><div class="label">📅 Created</div><div class="value" style="font-size:12px;">${formatDateTime(r.created_at)}</div></div>
-                <div class="stat-item"><div class="label">👤 By</div><div class="value" style="font-size:12px;">${escapeHtml(r.created_by || 'System')}</div></div>
-            </div>
-            <div class="section-title"><i class="fas fa-info-circle"></i> Report Details</div>
-            <div class="details-vertical">
-                <table>
-                    <tr><td>📌 Title:</td><td><strong>${escapeHtml(r.title)}</strong></td></tr>
-                    <tr><td>📊 Status:</td><td><span class="status-badge">${statusText}</span></td></tr>
-                    <tr><td>📆 Period:</td><td>${periodLabel}</td></tr>
-                    <tr><td>📅 Created At:</td><td>${formatDateTime(r.created_at)}</td></tr>
-                    <tr><td>👤 Created By:</td><td>${escapeHtml(r.created_by || 'System')}</td></tr>
-                </table>
-            </div>
-            <div class="section-title"><i class="fas fa-file-alt"></i> Report Content</div>
-            <div class="content-section"><div class="content-box">${escapeHtml(fullContent)}</div></div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Official Report Document</div>
-            <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1500);">🖨️ Save as PDF / Print</button></div>
-        </div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("📄 Report PDF preview opened - Click 'Save as PDF' to download", false);
-}
-
-function exportAllReportsToExcel() { 
-    let ws = [['ID','Title','Period','Content','Created','Status','Created By']]; 
-    reportsData.forEach(r => ws.push([r.id, r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System'])); 
-    let wb = XLSX.utils.book_new(); 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports'); 
-    XLSX.writeFile(wb, `all_reports_${new Date().toISOString().slice(0,10)}.xlsx`); 
-    showToast('Exported'); 
-}
-
-function exportAllReportsToPDF() {
-    if (reportsData.length === 0) { showToast('No reports to export', true); return; }
-    
-    let totalReports = reportsData.length;
-    let sentCount = 0, draftCount = 0;
-    let totalChars = 0;
-    let periodCounts = {};
-    let periodOrder = ['daily','weekly','monthly','quarterly','annual'];
-    
-    for (let r of reportsData) {
-        if (r.status === 'sent') sentCount++;
-        else if (r.status === 'draft') draftCount++;
-        if (r.content) totalChars += r.content.length;
-        let period = r.period || 'unknown';
-        periodCounts[period] = (periodCounts[period] || 0) + 1;
-    }
-    
-    let periodRows = '';
-    for (let period of periodOrder) {
-        let count = periodCounts[period] || 0;
-        if (count > 0) {
-            periodRows += '<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 12px;text-transform:capitalize;">' + escapeHtml(period) + '</td><td style="padding:10px 12px;text-align:center;font-weight:600;">' + count + '</td><td style="padding:10px 12px;text-align:center;color:#0d9488;font-weight:600;">' + ((count/totalReports)*100).toFixed(1) + '%</td></tr>';
-        }
-    }
-    
-    let rows = '';
-    for (let r of reportsData) {
-        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
-        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
-        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
-        let fullContent = r.content || 'No content available';
-        
-        rows += '<div style="margin-bottom:30px;border:2px solid #0d9488;border-radius:12px;overflow:hidden;page-break-inside:avoid;background:white;">' +
-            '<div style="background:linear-gradient(135deg,#0d9488,#0f766e);color:white;padding:15px 20px;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;"><div><h3 style="margin:0;font-size:17px;font-weight:700;">' + escapeHtml(r.title) + '</h3><p style="margin:4px 0 0;font-size:11px;opacity:0.85;">Report ID: #' + r.id + ' | Period: ' + r.period + '</p></div><span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span></div></div>' +
-            '<div style="padding:12px 20px;background:#f0fdfa;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:15px;font-size:12px;color:#475569;"><span><strong>📅 Created:</strong> ' + formatDateTime(r.created_at) + ' by ' + escapeHtml(r.created_by || 'System') + '</span><span><strong>📊 Status:</strong> ' + statusText + '</span><span><strong>📋 Period:</strong> ' + r.period + '</span></div>' +
-            '<div style="padding:18px 20px;background:white;font-size:13px;line-height:1.7;color:#1e293b;white-space:pre-wrap;word-wrap:break-word;max-height:none;overflow-y:visible;">' + escapeHtml(fullContent) + '</div>' +
-            '<div style="padding:8px 20px;background:#f8fafc;border-top:1px solid #e5e7eb;font-size:10px;color:#94a3b8;text-align:right;">Report #' + r.id + ' | Generated: ' + new Date().toLocaleString() + '</div></div>';
-    }
-    
-    let w = window.open('', '_blank');
-    if (!w) { showToast("Please allow popups", true); return; }
-    
-    w.document.write(`<!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><title>All Reports Report - Survey Department</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box;}
-        body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;padding:30px;}
-        .container{max-width:1300px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.1);border:2px solid #0d9488;}
-        .header{background:linear-gradient(135deg,#0d9488,#0f766e);color:white;padding:25px;text-align:center;}
-        .header h1{font-size:24px;margin:0;}
-        .header p{font-size:12px;opacity:0.85;margin-top:6px;}
-        .info-bar{background:#f8fafc;padding:12px 25px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:10px;font-size:12px;}
-        .summary-cards{display:grid;grid-template-columns:repeat(6,1fr);gap:15px;padding:20px 25px;background:#f9fafb;border-bottom:1px solid #e5e7eb;}
-        .summary-card{background:white;border-radius:10px;padding:12px;text-align:center;border:1px solid #e5e7eb;}
-        .summary-card .label{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;}
-        .summary-card .value{font-size:16px;font-weight:800;margin-top:5px;}
-        .summary-card.total .value{color:#0d9488;}
-        .summary-card.sent .value{color:#059669;}
-        .summary-card.draft .value{color:#d97706;}
-        .summary-card.chars .value{color:#3b82f6;}
-        .summary-card.periods .value{color:#8b5cf6;}
-        .period-summary{margin:0 25px 25px 25px;background:#f9fafb;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;}
-        .period-summary h4{background:#f1f5f9;padding:12px 18px;font-size:14px;font-weight:700;margin:0;border-bottom:1px solid #e2e8f0;color:#1e293b;}
-        .period-table{width:100%;border-collapse:collapse;font-size:13px;}
-        .period-table th{background:#f8fafc;padding:10px 16px;text-align:left;font-weight:600;border-bottom:1px solid #e2e8f0;color:#475569;}
-        .period-table td{padding:10px 16px;border-bottom:1px solid #e2e8f0;color:#334155;}
-        .reports-section{padding:0 25px 25px 25px;}
-        .reports-title{margin:25px 0 18px 0;font-size:16px;font-weight:700;color:#0d9488;border-bottom:3px solid #0d9488;padding-bottom:10px;display:inline-block;}
-        .footer{text-align:center;font-size:10px;color:#6b7280;padding:15px;border-top:1px solid #e5e7eb;background:#f9fafb;}
-        .print-btn{text-align:center;padding:15px;background:#f9fafb;border-top:1px solid #e5e7eb;}
-        .print-btn button{background:#0d9488;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
-        @media print{.print-btn{display:none;}body{background:white;padding:0;}.header{background:#0d9488 !important;}}
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header"><h1>📊 All Reports Report</h1><p>Survey Department - Complete Reports Overview</p></div>
-            <div class="info-bar">
-                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                <span><strong>Total Reports:</strong> ${totalReports}</span>
-                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
-            </div>
-            <div class="summary-cards">
-                <div class="summary-card total"><div class="label">📋 Total Reports</div><div class="value">${totalReports}</div></div>
-                <div class="summary-card sent"><div class="label">✅ Sent Reports</div><div class="value">${sentCount}</div></div>
-                <div class="summary-card draft"><div class="label">✏️ Draft Reports</div><div class="value">${draftCount}</div></div>
-                <div class="summary-card chars"><div class="label">📝 Total Characters</div><div class="value">${totalChars.toLocaleString()}</div></div>
-                <div class="summary-card periods"><div class="label">📆 Period Types</div><div class="value">${Object.keys(periodCounts).length}</div></div>
-            </div>
-            <div class="period-summary">
-                <h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>
-                <table class="period-table"><thead><tr><th style="width:40%;">Period Type</th><th style="width:30%;text-align:center;">Count</th><th style="width:30%;text-align:center;">Percentage</th></tr></thead><tbody>${periodRows}</tbody></table>
-            </div>
-            <div class="reports-section"><div class="reports-title">📄 Reports List (${totalReports} reports)</div>${rows}</div>
-            <div class="footer">GeoTraverse ERP System - Survey Department | Official All Reports Report</div>
-            <div class="print-btn"><button onclick="window.print();setTimeout(()=>window.close(),1500);">🖨️ Save as PDF / Print</button></div>
-        </div>
-    </body>
-    </html>`);
-    w.document.close();
-    showToast("📄 All Reports PDF preview opened - Click 'Save as PDF' to download", false);
-}
-
-function openUploadReportModal() { 
-    document.getElementById('uploadReportTitle').value = ''; 
-    document.getElementById('uploadReportPeriod').value = 'monthly'; 
-    document.getElementById('uploadedFilePreview').classList.add('hidden'); 
-    currentUploadedFile = null; 
-    openModal('uploadReportModal'); 
-}
-
-async function saveUploadedReport() {
-    const title = document.getElementById('uploadReportTitle').value.trim();
-    const period = document.getElementById('uploadReportPeriod').value;
-    if (!title) { showToast('Title required', true); return; }
-    if (!currentUploadedFile) { showToast('Please select a file', true); return; }
-    if (currentUploadedFile.size > 10 * 1024 * 1024) { showToast('File too large. Max size is 10MB', true); return; }
-    
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('period', period);
-    formData.append('department_id', DEPARTMENT_ID);
-    formData.append('uploaded_by', CURRENT_USER);
-    formData.append('report_file', currentUploadedFile);
-    
-    const sendBtn = document.querySelector('#uploadReportModal .btn-primary');
-    const originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Uploading...';
-    sendBtn.disabled = true;
-    
-    try {
-        const response = await fetch(API_BASE + 'upload_report_document.php', { method: 'POST', body: formData });
-        const result = await response.json();
-        if (result.success) { 
-            showToast('✅ Report uploaded successfully'); 
-            addLog(`Report uploaded: ${title}`);
-            closeModal('uploadReportModal'); 
-            await loadReports(); 
-            await loadDashboard(); 
-        } else { 
-            showToast('❌ ' + (result.message || 'Upload failed'), true); 
-        }
-    } catch (error) { 
-        showToast('❌ Network error: ' + error.message, true); 
-    } finally { 
-        sendBtn.innerHTML = originalText; 
-        sendBtn.disabled = false; 
-    }
-}
-
-async function deleteUploadedReport(id) {
-    if(confirm('Delete this uploaded report?')) {
-        const doc = uploadedReportsData.find(d => d.id === id);
-        if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title);
-        
-        let res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID });
-        if(res.success) { 
-            showToast('Uploaded report moved to recycle bin'); 
-            await loadReports(); 
-            await loadDashboard(); 
-        } else { 
-            uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
-            await loadReports();
-            showToast('Uploaded report removed from local view', false);
-        }
-    }
-}
-
-function openGenerateReportModal() { 
-    document.getElementById('genReportTitle').value = ''; 
-    document.getElementById('genPeriodType').value = 'daily'; 
-    openModal('generateReportModal'); 
-}
-
-async function generateAndSaveReport() {
-    const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`;
-    const period = document.getElementById('genPeriodType').value;
-    
-    let startDate, endDate, now = new Date();
-    if (period === 'daily') { startDate = new Date(now); startDate.setHours(0,0,0,0); endDate = new Date(now); endDate.setHours(23,59,59,999); }
-    else if (period === 'weekly') { startDate = new Date(now); startDate.setDate(now.getDate() - 7); endDate = new Date(now); }
-    else if (period === 'monthly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 1); endDate = new Date(now); }
-    else if (period === 'quarterly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 3); endDate = new Date(now); }
-    else { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); endDate = new Date(now); }
-    
-    await Promise.all([fetchProjects(), fetchRequests()]);
-    
-    let totalIncome = 0, totalExpense = 0;
-    let filteredRequests = requestsData.filter(t => { let tDate = new Date(t.request_date); return tDate >= startDate && tDate <= endDate; });
-    filteredRequests.forEach(t => { if(t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount)||0; if(t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount)||0; });
-    
-    let content = `${period.toUpperCase()} REPORT\n`;
-    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    content += `Generated by: ${CURRENT_USER}\n`;
-    content += `Generated: ${new Date().toLocaleString()}\n`;
-    content += `Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\n`;
-    content += `Department: Survey\n\n`;
-    content += `📈 FINANCIAL SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    content += `Total Income: ${formatCurrency(totalIncome)}\n`;
-    content += `Total Expenses: ${formatCurrency(totalExpense)}\n`;
-    content += `Net Profit: ${formatCurrency(totalIncome - totalExpense)}\n\n`;
-    content += `📋 PROJECT STATUS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    content += `Total Projects: ${projectsData.length}\n`;
-    content += `Pending: ${projectsData.filter(p => p.status === 'pending').length}\n`;
-    content += `In Progress: ${projectsData.filter(p => p.status === 'in_progress').length}\n`;
-    content += `Completed: ${projectsData.filter(p => p.status === 'completed').length}\n`;
-    content += `Approved: ${projectsData.filter(p => p.status === 'approved').length}\n\n`;
-    content += `📋 REQUESTS SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    content += `Total Requests: ${requestsData.length}\n`;
-    content += `Pending: ${requestsData.filter(r => r.status === 'pending').length}\n`;
-    content += `Approved: ${requestsData.filter(r => r.status === 'approved').length}\n`;
-    content += `Cancelled: ${requestsData.filter(r => r.status === 'cancelled').length}\n\n`;
-    content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    
-    let res = await apiCall('add_report.php', 'POST', { title, period, content, department_id: DEPARTMENT_ID, status: 'draft', created_by: CURRENT_USER });
-    if(res.success) { 
-        showToast(`✅ ${period} report generated and saved`); 
-        addLog(`Report generated: ${title}`);
-        closeModal('generateReportModal'); 
-        await loadReports(); 
-        await loadDashboard(); 
-    } else { 
-        showToast(res.message || 'Failed', true); 
+        showDocumentInfo(doc, 'uploaded_report');
+    } else {
+        showToast('Document not found', true);
     }
 }
 
 // ==================== DASHBOARD ====================
 async function loadDashboard() {
     await Promise.all([fetchProjects(), fetchRequests(), fetchReports(), fetchUploadedReports(), fetchDailyWork()]);
+    await getUnviewedNotificationsCount();
     
     let totalIncome = 0, totalExpense = 0;
     requestsData.forEach(t => { 
@@ -3790,8 +2800,6 @@ window.saveProject = saveProject;
 window.editProject = editProject;
 window.deleteProject = deleteProject;
 window.viewProject = viewProject;
-window.exportSingleProjectExcel = exportSingleProjectExcel;
-window.exportProjectToPDF = exportProjectToPDF;
 window.exportAllProjectsToExcel = exportAllProjectsToExcel;
 window.exportAllProjectsToPDF = exportAllProjectsToPDF;
 window.sendProjectToDept = sendProjectToDept;
@@ -3813,8 +2821,6 @@ window.submitRequest = submitRequest;
 window.viewRequestDetails = viewRequestDetails;
 window.editRequest = editRequest;
 window.deleteRequest = deleteRequest;
-window.exportSingleRequestExcel = exportSingleRequestExcel;
-window.exportSingleRequestPDF = exportSingleRequestPDF;
 window.exportAllRequestsToExcel = exportAllRequestsToExcel;
 window.exportAllRequestsToPDF = exportAllRequestsToPDF;
 window.openAddReportModal = openAddReportModal;
@@ -3822,8 +2828,6 @@ window.viewReportDetails = viewReportDetails;
 window.editReport = editReport;
 window.saveReport = saveReport;
 window.deleteReport = deleteReport;
-window.exportSingleReportExcel = exportSingleReportExcel;
-window.exportSingleReportPDF = exportSingleReportPDF;
 window.exportAllReportsToExcel = exportAllReportsToExcel;
 window.exportAllReportsToPDF = exportAllReportsToPDF;
 window.sendReportToDept = sendReportToDept;
@@ -3838,8 +2842,7 @@ window.deleteUploadedReport = deleteUploadedReport;
 window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel;
 window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF;
 window.sendUploadedReportToDept = sendUploadedReportToDept;
-window.downloadReportFile = downloadReportFile;
-window.getFullReportPath = getFullReportPath;
+window.downloadDocument = downloadDocument;
 window.changeColor = changeColor;
 window.createBackup = createBackup;
 window.restoreBackup = restoreBackup;
@@ -3851,11 +2854,15 @@ window.changePassword = changePassword;
 window.switchProjectTab = switchProjectTab;
 window.switchReportTab = switchReportTab;
 window.showRecycleBinModal = showRecycleBinModal;
+window.addNotification = addNotification;
+window.getUnviewedNotificationsCount = getUnviewedNotificationsCount;
+window.markNotificationViewed = markNotificationViewed;
 
 // ==================== INITIALIZATION ====================
 async function init() {
     await loadRecycleBinFromDB();
     initDarkMode();
+    await getUnviewedNotificationsCount();
     
     const container = document.getElementById("mainContentContainer");
     if (container) {

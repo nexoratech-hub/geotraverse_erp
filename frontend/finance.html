@@ -378,7 +378,7 @@ async function loadMyTransactions(highlightId = null) {
     await loadAllTransactions();
     
     let totalIncome = 0, totalExpense = 0, pendingAmount = 0;
-    myTransactions.forEach(t => { let amount = parseFloat(t.amount) || 0, paid = parseFloat(t.paid_amount) || 0; 
+    myTransactions.forEach(t => { let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0; 
         if (t.type === 'income') { totalIncome += paid; if (t.status !== 'paid') pendingAmount += (amount - paid); } 
         else { totalExpense += paid; if (t.status !== 'paid') pendingAmount += (amount - paid); }
     });
@@ -702,6 +702,7 @@ function exportMyTransactionsToPDF() {
     printWindow.document.close();
     showToast("📄 Transactions PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 // ==================== BUDGET REQUESTS - FULLY FIXED ====================
 
 // ==================== FETCH ALL REQUESTS FROM ALL DEPARTMENTS ====================
@@ -1306,6 +1307,7 @@ function exportAllRequestsToPDF() {
     w.document.close(); 
     showToast("PDF preview opened - Click Print to save"); 
 }
+
 // ==================== REPORTS SECTION ====================
 function loadReportsFromStorage() { try { const stored = localStorage.getItem(REPORTS_STORAGE_KEY); if (stored) reportsData = JSON.parse(stored); else reportsData = []; } catch(e) { reportsData = []; } }
 function saveReportsToStorage() { localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reportsData)); }
@@ -1351,6 +1353,102 @@ function markReportViewed(id) {
     } 
 }
 
+// ==================== GET FULL REPORT FILE PATH ====================
+function getFullReportPath(filePath) {
+    if (!filePath) return null;
+    
+    // If it's already a full URL
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+        return filePath;
+    }
+    
+    // If it's a data URI (base64 image)
+    if (filePath.startsWith('data:')) {
+        return filePath;
+    }
+    
+    // Clean the path
+    let cleanPath = filePath;
+    while (cleanPath.startsWith('../')) {
+        cleanPath = cleanPath.substring(3);
+    }
+    while (cleanPath.startsWith('./')) {
+        cleanPath = cleanPath.substring(2);
+    }
+    
+    // If it already contains the full path structure
+    if (cleanPath.includes('assets/uploads/reports/')) {
+        // Make sure it starts with /geotraverse/
+        if (cleanPath.startsWith('/geotraverse/')) {
+            return cleanPath;
+        }
+        return '/geotraverse/' + cleanPath;
+    }
+    
+    // If it's just a filename or relative path
+    if (!cleanPath.includes('/')) {
+        return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath;
+    }
+    
+    // Try to extract filename
+    let fileName = cleanPath.split('/').pop();
+    if (fileName && !fileName.includes('\\')) {
+        return '/geotraverse/frontend/assets/uploads/reports/' + fileName;
+    }
+    
+    // Fallback
+    return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath;
+}
+
+// ==================== DOWNLOAD FILE FUNCTION ====================
+function downloadReportFile(fileUrl, fileName) {
+    if (!fileUrl || fileUrl === '') {
+        showToast('File URL not available', true);
+        return;
+    }
+    
+    // For data URIs, open in new window
+    if (fileUrl.startsWith('data:')) {
+        window.open(fileUrl, '_blank');
+        showToast('Preview opened', false);
+        return;
+    }
+    
+    // Try to download using fetch to handle MIME types
+    fetch(fileUrl, { method: 'GET', credentials: 'include' })
+        .then(function(response) {
+            if (!response.ok) {
+                // Try alternative path
+                let altUrl = fileUrl.replace('/geotraverse/frontend/assets/uploads/reports/', '/geotraverse/backend/api/download_report_document.php?file=');
+                return fetch(altUrl, { method: 'GET', credentials: 'include' });
+            }
+            return response;
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('File not found');
+            }
+            return response.blob();
+        })
+        .then(function(blob) {
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = fileName || 'document.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            showToast('✅ Downloading: ' + fileName, false);
+        })
+        .catch(function(error) {
+            console.error('Download error:', error);
+            // Fallback: open in new window
+            window.open(fileUrl, '_blank');
+            showToast('Opening file in new window...', false);
+        });
+}
+
 async function loadReports(highlightId = null) {
     await Promise.all([fetchReports(), fetchUploadedReports()]);
     let html = `<div class="tab-container"><button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span></button><button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')"><i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span></button></div>`;
@@ -1392,6 +1490,7 @@ async function loadReports(highlightId = null) {
 
 function switchReportTab(tab) { currentReportTab = tab; loadReports(); }
 
+// ==================== VIEW REPORT DETAILS - FIXED ====================
 function viewReportDetails(id) { 
     const r = reportsData.find(report => report.id === id); 
     if(r) { 
@@ -2103,11 +2202,20 @@ async function saveUploadedReport() {
         btn.disabled = false; 
     } 
 }
+
+// ==================== VIEW UPLOADED REPORT DETAILS - FIXED ====================
 function viewUploadedReportDetail(id) { 
     const doc = uploadedReportsData.find(d => d.id === id); 
     if(doc) { 
         if(doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && !viewedReportIds.includes(id)) { markReportViewed(id); }
-        let fileUrl = doc.file_path || ''; 
+        
+        // Build file URL with multiple possible paths
+        let filePath = doc.file_path || doc.file_name || '';
+        let fileUrl = getFullReportPath(filePath);
+        
+        // Also try API endpoint as fallback
+        let apiDownloadUrl = API_BASE + 'download_report_document.php?id=' + doc.id;
+        
         // Send options for uploaded reports
         let deptOptions = ''; 
         allDepartmentsForSend.forEach(d => { 
@@ -2115,13 +2223,46 @@ function viewUploadedReportDetail(id) {
                 deptOptions += `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-2"></i> ${escapeHtml(d.name)}</a>`; 
             } 
         }); 
+        
         let fileIcon = getFileIconClass(doc.file_name);
         let fileIconColor = fileIcon === 'fa-file-pdf' ? 'text-red-500' : (fileIcon === 'fa-file-image' ? 'text-purple-500' : (fileIcon === 'fa-file-word' ? 'text-blue-500' : (fileIcon === 'fa-file-excel' ? 'text-green-500' : 'text-gray-500')));
-        document.getElementById('viewReportContent').innerHTML = `<div class="bg-green-100 dark:bg-green-900 p-3 rounded mb-3"><h4 class="font-bold"><i class="fas ${fileIcon} ${fileIconColor} mr-2"></i>${escapeHtml(doc.title)}</h4><p class="text-[9px] text-gray-500">Uploaded Report · ${doc.period || 'Monthly'}</p></div><div class="space-y-2 text-sm mb-3"><p><strong>File Name:</strong> ${escapeHtml(doc.file_name)}</p><p><strong>Description:</strong> ${escapeHtml(doc.description || 'No description')}</p><p><strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by || 'System')}</p><p><strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}</p><p><strong>File Size:</strong> ${doc.file_size ? formatFileSize(doc.file_size) : 'Unknown'}</p></div><div class="text-center"><button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary mt-2">Download File</button></div>`; 
-        document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportUploadedReportToExcel(${doc.id})" class="btn-success">Excel</button><button onclick="exportUploadedReportToPDF(${doc.id})" class="btn-danger">PDF</button><div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')"><i class="fas fa-paper-plane mr-1"></i> Send Report</button><div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>`; 
+        let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+        
+        document.getElementById('viewReportContent').innerHTML = `
+            <div class="bg-green-100 dark:bg-green-900 p-3 rounded mb-3">
+                <h4 class="font-bold"><i class="fas ${fileIcon} ${fileIconColor} mr-2"></i>${escapeHtml(doc.title)}</h4>
+                <p class="text-[9px] text-gray-500">Uploaded Report · ${doc.period || 'Monthly'}</p>
+                ${doc.sent_from_department ? `<p class="text-[9px] text-purple-600"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${departmentNames[doc.sent_from_department] || 'Unknown'}</p>` : ''}
+            </div>
+            <div class="space-y-2 text-sm mb-3">
+                <p><strong>File Name:</strong> ${escapeHtml(doc.file_name)}</p>
+                <p><strong>Description:</strong> ${escapeHtml(doc.description || 'No description')}</p>
+                <p><strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by || 'System')}</p>
+                <p><strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}</p>
+                <p><strong>File Size:</strong> ${fileSize}</p>
+            </div>
+            <div class="text-center flex flex-wrap gap-2 justify-center">
+                <button onclick="downloadReportFile('${fileUrl}', '${escapeHtml(doc.file_name || 'document.pdf')}')" class="btn-primary px-4 py-1.5 rounded text-sm">
+                    <i class="fas fa-download mr-1"></i> Download
+                </button>
+                <button onclick="window.open('${apiDownloadUrl}', '_blank')" class="btn-success px-4 py-1.5 rounded text-sm">
+                    <i class="fas fa-cloud-download-alt mr-1"></i> Download (API)
+                </button>
+            </div>
+        `; 
+        
+        document.getElementById('viewReportButtons').innerHTML = `
+            <button onclick="exportUploadedReportToExcel(${doc.id})" class="btn-success">Excel</button>
+            <button onclick="exportUploadedReportToPDF(${doc.id})" class="btn-danger">PDF</button>
+            <div class="send-dropdown">
+                <button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')"><i class="fas fa-paper-plane mr-1"></i> Send Report</button>
+                <div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div>
+            </div>
+        `; 
         openModal('viewReportModal'); 
     } 
 }
+
 function exportUploadedReportToExcel(id) { const doc = uploadedReportsData.find(d => d.id === id); if(doc) { let ws = [['Title','File Name','Description','Period','Uploaded By','Uploaded At','File Size']]; ws.push([doc.title, doc.file_name, doc.description||'', doc.period, doc.uploaded_by, doc.created_at, doc.file_size ? formatFileSize(doc.file_size) : 'Unknown']); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReport'); XLSX.writeFile(wb, `uploaded_report_${doc.id}.xlsx`); showToast('Exported'); } }
 function exportUploadedReportToPDF(id) { const doc = uploadedReportsData.find(d => d.id === id); if(doc) { let w = window.open('', '_blank'); w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(doc.title)} - Uploaded Report</title><style>body{font-family:Arial;padding:20px;border:2px solid #059669;}</style></head><body><h1>${escapeHtml(doc.title)}</h1><p><strong>File:</strong> ${doc.file_name}</p><p><strong>Period:</strong> ${doc.period}</p><p><strong>Description:</strong> ${escapeHtml(doc.description||'')}</p><p><strong>Uploaded By:</strong> ${escapeHtml(doc.uploaded_by||'System')}</p><p><strong>Uploaded At:</strong> ${new Date(doc.created_at).toLocaleString()}</p><div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); w.document.close(); showToast("PDF preview opened - Click Print to save"); } }
 async function deleteUploadedReport(id) { if(confirm('Delete this uploaded report?')) { const doc = uploadedReportsData.find(d => d.id === id); if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title); const res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID }); if(res.success) { showToast('Report moved to recycle bin'); await fetchUploadedReports(); await loadReports(); await loadDashboard(); } else { uploadedReportsData = uploadedReportsData.filter(d=>d.id!==id); await loadReports(); showToast('Report removed from local view'); } } }
@@ -2232,7 +2373,7 @@ function setupMoneyInputs() { const moneyInputs = ['transAmount', 'transPaidAmou
 async function init() { setupMoneyInputs(); await loadRecycleBinFromDB(); initDarkMode(); document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showPage(item.getAttribute('data-page'))); }); document.getElementById('homeBtn')?.addEventListener('click', () => showPage('dashboard')); document.getElementById('searchInput')?.addEventListener('input', performGlobalSearch); document.getElementById('mobileMenuBtn')?.addEventListener('click', () => { document.getElementById('mainSidebar').classList.add('mobile-open'); document.getElementById('mobileMenuOverlay').classList.remove('hidden'); }); document.getElementById('logoutBtn')?.addEventListener('click', logout); const savedColor = localStorage.getItem('sidebar_color'); if (savedColor) document.getElementById('mainSidebar').style.background = savedColor; initScrollTop(); setInterval(updateConnectionStatus, 30000); updateConnectionStatus(); showPage('dashboard'); addLog("Finance Dashboard initialized"); }
 
 // Expose global functions
-window.showPage = showPage; window.openModal = openModal; window.closeModal = closeModal; window.toggleSendDropdown = toggleSendDropdown; window.logout = logout; window.closeMobileSidebar = closeMobileSidebar; window.showFullImage = showFullImage; window.closeFullImageModal = closeFullImageModal; window.performGlobalSearch = performGlobalSearch; window.loadMyTransactions = loadMyTransactions; window.viewTransaction = viewTransaction; window.editTransaction = editTransaction; window.saveTransaction = saveTransaction; window.deleteTransaction = deleteTransaction; window.exportMyTransactionsToExcel = exportMyTransactionsToExcel; window.exportMyTransactionsToPDF = exportMyTransactionsToPDF; window.loadRequests = loadRequests; window.viewRequestDetail = viewRequestDetail; window.approveRequest = approveRequest; window.cancelRequest = cancelRequest; window.deleteRequestItem = deleteRequestItem; window.exportAllRequestsToExcel = exportAllRequestsToExcel; window.exportAllRequestsToPDF = exportAllRequestsToPDF; window.viewReportDetails = viewReportDetails; window.editReport = editReport; window.saveReport = saveReport; window.deleteReportItem = deleteReportItem; window.exportSingleReportExcel = exportSingleReportExcel; window.exportSingleReportPDF = exportSingleReportPDF; window.exportAllReportsToExcel = exportAllReportsToExcel; window.exportAllReportsToPDF = exportAllReportsToPDF; window.sendReportToDept = sendReportToDept; window.openGenerateReportModal = openGenerateReportModal; window.generateAndSaveReport = generateAndSaveReport; window.openUploadReportModal = openUploadReportModal; window.saveUploadedReport = saveUploadedReport; window.previewUploadedFile = previewUploadedFile; window.removeUploadedFile = removeUploadedFile; window.viewUploadedReportDetail = viewUploadedReportDetail; window.deleteUploadedReport = deleteUploadedReport; window.exportUploadedReportToExcel = exportUploadedReportToExcel; window.exportUploadedReportToPDF = exportUploadedReportToPDF; window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel; window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF; window.sendUploadedReportToDept = sendUploadedReportToDept; window.changeSidebarColor = changeSidebarColor; window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.clearLogs = clearLogs; window.emptyRecycleBin = emptyRecycleBin; window.restoreFromRecycleBin = restoreFromRecycleBin; window.permanentlyDeleteItem = permanentlyDeleteItem; window.changePassword = changePassword; window.switchReportTab = switchReportTab;
+window.showPage = showPage; window.openModal = openModal; window.closeModal = closeModal; window.toggleSendDropdown = toggleSendDropdown; window.logout = logout; window.closeMobileSidebar = closeMobileSidebar; window.showFullImage = showFullImage; window.closeFullImageModal = closeFullImageModal; window.performGlobalSearch = performGlobalSearch; window.loadMyTransactions = loadMyTransactions; window.viewTransaction = viewTransaction; window.editTransaction = editTransaction; window.saveTransaction = saveTransaction; window.deleteTransaction = deleteTransaction; window.exportMyTransactionsToExcel = exportMyTransactionsToExcel; window.exportMyTransactionsToPDF = exportMyTransactionsToPDF; window.loadRequests = loadRequests; window.viewRequestDetail = viewRequestDetail; window.approveRequest = approveRequest; window.cancelRequest = cancelRequest; window.deleteRequestItem = deleteRequestItem; window.exportAllRequestsToExcel = exportAllRequestsToExcel; window.exportAllRequestsToPDF = exportAllRequestsToPDF; window.viewReportDetails = viewReportDetails; window.editReport = editReport; window.saveReport = saveReport; window.deleteReportItem = deleteReportItem; window.exportSingleReportExcel = exportSingleReportExcel; window.exportSingleReportPDF = exportSingleReportPDF; window.exportAllReportsToExcel = exportAllReportsToExcel; window.exportAllReportsToPDF = exportAllReportsToPDF; window.sendReportToDept = sendReportToDept; window.openGenerateReportModal = openGenerateReportModal; window.generateAndSaveReport = generateAndSaveReport; window.openUploadReportModal = openUploadReportModal; window.saveUploadedReport = saveUploadedReport; window.previewUploadedFile = previewUploadedFile; window.removeUploadedFile = removeUploadedFile; window.viewUploadedReportDetail = viewUploadedReportDetail; window.deleteUploadedReport = deleteUploadedReport; window.exportUploadedReportToExcel = exportUploadedReportToExcel; window.exportUploadedReportToPDF = exportUploadedReportToPDF; window.exportAllUploadedReportsToExcel = exportAllUploadedReportsToExcel; window.exportAllUploadedReportsToPDF = exportAllUploadedReportsToPDF; window.sendUploadedReportToDept = sendUploadedReportToDept; window.changeSidebarColor = changeSidebarColor; window.createBackup = createBackup; window.restoreBackup = restoreBackup; window.clearLogs = clearLogs; window.emptyRecycleBin = emptyRecycleBin; window.restoreFromRecycleBin = restoreFromRecycleBin; window.permanentlyDeleteItem = permanentlyDeleteItem; window.changePassword = changePassword; window.switchReportTab = switchReportTab; window.downloadReportFile = downloadReportFile;
 
 init();
 </script>

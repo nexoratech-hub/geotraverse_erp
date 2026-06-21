@@ -260,7 +260,7 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         
-        /* Transaction Table Styles */
+        /* Transaction Table Styles - Using fund_requests table */
         .transaction-table-container {
             overflow-x: auto;
             border-radius: 12px;
@@ -429,9 +429,10 @@
 
 <div id="viewDailyworkModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-eye text-emerald-600 mr-2"></i>Daily Work Details</h3><div id="viewDailyworkContent"></div><button onclick="closeModal('viewDailyworkModal')" class="w-full bg-gray-200 py-2 rounded-lg mt-3">Close</button></div></div>
 
-<!-- REQUEST MODAL -->
-<div id="requestModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-plus-circle text-emerald-600 mr-2"></i>Add Request</h3><input type="hidden" id="editRequestId"><div class="form-group"><label>Type</label><select id="requestType"><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="requestSource" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="requestAmount" class="amount-input" required></div><div class="form-group"><label>Date</label><input type="date" id="requestDate"></div><div class="form-group"><label>Status</label><select id="requestStatus"><option value="paid">Paid</option><option value="pending">Pending</option><option value="partial">Partial</option></select></div><div class="form-group hidden" id="paidAmountGroupR"><label>Paid Amount (TZS)</label><input type="text" id="requestPaidAmount" class="amount-input"></div><div class="form-group"><label>Description</label><textarea id="requestDesc" rows="3"></textarea></div><div class="flex gap-3"><button onclick="saveRequest()" class="flex-1 btn-primary py-2 rounded-lg">Save</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
+<!-- REQUEST MODAL - USING fund_requests TABLE -->
+<div id="requestModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4"><i class="fas fa-hand-holding-usd text-emerald-600 mr-2"></i>Add Fund Request</h3><input type="hidden" id="editRequestId"><div class="form-group"><label>Title *</label><input type="text" id="requestTitle" placeholder="Request title" required></div><div class="form-group"><label>Date *</label><input type="date" id="requestDate"></div><div class="form-group"><label>Type</label><select id="requestType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="requestSource" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="requestAmount" class="amount-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="requestDesc" rows="3" placeholder="Reason for request..."></textarea></div><div class="flex gap-3"><button onclick="saveFundRequest()" class="flex-1 btn-primary py-2 rounded-lg">Submit Request</button><button onclick="closeModal('requestModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div>
 
+<!-- VIEW REQUEST MODAL -->
 <div id="viewRequestModal" class="modal"><div class="modal-content"><h3 class="text-xl font-bold mb-4">Request Details</h3><div id="viewRequestContent"></div><div id="viewRequestButtons" class="detail-buttons"></div><button onclick="closeModal('viewRequestModal')" class="w-full bg-gray-200 py-2 rounded mt-3">Close</button></div></div>
 
 <!-- REPORT MODALS -->
@@ -592,6 +593,74 @@ try {
     viewedReportIds = JSON.parse(localStorage.getItem('hatimiliki_viewedReportIds') || '[]');
     viewedRequestIds = JSON.parse(localStorage.getItem('hatimiliki_viewedRequestIds') || '[]');
 } catch(e) {}
+
+// ==================== NOTIFICATION SYSTEM ====================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        var payload = {
+            department_id: parseInt(departmentId),
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle || '',
+            message: message || '',
+            from_department_id: DEPARTMENT_ID
+        };
+        var res = await apiCall('add_notification.php', 'POST', payload);
+        return res;
+    } catch(e) {
+        console.error('Add notification error:', e);
+        return { success: false };
+    }
+}
+
+async function getUnviewedNotificationsCount() {
+    try {
+        var res = await apiCall('get_unviewed_count.php', 'GET');
+        if (res.success && res.data) {
+            var counts = res.data;
+            unviewedProjectsCount = counts.projects || 0;
+            unviewedReportsCount = counts.reports || 0;
+            unviewedRequestsCount = counts.requests || 0;
+            updateProjectBadge();
+            updateReportBadge();
+            updateRequestBadge();
+        }
+    } catch(e) {
+        console.error('Get unviewed count error:', e);
+    }
+}
+
+async function markNotificationViewed(itemType, itemId) {
+    try {
+        var res = await apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: itemType,
+            item_id: parseInt(itemId)
+        });
+        if (res.success) {
+            await getUnviewedNotificationsCount();
+        }
+    } catch(e) {
+        console.error('Mark notification viewed error:', e);
+    }
+}
+
+async function markAllNotificationsViewed() {
+    try {
+        var res = await apiCall('mark_all_notifications_viewed.php', 'POST', {
+            department_id: DEPARTMENT_ID
+        });
+        if (res.success) {
+            unviewedProjectsCount = 0;
+            unviewedReportsCount = 0;
+            unviewedRequestsCount = 0;
+            updateProjectBadge();
+            updateReportBadge();
+            updateRequestBadge();
+        }
+    } catch(e) {
+        console.error('Mark all viewed error:', e);
+    }
+}
 
 function updateProjectBadge() { 
     var badge = document.getElementById('projectBadge'); 
@@ -784,18 +853,22 @@ function fetchTitleDeedDocuments() {
 }
 
 function fetchRequests() {
-    return apiCall('get_transactions.php?department_id=' + DEPARTMENT_ID).then(function(res) {
+    return apiCall('get_fund_requests.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
             requestsData = res.data.filter(function(t) { 
                 return t.department_id === DEPARTMENT_ID && t.is_deleted !== 1; 
             }).sort(function(a,b) { return b.id - a.id; });
+            // Ensure source/title exists
             for (var i = 0; i < requestsData.length; i++) {
                 if (!requestsData[i].source || requestsData[i].source === '') {
                     requestsData[i].source = 'Office';
                 }
+                if (!requestsData[i].title || requestsData[i].title === '') {
+                    requestsData[i].title = requestsData[i].source;
+                }
             }
             unviewedRequestsCount = requestsData.filter(function(r) { 
-                return viewedRequestIds.indexOf(r.id) === -1; 
+                return viewedRequestIds.indexOf(r.id) === -1 && r.status === 'pending'; 
             }).length;
         } else { 
             requestsData = []; 
@@ -928,31 +1001,13 @@ function uploadProjectImage(file) {
         .catch(function(e) { console.error('Upload error:', e); showToast('Network error during upload', true); return ''; });
 }
 
-// ==================== MARK VIEWED ====================
+// ==================== MARK VIEWED USING NOTIFICATIONS ====================
 function markProjectAsViewed(projectId) {
-    return apiCall('mark_project_viewed.php', 'POST', { 
-        project_id: projectId, 
-        department_id: DEPARTMENT_ID, 
-        is_admin: 0 
-    }).then(function(res) {
-        if (res.success) { 
-            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
-            updateProjectBadge(); 
-        } 
-    });
+    return markNotificationViewed('project', projectId);
 }
 
 function markReportAsViewed(reportId) {
-    return apiCall('mark_report_viewed.php', 'POST', { 
-        report_id: reportId, 
-        department_id: DEPARTMENT_ID, 
-        is_admin: 0 
-    }).then(function(res) {
-        if (res.success) { 
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-            updateReportBadge(); 
-        } 
-    });
+    return markNotificationViewed('report', reportId);
 }
 
 function markRequestViewed(id) {
@@ -968,7 +1023,7 @@ function markRequestViewed(id) {
 function loadDashboard() {
     document.getElementById("dashboardSection").innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading...</span></div>';
     
-    Promise.all([fetchProjects(), fetchRequests(), fetchReports()]).then(function() {
+    Promise.all([fetchProjects(), fetchRequests(), fetchReports(), getUnviewedNotificationsCount()]).then(function() {
         var totalProjects = projects.length;
         var pending = projects.filter(function(p) { return p.status === 'pending'; }).length;
         var inProgress = projects.filter(function(p) { return p.status === 'in_progress'; }).length;
@@ -986,7 +1041,7 @@ function loadDashboard() {
         
         var html = '<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Hatimiliki Dashboard</h2><p class="text-xs text-gray-500">Title Deeds & Land Registration Management</p></div>' +
             '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
-                '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p></div>' +
+                '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p>' + (unviewedProjectsCount > 0 ? '<p class="text-[9px] text-red-300 mt-1">' + unviewedProjectsCount + ' new</p>' : '') + '</div>' +
                 '<div class="stat-card card-pending" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending</p><p class="stat-number">' + formatNumberWithCommas(pending) + '</p></div>' +
                 '<div class="stat-card card-progress" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-spinner text-lg"></i></div><p class="stat-label">In Progress</p><p class="stat-number">' + formatNumberWithCommas(inProgress) + '</p></div>' +
                 '<div class="stat-card card-completed" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-check-circle text-lg"></i></div><p class="stat-label">Completed</p><p class="stat-number">' + formatNumberWithCommas(completed) + '</p></div>' +
@@ -1044,7 +1099,7 @@ function getProjectStatusText(s) {
 }
 
 function loadTitleDeeds() {
-    Promise.all([fetchProjects(), fetchTitleDeedDocuments()]).then(function() {
+    Promise.all([fetchProjects(), fetchTitleDeedDocuments(), getUnviewedNotificationsCount()]).then(function() {
         var html = '<div class="tab-container">' +
             '<button class="tab-button ' + (currentProjectTab === 'added' ? 'active' : '') + '" onclick="switchProjectTab(\'added\')"><i class="fas fa-plus-circle mr-1"></i> Added Title Deeds <span class="tab-count">' + projects.length + '</span></button>' +
             '<button class="tab-button ' + (currentProjectTab === 'uploaded' ? 'active' : '') + '" onclick="switchProjectTab(\'uploaded\')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">' + titleDeedDocuments.length + '</span></button>' +
@@ -1274,7 +1329,7 @@ function deleteTitleDeed(id) {
     }
 }
 
-// ==================== SEND TITLE DEED ====================
+// ==================== SEND TITLE DEED WITH NOTIFICATION ====================
 function sendTitleDeedToDept(projectId, toDeptId) {
     var p = projects.find(function(proj) { return proj.id === projectId; });
     if (!p) {
@@ -1298,6 +1353,15 @@ function sendTitleDeedToDept(projectId, toDeptId) {
     
     var projectDailyWork = dailyworkData.filter(function(w) { return w.project_id == projectId; });
     
+    // Calculate summaries
+    var totalBudget = 0, totalExpenses = 0;
+    for (var i = 0; i < projectDailyWork.length; i++) {
+        var w = projectDailyWork[i];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+    }
+    var remainingBudget = totalBudget - totalExpenses;
+    
     var payload = {
         project_id: parseInt(projectId),
         to_department_id: parseInt(toDeptId),
@@ -1318,22 +1382,12 @@ function sendTitleDeedToDept(projectId, toDeptId) {
             created_by: p.created_by || CURRENT_USER,
             created_at: p.created_at,
             sent_count: (p.sent_count || 0) + 1,
-            daily_work: projectDailyWork.map(function(w) {
-                return {
-                    id: w.id,
-                    date: w.date,
-                    project_id: w.project_id,
-                    project_name: w.project_name,
-                    work_description: w.work_description || '',
-                    budget: parseFloat(w.budget) || 0,
-                    amount: parseFloat(w.amount) || 0,
-                    expenses: parseFloat(w.expenses) || 0,
-                    income: parseFloat(w.income) || 0,
-                    status: w.status || 'pending',
-                    created_by: w.created_by || 'System',
-                    created_at: w.created_at
-                };
-            })
+            daily_summary: {
+                total_budget: totalBudget,
+                total_expenses: totalExpenses,
+                remaining_budget: remainingBudget,
+                records_count: projectDailyWork.length
+            }
         }
     };
     
@@ -1349,6 +1403,13 @@ function sendTitleDeedToDept(projectId, toDeptId) {
             p.last_sent_at = new Date().toISOString();
             p.is_sent = 1;
             p.is_original = 1;
+            
+            // Add notification
+            addNotification(toDeptId, 'project', p.id, p.name, 'Title deed sent to your department');
+            
+            // Update badge count for sender
+            unviewedProjectsCount++;
+            updateProjectBadge();
             
             loadTitleDeeds();
             loadDashboard();
@@ -1368,7 +1429,7 @@ function sendTitleDeedToDept(projectId, toDeptId) {
     });
 }
 
-// ==================== VIEW TITLE DEED ====================
+// ==================== VIEW TITLE DEED WITH NOTIFICATION ====================
 function viewTitleDeed(id) {
     var p = projects.find(function(proj) { return proj.id === id; });
     if (!p) return;
@@ -1376,6 +1437,8 @@ function viewTitleDeed(id) {
     if (p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && 
         (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null) && 
         viewedProjectIds.indexOf(id) === -1) {
+        viewedProjectIds.push(id);
+        localStorage.setItem('hatimiliki_viewedProjectIds', JSON.stringify(viewedProjectIds));
         markProjectAsViewed(id);
     }
     
@@ -2260,6 +2323,9 @@ function sendDocumentToDept(docId, toDeptId, type) {
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
             
+            // Add notification
+            addNotification(toDeptId, 'document', doc.id, doc.title, 'Document sent to your department');
+            
             closeModal('documentInfoModal');
             loadTitleDeeds();
         } else {
@@ -2298,55 +2364,62 @@ function exportAllTitleDeedDocsToPDF() {
     showToast("PDF preview opened - Click Print");
 }
 
-// ==================== REQUESTS SECTION ====================
+// ==================== FUND REQUESTS SECTION (USING fund_requests TABLE) ====================
 function openRequestModal() {
     document.getElementById('editRequestId').value = '';
+    document.getElementById('requestTitle').value = '';
+    document.getElementById('requestDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('requestType').value = 'expense';
     document.getElementById('requestSource').value = 'Office';
     document.getElementById('requestAmount').value = '';
-    document.getElementById('requestDate').value = new Date().toISOString().split('T')[0];
-    document.getElementById('requestStatus').value = 'pending';
-    document.getElementById('requestPaidAmount').value = '';
     document.getElementById('requestDesc').value = '';
-    document.getElementById('paidAmountGroupR').style.display = 'none';
     openModal('requestModal');
 }
 
-function saveRequest() {
+function saveFundRequest() {
     var id = document.getElementById('editRequestId').value;
-    var status = document.getElementById('requestStatus').value;
-    var amount = parseAmount(document.getElementById('requestAmount').value);
-    var paidAmount = status === 'partial' ? parseAmount(document.getElementById('requestPaidAmount').value) : amount;
+    var title = document.getElementById('requestTitle').value.trim();
+    var request_date = document.getElementById('requestDate').value || new Date().toISOString().split('T')[0];
+    var type = document.getElementById('requestType').value;
     var source = document.getElementById('requestSource').value.trim();
-    if (!source || source === '') { source = 'Office'; }
-    var data = {
-        type: document.getElementById('requestType').value,
+    var amount = parseAmount(document.getElementById('requestAmount').value);
+    var description = document.getElementById('requestDesc').value;
+    
+    if (!title || !source || amount <= 0) {
+        showToast('Title, source and amount required', true);
+        return;
+    }
+    
+    var data = { 
+        title: title,
+        request_date: request_date,
+        type: type,
         source: source,
         amount: amount,
-        paid_amount: paidAmount,
-        transaction_date: document.getElementById('requestDate').value,
-        status: status,
-        description: document.getElementById('requestDesc').value
+        description: description,
+        status: 'pending',
+        department_id: DEPARTMENT_ID,
+        requested_by: CURRENT_USER
     };
-    if (amount <= 0) { showToast("Amount required", true); return; }
-    
-    var endpoint = id ? 'update_transaction.php' : 'add_transaction.php';
-    var payload = id ? { ...data, id: parseInt(id), department_id: DEPARTMENT_ID } : { ...data, department_id: DEPARTMENT_ID };
     
     var btn = document.querySelector('#requestModal .btn-primary');
     var originalText = btn.innerHTML;
     btn.innerHTML = '<span class="loading-spinner"></span> Saving...';
     btn.disabled = true;
     
+    var endpoint = id ? 'update_fund_request.php' : 'add_fund_request.php';
+    var payload = id ? { ...data, id: parseInt(id) } : data;
+    
     apiCall(endpoint, 'POST', payload).then(function(res) {
         if (res.success) {
-            showToast(id ? "Updated" : "Added");
+            showToast(id ? 'Fund request updated' : 'Fund request submitted successfully');
+            addLog(id ? 'Fund request updated: ' + title : 'Fund request added: ' + title);
             closeModal('requestModal');
             fetchRequests();
             loadRequests();
             loadDashboard();
         } else {
-            showToast(res.message || "Failed", true);
+            showToast(res.message || 'Failed to submit request', true);
         }
     }).catch(function(e) {
         showToast('Network error: ' + e.message, true);
@@ -2360,40 +2433,98 @@ function loadRequests(highlightId) {
     highlightId = highlightId || null;
     fetchRequests().then(function() {
         updateRequestBadge();
-        var html = '<div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h2 class="text-xl font-bold"><i class="fas fa-hand-holding-usd text-emerald-600 mr-2"></i>Request Table (' + requestsData.length + ')</h2><div class="flex gap-2"><button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Request</button><button onclick="exportAllRequestsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllRequestsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>' +
-            '<div class="transaction-table-container"><table class="transaction-table"><thead><tr style="background:#059669; color:white;"><th style="width:12%;">Date</th><th style="width:8%;">Type</th><th style="width:20%;">Source</th><th style="width:15%;" class="text-right">Amount (TZS)</th><th style="width:25%;">Description</th><th style="width:10%;">Status</th><th style="width:10%;" class="text-center">Actions</th></tr></thead><tbody>';
-        if (requestsData.length === 0) {
-            html += '<tr><td colspan="7" style="text-align:center;padding:40px;color:#9ca3af;">No requests found. Click "Add Request" to create one.</td></tr>';
-        } else {
-            for (var i = 0; i < requestsData.length; i++) {
-                var r = requestsData[i];
-                var statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
-                var statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-                var typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-                var typeText = r.type === 'income' ? 'Income' : 'Expense';
-                var isNew = viewedRequestIds.indexOf(r.id) === -1;
-                var isHighlighted = highlightId && r.id === highlightId;
-                var amount = parseFloat(r.amount) || 0;
-                var rowClass = '';
-                var rowStyle = '';
-                if (isNew) { rowClass = 'request-unviewed'; rowStyle = 'background:#fef3c7; border-left:3px solid #f59e0b;'; }
-                else if (r.type === 'income') { rowClass = 'income-row'; rowStyle = 'background:#f0fdf4;'; }
-                else if (r.type === 'expense') { rowClass = 'expense-row'; rowStyle = 'background:#fef2f2;'; }
-                if (isHighlighted) { rowClass += ' search-highlight'; rowStyle = 'background:#fef3c7 !important; border-left:4px solid #f59e0b;'; }
-                
-                html += '<tr id="req-row-' + r.id + '" class="' + rowClass + '" style="border-bottom:1px solid #e5e7eb; ' + rowStyle + '">' +
-                    '<td style="padding:12px 10px; white-space:nowrap;">' + formatDate(r.transaction_date) + '</td>' +
-                    '<td style="padding:12px 10px;"><span class="status-badge ' + typeClass + '" style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;">' + typeText + '</span></td>' +
-                    '<td style="padding:12px 10px; font-weight:500; word-break:break-word;">' + escapeHtml(r.source) + '</td>' +
-                    '<td style="padding:12px 10px; text-align:right; font-weight:700; white-space:nowrap;">' + formatCurrency(amount) + '</td>' +
-                    '<td style="padding:12px 10px; word-break:break-word;" title="' + escapeHtml(r.description || '-') + '">' + escapeHtml(r.description ? r.description.substring(0,50) : '-') + (r.description && r.description.length > 50 ? '...' : '') + '</td>' +
-                    '<td style="padding:12px 10px;"><span class="status-badge ' + statusClass + '" style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;">' + statusText + '</span></td>' +
-                    '<td style="padding:12px 10px; text-align:center;"><div class="flex gap-2 justify-center"><button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button><button onclick="editRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button><button onclick="deleteRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button></div></td>' +
-                '</tr>';
-            }
-        }
-        html += '</tbody></table></div>';
+        
+        var totalAmount = 0, pendingCount = 0, approvedCount = 0, cancelledCount = 0;
+        requestsData.forEach(function(r) {
+            var amt = parseFloat(r.amount) || 0;
+            totalAmount += amt;
+            if (r.status === 'pending' || r.status === 'Pending') pendingCount++;
+            else if (r.status === 'approved' || r.status === 'Approved') approvedCount++;
+            else if (r.status === 'cancelled' || r.status === 'Cancelled') cancelledCount++;
+        });
+        
+        var html = 
+            '<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">' +
+                '<div class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Total Amount</p><p class="text-lg font-bold">' + formatCurrency(totalAmount) + '</p></div>' +
+                '<div class="bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Pending</p><p class="text-lg font-bold">' + pendingCount + '</p></div>' +
+                '<div class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Approved</p><p class="text-lg font-bold">' + approvedCount + '</p></div>' +
+                '<div class="bg-gradient-to-r from-red-500 to-red-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Cancelled</p><p class="text-lg font-bold">' + cancelledCount + '</p></div>' +
+                '<div class="bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Total Requests</p><p class="text-lg font-bold">' + requestsData.length + '</p></div>' +
+            '</div>' +
+            '<div class="flex justify-between flex-wrap gap-3 mb-4">' +
+                '<h2 class="text-xl font-bold"><i class="fas fa-hand-holding-usd text-emerald-600 mr-2"></i>Fund Requests (' + requestsData.length + ')</h2>' +
+                '<div class="flex gap-2">' +
+                    '<button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Request</button>' +
+                    '<button onclick="exportAllRequestsToExcel()" class="btn-excel"><i class="fas fa-file-excel mr-1"></i> Excel All</button>' +
+                    '<button onclick="exportAllRequestsToPDF()" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="transaction-table-container">' +
+                '<table class="transaction-table">' +
+                    '<thead>' +
+                        '<tr>' +
+                            '<th style="width:10%;">Date</th>' +
+                            '<th style="width:8%;">Type</th>' +
+                            '<th style="width:18%;">Title</th>' +
+                            '<th style="width:15%;">Source</th>' +
+                            '<th style="width:12%;" class="text-right">Amount (TZS)</th>' +
+                            '<th style="width:22%;">Description</th>' +
+                            '<th style="width:8%;">Status</th>' +
+                            '<th style="width:12%;" class="text-center">Actions</th>' +
+                        '</tr>' +
+                    '</thead>' +
+                    '<tbody id="fundRequestsTableBody"></tbody>' +
+                '</table>' +
+            '</div>';
+        
         document.getElementById("requestsSection").innerHTML = html;
+        
+        if (requestsData.length === 0) {
+            document.getElementById('fundRequestsTableBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#9ca3af;">No fund requests found. Click "Add Request" to create one.</td></tr>';
+            return;
+        }
+        
+        var tableHtml = '';
+        for (var i = 0; i < requestsData.length; i++) {
+            var r = requestsData[i];
+            var isUnviewed = viewedRequestIds.indexOf(r.id) === -1 && (r.status === 'pending' || r.status === 'Pending');
+            var isHighlighted = highlightId && r.id === highlightId;
+            
+            var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : 
+                           (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
+            var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : 
+                              (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
+            var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : 
+                             (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
+            
+            var typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+            var typeColor = r.type === 'income' ? '#059669' : '#dc2626';
+            var typeText = r.type === 'income' ? 'Income' : 'Expense';
+            
+            var shortDesc = (r.description || '-').substring(0, 50) + ((r.description || '').length > 50 ? '...' : '');
+            var titleText = r.title || r.source || '-';
+            var amount = parseFloat(r.amount) || 0;
+            
+            tableHtml += 
+                '<tr id="req-row-' + r.id + '" class="' + (isUnviewed ? 'request-unviewed' : '') + (isHighlighted ? ' search-highlight' : '') + '" style="border-bottom:1px solid #e5e7eb;">' +
+                    '<td style="padding:12px 10px;white-space:nowrap;">' + formatDate(r.request_date || r.created_at) + '</td>' +
+                    '<td style="padding:12px 10px;"><span class="status-badge ' + typeBg + '" style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;color:' + typeColor + ';">' + typeText + '</span></td>' +
+                    '<td style="padding:12px 10px;font-weight:500;word-break:break-word;">' + escapeHtml(titleText) + '</td>' +
+                    '<td style="padding:12px 10px;word-break:break-word;">' + escapeHtml(r.source) + '</td>' +
+                    '<td style="padding:12px 10px;text-align:right;font-weight:700;color:#ea580c;white-space:nowrap;">' + formatCurrency(amount) + '</td>' +
+                    '<td style="padding:12px 10px;word-break:break-word;" title="' + escapeHtml(r.description || '-') + '">' + escapeHtml(shortDesc) + '</td>' +
+                    '<td style="padding:12px 10px;"><span style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span></td>' +
+                    '<td style="padding:12px 10px;text-align:center;">' +
+                        '<div class="flex gap-1 justify-center">' +
+                            '<button onclick="viewFundRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>' +
+                            '<button onclick="editFundRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>' +
+                            '<button onclick="deleteFundRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>' +
+                        '</div>' +
+                    '</td>' +
+                '</tr>';
+        }
+        document.getElementById('fundRequestsTableBody').innerHTML = tableHtml;
+        
         if (highlightId) {
             var el = document.getElementById('req-row-' + highlightId);
             if (el) {
@@ -2401,10 +2532,11 @@ function loadRequests(highlightId) {
                 setTimeout(function() { el.classList.remove('search-highlight'); }, 3000);
             }
         }
+        updateRequestBadge();
     });
 }
 
-function viewRequestDetails(id) {
+function viewFundRequestDetails(id) {
     var r = requestsData.find(function(req) { return req.id === id; });
     if (r) {
         if (viewedRequestIds.indexOf(id) === -1) {
@@ -2412,56 +2544,77 @@ function viewRequestDetails(id) {
             var row = document.getElementById('req-row-' + id);
             if (row) {
                 row.classList.remove('request-unviewed');
-                if (r.type === 'income') row.classList.add('income-row');
-                if (r.type === 'expense') row.classList.add('expense-row');
             }
             updateRequestBadge();
         }
-        var statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
-        var statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        var typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-        document.getElementById('viewRequestContent').innerHTML =
-            '<div class="space-y-2">' +
-                '<p><strong>Date:</strong> ' + formatDateTime(r.transaction_date) + '</p>' +
-                '<p><strong>Type:</strong> <span class="status-badge ' + typeClass + '">' + r.type + '</span></p>' +
-                '<p><strong>Source:</strong> ' + escapeHtml(r.source) + '</p>' +
-                '<p><strong>Amount:</strong> <span class="font-bold text-orange-600">' + formatCurrency(r.amount) + '</span></p>' +
-                '<p><strong>Description:</strong> ' + escapeHtml(r.description || '-') + '</p>' +
-                '<p><strong>Status:</strong> <span class="status-badge ' + statusClass + '">' + statusText + '</span></p>' +
-                '<div class="user-info mt-2">Submitted by: ' + escapeHtml(r.created_by || 'System') + ' on ' + formatDateTime(r.created_at) + '</div>' +
+        
+        var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : 
+                       (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
+        var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : 
+                          (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
+        var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : 
+                         (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
+        var typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+        var typeColor = r.type === 'income' ? '#059669' : '#dc2626';
+        
+        var actionHtml = '';
+        if (r.requested_by) actionHtml += '<div><i class="fas fa-user-plus text-xs mr-1"></i> Requested by: ' + escapeHtml(r.requested_by) + ' | ' + formatDateTime(r.created_at) + '</div>';
+        if (r.reviewed_by) actionHtml += '<div><i class="fas fa-check-circle text-xs mr-1"></i> Reviewed by: ' + escapeHtml(r.reviewed_by) + ' | ' + formatDateTime(r.reviewed_at) + '</div>';
+        
+        document.getElementById('viewRequestContent').innerHTML = 
+            '<div class="space-y-3">' +
+                '<div class="bg-gradient-to-r from-emerald-600 to-emerald-800 text-white p-4 rounded-lg">' +
+                    '<h3 class="text-lg font-bold">Fund Request #' + r.id + '</h3>' +
+                    '<p class="text-xs opacity-90 mt-1">Submitted: ' + formatDateTime(r.created_at) + '</p>' +
+                '</div>' +
+                '<div class="grid grid-cols-2 gap-3 text-sm">' +
+                    '<div class="font-semibold text-gray-600">Date:</div><div>' + formatDateTime(r.request_date || r.created_at) + '</div>' +
+                    '<div class="font-semibold text-gray-600">Title:</div><div><strong>' + escapeHtml(r.title) + '</strong></div>' +
+                    '<div class="font-semibold text-gray-600">Type:</div><div><span class="status-badge" style="background:' + typeBg + ';color:' + typeColor + ';padding:4px 12px;border-radius:20px;">' + r.type + '</span></div>' +
+                    '<div class="font-semibold text-gray-600">Source:</div><div>' + escapeHtml(r.source) + '</div>' +
+                    '<div class="font-semibold text-gray-600">Amount:</div><div class="font-bold text-orange-600">' + formatCurrency(r.amount) + '</div>' +
+                    '<div class="font-semibold text-gray-600 col-span-2">Description:</div>' +
+                    '<div class="col-span-2">' + escapeHtml(r.description || 'No description provided') + '</div>' +
+                    '<div class="font-semibold text-gray-600">Status:</div><div><span style="background:' + statusBg + ';color:' + statusColor + ';padding:4px 12px;border-radius:20px;">' + statusText + '</span></div>' +
+                    '<div class="font-semibold text-gray-600">Requested By:</div><div>' + escapeHtml(r.requested_by || r.created_by || CURRENT_USER) + '</div>' +
+                '</div>' +
+                (actionHtml ? '<div class="action-history text-xs text-gray-400 mt-2 pt-2 border-t">' + actionHtml + '</div>' : '') +
+                (r.status === 'approved' ? '<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg"><i class="fas fa-check-circle text-green-600 mr-2"></i> This request has been approved</div>' : '') +
+                (r.status === 'pending' ? '<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg"><i class="fas fa-clock text-yellow-600 mr-2"></i> This request is pending approval</div>' : '') +
+                (r.status === 'cancelled' ? '<div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg"><i class="fas fa-times-circle text-red-600 mr-2"></i> This request has been cancelled</div>' : '') +
             '</div>';
-        document.getElementById('viewRequestButtons').innerHTML =
-            '<button onclick="exportSingleRequestExcel(' + r.id + ')" class="btn-success">Excel</button>' +
-            '<button onclick="exportSingleRequestPDF(' + r.id + ')" class="btn-pdf">PDF</button>';
+        
+        document.getElementById('viewRequestButtons').innerHTML = 
+            '<button onclick="exportSingleRequestExcel(' + r.id + ')" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>' +
+            '<button onclick="exportSingleRequestPDF(' + r.id + ')" class="btn-pdf"><i class="fas fa-file-pdf"></i> PDF</button>';
+        
         openModal('viewRequestModal');
         loadRequests();
     }
 }
 
-function editRequest(id) {
+function editFundRequest(id) {
     var r = requestsData.find(function(req) { return req.id === id; });
     if (r) {
         document.getElementById('editRequestId').value = r.id;
+        document.getElementById('requestTitle').value = r.title || r.source;
+        document.getElementById('requestDate').value = r.request_date || r.created_at || new Date().toISOString().split('T')[0];
         document.getElementById('requestType').value = r.type;
         document.getElementById('requestSource').value = r.source;
-        document.getElementById('requestAmount').value = r.amount;
-        document.getElementById('requestDate').value = r.transaction_date;
-        document.getElementById('requestStatus').value = r.status;
-        document.getElementById('requestPaidAmount').value = r.paid_amount ? r.paid_amount : '';
+        document.getElementById('requestAmount').value = formatNumberWithCommas(r.amount);
         document.getElementById('requestDesc').value = r.description || '';
-        document.getElementById('paidAmountGroupR').style.display = r.status === 'partial' ? 'block' : 'none';
         openModal('requestModal');
     }
 }
 
-function deleteRequest(id) {
-    if (confirm("Delete this request?")) {
+function deleteFundRequest(id) {
+    if (confirm("Delete this fund request?")) {
         var r = requestsData.find(function(req) { return req.id === id; });
         if (r) {
-            addToRecycleBin(id, 'transaction', r.source).then(function() {
-                apiCall('delete_transaction.php', 'POST', { id: parseInt(id), is_deleted: 1 }).then(function(res) {
+            addToRecycleBin(id, 'budget_request', r.title).then(function() {
+                apiCall('delete_fund_request.php', 'POST', { request_id: parseInt(id), is_deleted: 1 }).then(function(res) {
                     if (res.success) {
-                        showToast("Deleted");
+                        showToast("Fund request moved to recycle bin");
                         fetchRequests();
                         loadRequests();
                         loadDashboard();
@@ -2477,11 +2630,20 @@ function deleteRequest(id) {
 function exportSingleRequestExcel(id) {
     var r = requestsData.find(function(req) { return req.id === id; });
     if (r) {
-        var ws = [['Date','Type','Source','Amount','Status','Description']];
-        ws.push([formatDate(r.transaction_date), r.type, r.source, r.amount, r.status, r.description || '-']);
+        var ws = [['Date','Title','Type','Source','Amount','Description','Status','Requested By']];
+        ws.push([
+            formatDate(r.request_date || r.created_at),
+            r.title || r.source,
+            r.type,
+            r.source,
+            formatNumberWithCommas(r.amount),
+            r.description || '-',
+            r.status,
+            r.requested_by || r.created_by || CURRENT_USER
+        ]);
         var wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Request');
-        XLSX.writeFile(wb, 'request_' + r.id + '.xlsx');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'FundRequest');
+        XLSX.writeFile(wb, 'fund_request_' + r.id + '.xlsx');
         showToast('Exported');
     }
 }
@@ -2489,22 +2651,67 @@ function exportSingleRequestExcel(id) {
 function exportSingleRequestPDF(id) {
     var r = requestsData.find(function(req) { return req.id === id; });
     if (r) {
-        var w = window.open('', '_blank');
-        w.document.write('<!DOCTYPE html><html><head><title>Request Details</title><style>body{font-family:Arial;padding:30px;border:2px solid #059669;border-radius:12px;}h1{color:#059669;text-align:center;}</style></head><body><h1>Request Details</h1><p><strong>Date:</strong> ' + formatDateTime(r.transaction_date) + '</p><p><strong>Type:</strong> ' + r.type + '</p><p><strong>Source:</strong> ' + escapeHtml(r.source) + '</p><p><strong>Amount:</strong> ' + formatCurrency(r.amount) + '</p><p><strong>Status:</strong> ' + r.status + '</p><div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);">Save as PDF</button></div></body></html>');
-        w.document.close();
+        var printWindow = window.open('', '_blank');
+        if (!printWindow) { showToast("Please allow popups", true); return; }
+        
+        var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : 
+                       (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
+        var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : 
+                          (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
+        var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : 
+                         (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
+        
+        printWindow.document.write('<!DOCTYPE html>\n' +
+        '<html><head><title>Fund Request Details</title>\n' +
+        '<style>\n' +
+            'body{font-family:Arial;padding:30px;border:2px solid #059669;border-radius:16px;}\n' +
+            'h1{color:#059669;text-align:center;}\n' +
+            '.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;}\n' +
+            '.print-btn{text-align:center;margin-top:20px;}\n' +
+            '.print-btn button{background:#059669;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}\n' +
+            '@media print{.print-btn{display:none;}}\n' +
+        '</style>\n' +
+        '</head>\n' +
+        '<body>\n' +
+            '<h1>Fund Request Details</h1>\n' +
+            '<p><strong>Date:</strong> ' + formatDate(r.request_date || r.created_at) + '</p>\n' +
+            '<p><strong>Title:</strong> ' + escapeHtml(r.title || r.source) + '</p>\n' +
+            '<p><strong>Type:</strong> ' + r.type + '</p>\n' +
+            '<p><strong>Source:</strong> ' + escapeHtml(r.source) + '</p>\n' +
+            '<p><strong>Amount:</strong> <span style="color:#ea580c;font-weight:bold;">' + formatCurrency(r.amount) + '</span></p>\n' +
+            '<p><strong>Description:</strong> ' + escapeHtml(r.description || '-') + '</p>\n' +
+            '<p><strong>Status:</strong> <span class="status-badge" style="background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span></p>\n' +
+            '<p><strong>Requested By:</strong> ' + escapeHtml(r.requested_by || r.created_by || 'System') + '</p>\n' +
+            '<p><strong>Submitted At:</strong> ' + formatDateTime(r.created_at) + '</p>\n' +
+            (r.reviewed_by ? '<p><strong>Reviewed By:</strong> ' + escapeHtml(r.reviewed_by) + '</p>' : '') +
+            '<div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1000);"><i class="fas fa-print"></i> Save as PDF</button></div>\n' +
+        '</body>\n' +
+        '</html>');
+        printWindow.document.close();
         showToast("PDF preview opened - Click Print to save");
     }
 }
 
 function exportAllRequestsToExcel() {
-    var ws = [['Date','Type','Source','Amount','Status','Description','Created By']];
+    var ws = [['ID','Date','Title','Type','Source','Amount','Description','Status','Requested By','Reviewed By']];
     requestsData.forEach(function(r) {
-        ws.push([formatDate(r.transaction_date), r.type, r.source, r.amount, r.status, r.description || '-', r.created_by || 'System']);
+        ws.push([
+            r.id,
+            formatDate(r.request_date || r.created_at),
+            r.title || r.source,
+            r.type,
+            r.source,
+            formatNumberWithCommas(r.amount),
+            r.description || '-',
+            r.status,
+            r.requested_by || r.created_by || 'System',
+            r.reviewed_by || '-'
+        ]);
     });
     var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Requests');
-    XLSX.writeFile(wb, 'requests_' + new Date().toISOString().slice(0,10) + '.xlsx');
-    showToast('Exported');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'FundRequests');
+    XLSX.writeFile(wb, 'fund_requests_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    showToast('All fund requests exported to Excel');
 }
 
 function exportAllRequestsToPDF() {
@@ -2513,75 +2720,107 @@ function exportAllRequestsToPDF() {
         return;
     }
     
+    var totalAmount = 0, pendingCount = 0, approvedCount = 0, cancelledCount = 0;
     var totalIncome = 0, totalExpense = 0;
     for (var i = 0; i < requestsData.length; i++) {
         var r = requestsData[i];
         var amount = parseFloat(r.amount) || 0;
+        totalAmount += amount;
         if (r.type === 'income') totalIncome += amount;
         else totalExpense += amount;
+        if (r.status === 'pending' || r.status === 'Pending') pendingCount++;
+        else if (r.status === 'approved' || r.status === 'Approved') approvedCount++;
+        else if (r.status === 'cancelled' || r.status === 'Cancelled') cancelledCount++;
     }
+    var netProfit = totalIncome - totalExpense;
     
     var rows = '';
     for (var j = 0; j < requestsData.length; j++) {
         var r = requestsData[j];
-        var source = r.source || 'Office';
-        var description = r.description || '-';
-        var shortDesc = description.length > 60 ? description.substring(0, 60) + '...' : description;
-        rows += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
-            '<td style="padding: 8px; border: 1px solid #059669;">' + formatDate(r.transaction_date) + '</td>' +
-            '<td style="padding: 8px; border: 1px solid #059669;"><span style="display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 10px; font-weight: 500; ' + (r.type === 'income' ? 'background: #d1fae5; color: #059669;' : 'background: #fee2e2; color: #dc2626;') + '">' + r.type + '</span></td>' +
-            '<td style="padding: 8px; border: 1px solid #059669;">' + escapeHtml(source) + '</td>' +
-            '<td style="padding: 8px; border: 1px solid #059669; text-align: right; font-weight: 700;">' + formatCurrency(r.amount) + '</td>' +
-            '<td style="padding: 8px; border: 1px solid #059669;">' + escapeHtml(shortDesc) + '</td>' +
-            '<td style="padding: 8px; border: 1px solid #059669;"><span style="display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 10px; font-weight: 500; ' + (r.status === 'paid' ? 'background: #d1fae5; color: #059669;' : r.status === 'partial' ? 'background: #fef3c7; color: #d97706;' : r.status === 'approved' ? 'background: #d1fae5; color: #059669;' : r.status === 'cancelled' ? 'background: #fee2e2; color: #dc2626;' : 'background: #fee2e2; color: #dc2626;') + '">' + r.status + '</span></td>' +
-            '<td style="padding: 8px; border: 1px solid #059669;">' + escapeHtml(r.created_by || 'System') + '</td>' +
-        '</tr>';
+        var amount = parseFloat(r.amount) || 0;
+        var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : 
+                         (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
+        var typeText = r.type === 'income' ? 'Income' : 'Expense';
+        var typeColor = r.type === 'income' ? '#059669' : '#dc2626';
+        var typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+        var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : 
+                       (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
+        var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : 
+                          (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
+        
+        rows += '<tr style="border-bottom:1px solid #e2e8f0;">' +
+            '<td style="padding:10px 8px;border:1px solid #059669;">' + formatDate(r.request_date || r.created_at) + '</td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;">' + escapeHtml(r.title || r.source) + '</td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;text-align:center;"><span style="background:' + typeBg + ';color:' + typeColor + ';padding:4px 12px;border-radius:20px;font-size:11px;display:inline-block;">' + typeText + '</span></td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;">' + escapeHtml(r.source) + '</td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;text-align:right;font-weight:700;color:#ea580c;font-family:monospace;">' + formatCurrency(amount) + '</td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;">' + escapeHtml(r.description || '-') + '</td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;text-align:center;"><span style="background:' + statusBg + ';color:' + statusColor + ';padding:4px 12px;border-radius:20px;font-size:11px;display:inline-block;">' + statusText + '</span></td>' +
+            '<td style="padding:10px 8px;border:1px solid #059669;text-align:center;">' + escapeHtml(r.requested_by || r.created_by || 'System') + '</td>' +
+            '</tr>';
     }
     
     var win = window.open('', '_blank');
-    if (!win) {
-        showToast('Please allow popups to generate PDF', true);
-        return;
-    }
+    if (!win) { showToast("Please allow popups to generate PDF", true); return; }
     
     win.document.write('<!DOCTYPE html>\n' +
     '<html>\n' +
     '<head>\n' +
         '<meta charset="UTF-8">\n' +
-        '<title>All Requests Report - Hatimiliki Department</title>\n' +
+        '<title>Fund Requests Report - Hatimiliki Department</title>\n' +
         '<style>\n' +
-            '* { margin: 0; padding: 0; box-sizing: border-box; }\n' +
-            'body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n' +
-            '.container { max-width: 1300px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #059669; }\n' +
-            '.header { background: linear-gradient(135deg, #059669, #047857); color: white; padding: 25px; text-align: center; }\n' +
-            '.header h1 { font-size: 22px; margin: 0; }\n' +
-            '.header p { font-size: 11px; opacity: 0.85; margin-top: 5px; }\n' +
-            '.info-bar { background: #f8fafc; padding: 10px 20px; display: flex; justify-content: space-between; font-size: 11px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; }\n' +
-            '.summary-bar { background: #f0fdf4; padding: 12px 20px; display: flex; justify-content: space-around; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 15px; }\n' +
-            '.summary-item { text-align: center; }\n' +
-            '.summary-item .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }\n' +
-            '.summary-item .value { font-size: 16px; font-weight: 800; margin-top: 4px; }\n' +
-            '.summary-item.income .value { color: #10b981; }\n' +
-            '.summary-item.expense .value { color: #ef4444; }\n' +
-            '.summary-item.net .value { color: #3b82f6; }\n' +
-            '.table-container { overflow-x: auto; padding: 20px; }\n' +
-            'table { width: 100%; border-collapse: collapse; font-size: 11px; }\n' +
-            'th { background: #059669; color: white; padding: 10px 8px; font-weight: 700; text-align: left; border: 1px solid #047857; }\n' +
-            'td { padding: 8px; border: 1px solid #059669; vertical-align: top; }\n' +
-            '.footer { text-align: center; font-size: 9px; color: #6b7280; padding: 12px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n' +
-            '.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n' +
-            '.print-btn button { background: #059669; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }\n' +
-            '@media print { body { background: white; padding: 0; } .print-btn { display: none; } .header { background: #059669 !important; -webkit-print-color-adjust: exact; } th { background: #059669 !important; -webkit-print-color-adjust: exact; } }\n' +
+            '* { margin:0; padding:0; box-sizing:border-box; }\n' +
+            'body { font-family:"Inter","Segoe UI",Arial,sans-serif; background:#f0f2f5; padding:30px; }\n' +
+            '.container { max-width:1300px; margin:0 auto; background:white; border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.1); border:2px solid #059669; }\n' +
+            '.header { background:linear-gradient(135deg,#059669,#047857); color:white; padding:25px; text-align:center; }\n' +
+            '.header h1 { font-size:24px; margin:0; }\n' +
+            '.header p { font-size:12px; opacity:0.85; margin-top:6px; }\n' +
+            '.info-bar { background:#f8fafc; padding:12px 25px; display:flex; justify-content:space-between; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; gap:10px; font-size:12px; }\n' +
+            '.summary-cards { display:grid; grid-template-columns:repeat(6,1fr); gap:15px; padding:20px 25px; background:#f9fafb; border-bottom:1px solid #e5e7eb; }\n' +
+            '.summary-card { background:white; border-radius:10px; padding:12px; text-align:center; border:1px solid #e5e7eb; }\n' +
+            '.summary-card .label { font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; }\n' +
+            '.summary-card .value { font-size:16px; font-weight:800; margin-top:5px; font-family:monospace; }\n' +
+            '.summary-card.total .value { color:#059669; }\n' +
+            '.summary-card.income .value { color:#10b981; }\n' +
+            '.summary-card.expense .value { color:#ef4444; }\n' +
+            '.summary-card.profit .value { color:#3b82f6; }\n' +
+            '.summary-card.pending .value { color:#f59e0b; }\n' +
+            '.summary-card.approved .value { color:#059669; }\n' +
+            '.table-container { overflow-x:auto; padding:20px 25px; }\n' +
+            'table { width:100%; border-collapse:collapse; font-size:11px; }\n' +
+            'th { background:#059669; color:white; padding:12px 8px; font-weight:700; text-align:left; border:1px solid #047857; }\n' +
+            'td { padding:10px 8px; border:1px solid #059669; vertical-align:middle; }\n' +
+            '.footer { text-align:center; font-size:9px; color:#6b7280; padding:15px; border-top:1px solid #e5e7eb; background:#f9fafb; }\n' +
+            '.print-btn { text-align:center; padding:15px; background:#f9fafb; border-top:1px solid #e5e7eb; }\n' +
+            '.print-btn button { background:#059669; color:white; border:none; padding:10px 24px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }\n' +
+            '@media print { .print-btn { display:none; } body { background:white; padding:0; } .header { background:#059669 !important; } th { background:#059669 !important; } }\n' +
         '</style>\n' +
     '</head>\n' +
     '<body>\n' +
         '<div class="container">\n' +
-            '<div class="header"><h1>📋 Hatimiliki Department - All Requests Report</h1><p>Complete Fund Requests Summary | Generated: ' + new Date().toLocaleString() + '</p></div>\n' +
-            '<div class="info-bar"><span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span><span><strong>Total Requests:</strong> ' + requestsData.length + '</span><span><strong>Generated By:</strong> ' + CURRENT_USER + '</span></div>\n' +
-            '<div class="summary-bar"><div class="summary-item income"><div class="label">💰 Total Income</div><div class="value">' + formatCurrency(totalIncome) + '</div></div><div class="summary-item expense"><div class="label">💸 Total Expenses</div><div class="value">' + formatCurrency(totalExpense) + '</div></div><div class="summary-item net"><div class="label">📈 Net Profit</div><div class="value">' + formatCurrency(totalIncome - totalExpense) + '</div></div></div>\n' +
-            '<div class="table-container"><table><thead><tr><th style="width:10%;">Date</th><th style="width:8%;">Type</th><th style="width:18%;">Source</th><th style="width:12%;" class="text-right">Amount (TZS)</th><th style="width:22%;">Description</th><th style="width:10%;">Status</th><th style="width:20%;">Created By</th></tr></thead><tbody>' + rows + '</tbody></table></div>\n' +
-            '<div class="footer">GeoTraverse ERP System - Hatimiliki Department | Official Fund Requests Report<br>This document is system generated and requires no signature</div>\n' +
-            '<div class="print-btn"><button onclick="window.print(); setTimeout(function(){ window.close(); }, 1000);">🖨️ Save as PDF / Print</button><button onclick="window.close();">❌ Close</button></div>\n' +
+            '<div class="header"><h1>📋 Fund Requests Report</h1><p>Hatimiliki Department - All Fund Requests</p></div>\n' +
+            '<div class="info-bar">\n' +
+                '<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n' +
+                '<span><strong>Total Requests:</strong> ' + requestsData.length + '</span>\n' +
+                '<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n' +
+                '<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n' +
+            '</div>\n' +
+            '<div class="summary-cards">\n' +
+                '<div class="summary-card total"><div class="label">📊 Total Amount</div><div class="value">' + formatCurrency(totalAmount) + '</div></div>\n' +
+                '<div class="summary-card income"><div class="label">💰 Total Income</div><div class="value">' + formatCurrency(totalIncome) + '</div></div>\n' +
+                '<div class="summary-card expense"><div class="label">💸 Total Expenses</div><div class="value">' + formatCurrency(totalExpense) + '</div></div>\n' +
+                '<div class="summary-card profit"><div class="label">📈 Net Profit</div><div class="value" style="color:' + (netProfit >= 0 ? '#10b981' : '#dc2626') + ';">' + formatCurrency(netProfit) + '</div></div>\n' +
+                '<div class="summary-card pending"><div class="label">⏳ Pending</div><div class="value">' + pendingCount + '</div></div>\n' +
+                '<div class="summary-card approved"><div class="label">✅ Approved</div><div class="value">' + approvedCount + '</div></div>\n' +
+            '</div>\n' +
+            '<div class="table-container">\n' +
+                '<table>\n' +
+                    '<thead><tr><th style="width:10%;">Date</th><th style="width:18%;">Title</th><th style="width:8%;text-align:center;">Type</th><th style="width:15%;">Source</th><th style="width:12%;text-align:right;">Amount</th><th style="width:20%;">Description</th><th style="width:8%;text-align:center;">Status</th><th style="width:18%;text-align:center;">Requested By</th></tr></thead>\n' +
+                    '<tbody>' + rows + '</tbody>\n' +
+                '</table>\n' +
+            '</div>\n' +
+            '<div class="footer">GeoTraverse ERP System - Hatimiliki Department | Official Fund Requests Report</div>\n' +
+            '<div class="print-btn"><button onclick="window.print();setTimeout(function(){window.close();},1500);">🖨️ Save as PDF / Print</button></div>\n' +
         '</div>\n' +
     '</body>\n' +
     '</html>');
@@ -2590,9 +2829,9 @@ function exportAllRequestsToPDF() {
     showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
-// ==================== REPORTS SECTION ====================
+// ==================== REPORTS SECTION WITH NOTIFICATIONS ====================
 function loadReports() {
-    Promise.all([fetchReports(), fetchUploadedReports()]).then(function() {
+    Promise.all([fetchReports(), fetchUploadedReports(), getUnviewedNotificationsCount()]).then(function() {
         var html = '<div class="tab-container"><button class="tab-button ' + (currentReportTab === 'added' ? 'active' : '') + '" onclick="switchReportTab(\'added\')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">' + reportsList.length + '</span></button><button class="tab-button ' + (currentReportTab === 'uploaded' ? 'active' : '') + '" onclick="switchReportTab(\'uploaded\')"><i class="fas fa-file-upload mr-1"></i> Uploaded Reports <span class="tab-count">' + uploadedReports.length + '</span></button></div>\n' +
             '<div class="flex flex-wrap justify-between items-center gap-3 mb-4">\n' +
                 '<h2 class="text-xl font-bold"><i class="fas fa-chart-line text-emerald-600 mr-2"></i>Reports</h2>\n' +
@@ -2652,6 +2891,8 @@ function viewReportDetails(id) {
         if (r.sent_from_department && r.sent_from_department !== DEPARTMENT_ID && 
             (r.is_viewed_by_department === 0 || r.is_viewed_by_department === null) && 
             viewedReportIds.indexOf(id) === -1) {
+            viewedReportIds.push(id);
+            localStorage.setItem('hatimiliki_viewedReportIds', JSON.stringify(viewedReportIds));
             markReportAsViewed(id);
         }
         var deptOptions = '';
@@ -2713,6 +2954,13 @@ function sendReportToDept(reportId, toDeptId) {
             r.is_viewed_by_department = 0;
             r.sent_count = (r.sent_count || 0) + 1;
             r.is_sent = 1;
+            
+            // Add notification
+            addNotification(toDeptId, 'report', r.id, r.title, 'Report sent to your department');
+            
+            // Update badge count for sender
+            unviewedReportsCount++;
+            updateReportBadge();
             
             fetchReports();
             loadReports();
@@ -2799,6 +3047,13 @@ function sendUploadedReportToDept(docId, toDeptId) {
             doc.is_viewed_by_department = 0;
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
+            
+            // Add notification
+            addNotification(toDeptId, 'uploaded_report', doc.id, doc.title, 'Uploaded report sent to your department');
+            
+            // Update badge count for sender
+            unviewedReportsCount++;
+            updateReportBadge();
             
             closeModal('documentInfoModal');
             loadReports();
@@ -3217,7 +3472,7 @@ function generateAndSaveReport() {
     
     Promise.all([fetchProjects(), fetchRequests(), fetchDailyWork()]).then(function() {
         var filteredRequests = requestsData.filter(function(t) {
-            var tDate = new Date(t.transaction_date);
+            var tDate = new Date(t.request_date || t.created_at);
             return tDate >= startDate && tDate <= endDate;
         });
         var filteredTitleDeeds = projects.filter(function(p) {
@@ -3413,7 +3668,7 @@ function performGlobalSearch() {
             return p.name.toLowerCase().includes(term) || (p.client_name || '').toLowerCase().includes(term);
         });
         var reqResults = requestsData.filter(function(r) {
-            return r.source.toLowerCase().includes(term);
+            return (r.title || r.source || '').toLowerCase().includes(term) || (r.description || '').toLowerCase().includes(term);
         });
         var repResults = reportsList.filter(function(r) {
             return r.title.toLowerCase().includes(term);
@@ -3437,7 +3692,7 @@ function performGlobalSearch() {
             html += '<div class="p-2 bg-gray-100 text-[9px] font-semibold">💰 REQUESTS</div>';
             for (var j = 0; j < Math.min(reqResults.length, 3); j++) {
                 var r = reqResults[j];
-                html += '<div class="search-result-item" onclick="goToSectionAndHighlight(\'requests\', \'req-row-' + r.id + '\')"><div class="font-medium text-xs">' + escapeHtml(r.source) + '</div><div class="text-[9px] text-gray-500">' + formatCurrency(r.amount) + '</div></div>';
+                html += '<div class="search-result-item" onclick="goToSectionAndHighlight(\'requests\', \'req-row-' + r.id + '\')"><div class="font-medium text-xs">' + escapeHtml(r.title || r.source) + '</div><div class="text-[9px] text-gray-500">' + formatCurrency(r.amount) + '</div></div>';
             }
         }
         if (repResults.length) {
@@ -3630,10 +3885,10 @@ window.exportAllTitleDeedDocsToExcel = exportAllTitleDeedDocsToExcel;
 window.exportAllTitleDeedDocsToPDF = exportAllTitleDeedDocsToPDF;
 window.sendDocumentToDept = sendDocumentToDept;
 window.openRequestModal = openRequestModal;
-window.saveRequest = saveRequest;
-window.viewRequestDetails = viewRequestDetails;
-window.editRequest = editRequest;
-window.deleteRequest = deleteRequest;
+window.saveFundRequest = saveFundRequest;
+window.viewFundRequestDetails = viewFundRequestDetails;
+window.editFundRequest = editFundRequest;
+window.deleteFundRequest = deleteFundRequest;
 window.exportSingleRequestExcel = exportSingleRequestExcel;
 window.exportSingleRequestPDF = exportSingleRequestPDF;
 window.exportAllRequestsToExcel = exportAllRequestsToExcel;
@@ -3680,6 +3935,10 @@ window.loadRequests = loadRequests;
 window.loadReports = loadReports;
 window.renderSettings = renderSettings;
 window.showDocumentInfo = showDocumentInfo;
+window.markAllNotificationsViewed = markAllNotificationsViewed;
+window.getUnviewedNotificationsCount = getUnviewedNotificationsCount;
+window.addNotification = addNotification;
+window.markNotificationViewed = markNotificationViewed;
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
