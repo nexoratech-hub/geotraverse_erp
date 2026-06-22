@@ -1076,6 +1076,15 @@ function fetchProjects() {
     });
 }
 
+function fetchSentProjects() {
+    return apiCall('get_sent_projects.php?department_id=' + DEPARTMENT_ID).then(function(res) {
+        if (res.success && res.data) {
+            return res.data;
+        }
+        return [];
+    });
+}
+
 function fetchFundRequests() {
     return apiCall('get_fund_requests.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
@@ -1125,6 +1134,15 @@ function fetchReports() {
             unviewedReportsCount = 0;
         }
         updateReportBadge();
+    });
+}
+
+function fetchSentReports() {
+    return apiCall('get_sent_reports.php?department_id=' + DEPARTMENT_ID).then(function(res) {
+        if (res.success && res.data) {
+            return res.data;
+        }
+        return [];
     });
 }
 
@@ -1318,7 +1336,49 @@ function loadDashboard() {
 function loadProjects(highlightId) {
     highlightId = highlightId || null;
     
-    fetchProjects().then(function() {
+    // Fetch both original and sent projects
+    Promise.all([fetchProjects(), fetchSentProjects()]).then(function(results) {
+        var sentProjects = results[1] || [];
+        
+        // Merge sent projects into projectsData
+        sentProjects.forEach(function(sent) {
+            var exists = projectsData.some(function(p) { return p.id === sent.id || p.id === sent.original_project_id; });
+            if (!exists) {
+                var projectData = {
+                    id: sent.original_project_id || sent.id,
+                    name: sent.project_name || sent.project_data?.name || 'Sent Project',
+                    client_name: sent.project_data?.client_name || '',
+                    amount: sent.amount || sent.project_data?.amount || 0,
+                    status: sent.project_data?.status || 'pending',
+                    progress: sent.project_data?.progress || 0,
+                    location: sent.project_data?.location || '',
+                    description: sent.project_data?.description || '',
+                    image: sent.project_data?.image || '',
+                    start_date: sent.project_data?.start_date || '',
+                    end_date: sent.project_data?.end_date || '',
+                    department_id: sent.from_department_id || DEPARTMENT_ID,
+                    created_by: sent.sent_by || 'System',
+                    created_at: sent.sent_at || new Date().toISOString(),
+                    sent_from_dept: sent.from_department_id,
+                    sent_to_dept: sent.to_department_id,
+                    is_viewed_by_department: sent.is_viewed || 0,
+                    is_sent: 1,
+                    _is_unviewed: sent.is_viewed == 0 || sent.is_viewed === null,
+                    _is_sent: true
+                };
+                projectsData.push(projectData);
+            }
+        });
+        
+        // Recalculate unviewed count
+        unviewedProjectsCount = projectsData.filter(function(p) {
+            return p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+                p.sent_to_dept === DEPARTMENT_ID && 
+                (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
+                viewedProjectIds.indexOf(p.id) === -1;
+        }).length;
+        updateProjectBadge();
+        
         fetchProjectDocuments().then(function() {
             var html = 
                 '<div class="tab-container">' +
@@ -1341,15 +1401,16 @@ function loadProjects(highlightId) {
                 
                 var projectsHtml = '';
                 projectsData.forEach(function(p) {
-                    var isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_dept === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && viewedProjectIds.indexOf(p.id) === -1;
+                    var isNew = p._is_unviewed || false;
                     var fileUrl = getFullImageUrl(p.image);
                     var isImage = fileUrl && isImageFile(fileUrl);
                     var statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
                     var statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
                     var isHighlighted = highlightId && p.id === highlightId;
+                    var isSent = p._is_sent || (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID);
                     
                     var sentFromBadge = '';
-                    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+                    if (isSent) {
                         var deptName = departmentNames[p.sent_from_dept] || 'Unknown';
                         sentFromBadge = '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + deptName + '</span>';
                     }
@@ -1700,20 +1761,210 @@ function viewProjectDetails(id) {
     updateDailyWorkSummary();
     
     var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
+    // Only show send button if project is NOT received (own project)
+    var canSend = !p.sent_from_dept || p.sent_from_dept == DEPARTMENT_ID;
+    if (canSend) {
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
+    }
     
-    document.getElementById('viewProjButtons').innerHTML = 
+    var buttonsHtml = 
         '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
         '<button onclick="exportProjectToPDF(' + p.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (Full Report)</button>' +
-        (fileUrl ? '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View File</button>' : '') +
-        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+        (fileUrl ? '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View File</button>' : '');
     
+    if (canSend) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    document.getElementById('viewProjButtons').innerHTML = buttonsHtml;
     openModal('viewProjModal');
     loadProjects();
+}
+
+// ============================================================
+// ==================== SEND PROJECT - WITH IMAGE & DAILY WORK ====================
+// ============================================================
+function sendProjectToDept(projectId, deptId) {
+    var p = projectsData.find(function(p) { return p.id === projectId; });
+    if (!p) { showToast('Project not found', true); return; }
+    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    var deptName = null;
+    for (var d = 0; d < allDepartmentsForSend.length; d++) {
+        if (allDepartmentsForSend[d].id == deptId) {
+            deptName = allDepartmentsForSend[d].name;
+            break;
+        }
+    }
+    deptName = deptName || 'Department';
+    
+    var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
+    var originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    // Get daily work records for this project
+    var projectDailyWork = dailyworkData.filter(function(w) { 
+        return parseInt(w.project_id) === parseInt(projectId); 
+    });
+    
+    // Calculate daily work summary
+    var totalBudget = 0, totalExpenses = 0;
+    var completedCount = 0, partialCount = 0, pendingCount = 0;
+    for (var m = 0; m < projectDailyWork.length; m++) {
+        var w = projectDailyWork[m];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+        if (w.status === 'completed') completedCount++;
+        else if (w.status === 'partial') partialCount++;
+        else pendingCount++;
+    }
+    var remainingBudget = totalBudget - totalExpenses;
+    
+    // Get image path - make sure it's clean
+    var imagePath = p.image || '';
+    if (imagePath && !imagePath.startsWith('http') && !imagePath.startsWith('data:')) {
+        var cleanImage = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
+        if (cleanImage.includes('/')) {
+            cleanImage = cleanImage.split('/').pop();
+        }
+        imagePath = cleanImage;
+    }
+    
+    var payload = {
+        project_id: parseInt(projectId),
+        to_department_id: parseInt(deptId),
+        from_department_id: DEPARTMENT_ID,
+        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+        project_name: p.name || 'Project',
+        client_name: p.client_name || '',
+        amount: parseFloat(p.amount) || 0,
+        status: p.status || 'pending',
+        progress: parseInt(p.progress) || 0,
+        location: p.location || '',
+        description: p.description || '',
+        image: imagePath, // INCLUDING IMAGE
+        start_date: p.start_date || '',
+        end_date: p.end_date || '',
+        sent_by: CURRENT_USER || 'Architectural Manager',
+        duplicate_send: true,
+        daily_work_records: projectDailyWork,
+        daily_summary: {
+            total_budget: totalBudget,
+            total_expenses: totalExpenses,
+            remaining_budget: remainingBudget,
+            records_count: projectDailyWork.length,
+            completed_count: completedCount,
+            partial_count: partialCount,
+            pending_count: pendingCount
+        }
+    };
+    
+    apiCall('send_project_advanced.php', 'POST', payload)
+    .then(function(res) {
+        if (res && res.success) {
+            showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records', false);
+            addLog('Project sent: "' + p.name + '" to ' + deptName);
+            
+            // Update local project
+            p.sent_to_dept = deptId;
+            p.sent_from_dept = DEPARTMENT_ID;
+            p.is_viewed_by_department = 0;
+            p.sent_count = (p.sent_count || 0) + 1;
+            p.is_sent = 1;
+            p._is_sent = true;
+            
+            // Update badges
+            unviewedProjectsCount = projectsData.filter(function(proj) {
+                return proj.sent_from_dept && proj.sent_from_dept != DEPARTMENT_ID && 
+                    proj.sent_to_dept === DEPARTMENT_ID && 
+                    (proj.is_viewed_by_department == 0 || proj.is_viewed_by_department === null);
+            }).length;
+            updateProjectBadge();
+            
+            loadProjects();
+            loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send project', true);
+        }
+    })
+    .catch(function(e) {
+        console.error('Send project error:', e);
+        showToast('Network error: ' + e.message, true);
+    })
+    .finally(function() {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        toggleSendDropdown('projSendDropdown-' + projectId);
+        closeModal('viewProjModal');
+    });
+}
+
+function sendDocumentToDept(docId, deptId) {
+    var doc = projectDocuments.find(function(d) { return d.id === docId; });
+    if (!doc) { showToast('Document not found', true); return; }
+    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
+    var btn = document.querySelector('#docSendDropdown-' + docId + ' .dropdown-trigger');
+    var originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
+    
+    var payload = {
+        document_id: parseInt(docId),
+        to_department_id: parseInt(deptId),
+        from_department_id: DEPARTMENT_ID,
+        sent_by: CURRENT_USER,
+        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+        doc_type: 'project',
+        duplicate_send: true,
+        doc_data: {
+            id: doc.id,
+            title: doc.title,
+            description: doc.description || '',
+            file_name: doc.file_name || '',
+            file_path: doc.file_path || '',
+            file_size: doc.file_size || 0,
+            file_type: doc.file_type || '',
+            uploaded_by: doc.uploaded_by || CURRENT_USER,
+            department_id: doc.department_id || DEPARTMENT_ID,
+            created_at: doc.created_at,
+            sent_count: (doc.sent_count || 0) + 1
+        }
+    };
+    
+    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
+        if (res && res.success) {
+            showToast('✅ Document "' + doc.title + '" sent to ' + deptName, false);
+            addLog('Document sent: "' + doc.title + '" to ' + deptName);
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.is_sent = 1;
+            doc.last_sent_at = new Date().toISOString();
+            updateProjectBadge();
+            closeModal('documentInfoModal');
+            loadProjects();
+            loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    }).catch(function(e) {
+        console.error('Send document error:', e);
+        showToast('Network error: ' + e.message, true);
+    }).finally(function() {
+        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+        toggleSendDropdown('docSendDropdown-' + docId);
+    });
 }
 
 // ============================================================
@@ -2572,6 +2823,8 @@ function generateAllProjectsPDF() {
 }
 
 // ============================================================
+// ==================== PROJECT DOCUMENTS ====================
+// ============================================================
 function openUploadProjectDocModal() {
     document.getElementById('projectDocTitle').value = '';
     document.getElementById('projectDocDesc').value = '';
@@ -2668,18 +2921,23 @@ function viewUploadedDocumentInfo(docId) {
     document.getElementById('documentInfoContent').innerHTML = infoHtml;
     
     var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendDocumentToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
+    // Only show send if document is NOT received
+    if (!doc.sent_from_department || doc.sent_from_department == DEPARTMENT_ID) {
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendDocumentToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
+    }
     
     var downloadUrl = '../backend/api/download_document.php?id=' + doc.id + '&type=project';
     
-    document.getElementById('documentInfoButtons').innerHTML =
-        '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download"></i> Download</a>' +
-        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'docSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download"></i> Download</a>';
+    if (deptOptions) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'docSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
     
+    document.getElementById('documentInfoButtons').innerHTML = buttonsHtml;
     openModal('documentInfoModal');
 }
 
@@ -2723,149 +2981,6 @@ function exportAllProjectDocsToPDF() {
     w.document.write('<!DOCTYPE html><html><head><title>All Documents</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Documents</h1><p>Generated: ' + new Date().toLocaleString() + '</p>' + rows + '<div style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1000);">Save as PDF</button></div></body></html>');
     w.document.close();
     showToast("PDF preview opened - Click Print to save");
-}
-
-// ============================================================
-// ==================== SEND PROJECT ====================
-// ============================================================
-function sendProjectToDept(projectId, deptId) {
-    var p = projectsData.find(function(p) { return p.id === projectId; });
-    if (!p) { showToast('Project not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
-    
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    
-    var projectDailyWork = dailyworkData.filter(function(w) { return w.project_id == projectId; });
-    
-    var payload = {
-        project_id: parseInt(projectId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        duplicate_send: true,
-        project_data: {
-            id: p.id,
-            name: p.name,
-            client_name: p.client_name || '',
-            amount: parseFloat(p.amount) || 0,
-            location: p.location || '',
-            description: p.description || '',
-            status: p.status,
-            progress: p.progress || 0,
-            start_date: p.start_date || '',
-            end_date: p.end_date || '',
-            image: p.image || '',
-            department_id: p.department_id || DEPARTMENT_ID,
-            created_by: p.created_by || CURRENT_USER,
-            created_at: p.created_at,
-            sent_count: (p.sent_count || 0) + 1,
-            daily_work_summary: {
-                total_budget: projectDailyWork.reduce(function(sum, w) { return sum + (parseFloat(w.budget) || 0); }, 0),
-                total_expenses: projectDailyWork.reduce(function(sum, w) { return sum + (parseFloat(w.amount) || 0); }, 0),
-                remaining_budget: projectDailyWork.reduce(function(sum, w) { return sum + (parseFloat(w.budget) || 0) - (parseFloat(w.amount) || 0); }, 0),
-                records_count: projectDailyWork.length,
-                completed_count: projectDailyWork.filter(function(w) { return w.status === 'completed'; }).length,
-                partial_count: projectDailyWork.filter(function(w) { return w.status === 'partial'; }).length,
-                pending_count: projectDailyWork.filter(function(w) { return w.status === 'pending' || !w.status; }).length
-            }
-        }
-    };
-    
-    apiCall('send_project_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records', false);
-            addLog('Project sent: "' + p.name + '" to ' + deptName);
-            p.sent_to_dept = deptId;
-            p.sent_from_dept = DEPARTMENT_ID;
-            p.is_viewed_by_department = 0;
-            p.sent_count = (p.sent_count || 0) + 1;
-            p.is_sent = 1;
-            p.last_sent_at = new Date().toISOString();
-            
-            // Update badges
-            unviewedProjectsCount = projectsData.filter(function(proj) {
-                return proj.sent_from_dept && proj.sent_from_dept != DEPARTMENT_ID && 
-                    proj.sent_to_dept === DEPARTMENT_ID && 
-                    (proj.is_viewed_by_department == 0 || proj.is_viewed_by_department === null);
-            }).length;
-            updateProjectBadge();
-            
-            loadProjects();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send project', true);
-        }
-    }).catch(function(e) {
-        console.error('Send project error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
-        toggleSendDropdown('projSendDropdown-' + projectId);
-        closeModal('viewProjModal');
-    });
-}
-
-function sendDocumentToDept(docId, deptId) {
-    var doc = projectDocuments.find(function(d) { return d.id === docId; });
-    if (!doc) { showToast('Document not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
-    
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    var btn = document.querySelector('#docSendDropdown-' + docId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    
-    var payload = {
-        document_id: parseInt(docId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        doc_type: 'project',
-        duplicate_send: true,
-        doc_data: {
-            id: doc.id,
-            title: doc.title,
-            description: doc.description || '',
-            file_name: doc.file_name || '',
-            file_path: doc.file_path || '',
-            file_size: doc.file_size || 0,
-            file_type: doc.file_type || '',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
-            department_id: doc.department_id || DEPARTMENT_ID,
-            created_at: doc.created_at,
-            sent_count: (doc.sent_count || 0) + 1
-        }
-    };
-    
-    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Document "' + doc.title + '" sent to ' + deptName, false);
-            addLog('Document sent: "' + doc.title + '" to ' + deptName);
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.is_sent = 1;
-            doc.last_sent_at = new Date().toISOString();
-            updateProjectBadge();
-            closeModal('documentInfoModal');
-            loadProjects();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send document', true);
-        }
-    }).catch(function(e) {
-        console.error('Send document error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
-        toggleSendDropdown('docSendDropdown-' + docId);
-    });
 }
 
 // ============================================================
@@ -3303,78 +3418,27 @@ function viewReportDetailsModal(id) {
     document.getElementById('viewReportContent').innerHTML = detailsHtml;
     
     var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendReportToDeptModal(' + r.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
+    // Only show send if report is NOT received
+    var canSend = !r.sent_from_department || r.sent_from_department == DEPARTMENT_ID;
+    if (canSend) {
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendReportToDeptModal(' + r.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
+    }
     
-    document.getElementById('viewReportButtons').innerHTML = 
+    var buttonsHtml = 
         '<button onclick="exportSingleReportExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
-        '<button onclick="exportSingleReportPDFNewWindow(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>' +
-        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+        '<button onclick="exportSingleReportPDFNewWindow(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>';
     
+    if (canSend) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
     openModal('viewReportModal');
     loadReports();
-}
-
-function viewUploadedReportDetail(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (!doc) { showToast('Report not found', true); return; }
-    
-    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
-        markReportViewed(id);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: id,
-            department_id: DEPARTMENT_ID,
-            item_type: 'uploaded_report'
-        }).catch(function(e) {});
-    }
-    
-    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    
-    var sentFromInfo = '';
-    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-        var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
-        sentFromInfo = '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></div></div>';
-    }
-    
-    var detailsHtml = 
-        '<div class="space-y-4">' +
-            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
-                '<h3 class="text-xl font-bold">Document Information</h3>' +
-                '<p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p>' +
-            '</div>' +
-            '<div class="doc-info-container">' +
-                '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
-                sentFromInfo +
-            '</div>' +
-        '</div>';
-    
-    document.getElementById('viewReportContent').innerHTML = detailsHtml;
-    
-    var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
-    
-    var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
-    
-    document.getElementById('viewReportButtons').innerHTML =
-        '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download mr-1"></i> Download</a>' +
-        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    
-    openModal('viewReportModal');
 }
 
 function sendReportToDeptModal(reportId, deptId) {
@@ -3443,6 +3507,71 @@ function sendReportToDeptModal(reportId, deptId) {
         toggleSendDropdown('reportSendDropdown-' + reportId);
         closeModal('viewReportModal');
     });
+}
+
+function viewUploadedReportDetail(id) {
+    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
+    if (!doc) { showToast('Report not found', true); return; }
+    
+    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
+        markReportViewed(id);
+        apiCall('mark_notification_viewed.php', 'POST', {
+            notification_id: id,
+            department_id: DEPARTMENT_ID,
+            item_type: 'uploaded_report'
+        }).catch(function(e) {});
+    }
+    
+    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
+    var sentFromInfo = '';
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+        sentFromInfo = '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></div></div>';
+    }
+    
+    var detailsHtml = 
+        '<div class="space-y-4">' +
+            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
+                '<h3 class="text-xl font-bold">Document Information</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p>' +
+            '</div>' +
+            '<div class="doc-info-container">' +
+                '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
+                sentFromInfo +
+            '</div>' +
+        '</div>';
+    
+    document.getElementById('viewReportContent').innerHTML = detailsHtml;
+    
+    var deptOptions = '';
+    // Only show send if report is NOT received
+    var canSend = !doc.sent_from_department || doc.sent_from_department == DEPARTMENT_ID;
+    if (canSend) {
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
+    }
+    
+    var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
+    
+    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download mr-1"></i> Download</a>';
+    if (canSend) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
+    openModal('viewReportModal');
 }
 
 function sendUploadedReportToDept(reportId, deptId) {

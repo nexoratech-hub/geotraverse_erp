@@ -46,7 +46,6 @@
         body.dark-mode .requests-table tr:hover { background: #2d1b2e; }
         body.dark-mode .report-card-header { background: linear-gradient(135deg, #b45309, #92400e); }
         
-        /* SEARCH HIGHLIGHT - FIXED */
         .search-highlight {
             background: #fef3c7 !important;
             border-left: 4px solid #f59e0b !important;
@@ -136,7 +135,6 @@
             background: linear-gradient(135deg, #b45309, #92400e); 
         }
         
-        /* DAILY WORK TABLE STYLES */
         .dailywork-section-card {
             background: white;
             border-radius: 16px;
@@ -174,7 +172,6 @@
             padding: 20px;
         }
         
-        /* Summary Cards - Horizontal Row */
         .dailywork-summary {
             display: flex;
             gap: 20px;
@@ -222,7 +219,6 @@
         .summary-card.paid .summary-value { color: #8b5cf6; }
         .summary-card.remaining .summary-value { color: #f59e0b; }
         
-        /* Daily Work Table */
         .dailywork-table-container {
             overflow-x: auto;
             border-radius: 12px;
@@ -266,15 +262,14 @@
             background: #2d1b2e;
         }
         
-        /* Column widths */
-        .dailywork-table th:nth-child(1) { width: 14%; }  /* Date/Time */
-        .dailywork-table th:nth-child(2) { width: 10%; }  /* Category */
-        .dailywork-table th:nth-child(3) { width: 28%; }  /* Description (vertical) */
-        .dailywork-table th:nth-child(4) { width: 12%; text-align: right; }  /* Total Amount */
-        .dailywork-table th:nth-child(5) { width: 10%; text-align: right; }  /* Expenses */
-        .dailywork-table th:nth-child(6) { width: 10%; text-align: right; }  /* Profit */
-        .dailywork-table th:nth-child(7) { width: 10%; text-align: center; }  /* Payment Status */
-        .dailywork-table th:nth-child(8) { width: 6%; text-align: center; }   /* Actions */
+        .dailywork-table th:nth-child(1) { width: 14%; }
+        .dailywork-table th:nth-child(2) { width: 10%; }
+        .dailywork-table th:nth-child(3) { width: 28%; }
+        .dailywork-table th:nth-child(4) { width: 12%; text-align: right; }
+        .dailywork-table th:nth-child(5) { width: 10%; text-align: right; }
+        .dailywork-table th:nth-child(6) { width: 10%; text-align: right; }
+        .dailywork-table th:nth-child(7) { width: 10%; text-align: center; }
+        .dailywork-table th:nth-child(8) { width: 6%; text-align: center; }
         
         .dailywork-table td:nth-child(4),
         .dailywork-table td:nth-child(5),
@@ -282,7 +277,6 @@
         .dailywork-table td:nth-child(7) { text-align: center; }
         .dailywork-table td:nth-child(8) { text-align: center; }
         
-        /* Description column vertical layout */
         .dailywork-table .desc-text {
             margin-bottom: 8px;
             line-height: 1.4;
@@ -421,7 +415,6 @@
         .hidden-field { display: none; }
         .partial-amount-group { transition: all 0.3s ease; }
         
-        /* Report content - FULL VISIBLE NO SCROLL */
         .report-content-full {
             background: #1e293b;
             color: #f1f5f9;
@@ -438,7 +431,6 @@
             background: #0f172a;
         }
         
-        /* Search result highlight animation */
         .search-result-item .highlight-text {
             background: #fef3c7;
             padding: 0 2px;
@@ -718,7 +710,7 @@ async function addNotification(departmentId, itemType, itemId, itemTitle, messag
 
 async function getUnviewedNotificationsCount() {
     try {
-        var res = await apiCall('get_unviewed_count.php', 'GET');
+        var res = await apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID);
         if (res.success && res.data) {
             var counts = res.data;
             unviewedReportsCount = counts.reports || 0;
@@ -735,7 +727,8 @@ async function markNotificationViewed(itemType, itemId) {
     try {
         var res = await apiCall('mark_notification_viewed.php', 'POST', {
             item_type: itemType,
-            item_id: parseInt(itemId)
+            item_id: parseInt(itemId),
+            department_id: DEPARTMENT_ID
         });
         if (res.success) {
             await getUnviewedNotificationsCount();
@@ -964,7 +957,7 @@ async function fetchReports() {
                 (!r.deleted_by_admin || r.deleted_by_admin != 1)
             ).sort((a,b) => b.id - a.id); 
             
-            // Mark unviewed reports
+            // Mark unviewed reports - show NEW badge for all sent reports
             reportsData.forEach(r => {
                 r._is_unviewed = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
                     r.sent_to_department === DEPARTMENT_ID && 
@@ -1124,22 +1117,18 @@ async function emptyRecycleBin() {
     } 
 }
 
-// ==================== DOCUMENT FUNCTIONS - WITH MULTIPLE PATH SUPPORT ====================
 // ==================== DOCUMENT FUNCTIONS - FIXED FOR SENT UPLOADED REPORTS ====================
 function getReportFileUrl(fileName) {
     if (!fileName) return null;
     
-    // Check if it's already a full URL
     if (fileName.startsWith('http://') || fileName.startsWith('https://')) {
         return fileName;
     }
     
-    // Check if it starts with data: (base64)
     if (fileName.startsWith('data:')) {
         return fileName;
     }
     
-    // Clean the filename - remove any path segments
     let cleanName = fileName;
     if (cleanName.includes('/')) {
         cleanName = cleanName.split('/').pop();
@@ -1148,7 +1137,6 @@ function getReportFileUrl(fileName) {
         cleanName = cleanName.split('\\').pop();
     }
     
-    // Try multiple possible paths
     const possiblePaths = [
         '/geotraverse/frontend/assets/uploads/reports/' + cleanName,
         '/geotraverse/assets/uploads/reports/' + cleanName,
@@ -1175,11 +1163,6 @@ function downloadReportFile(fileName) {
     const fileInfo = getReportFileUrl(fileName);
     const cleanName = fileInfo.cleanName;
     
-    // Try to find the file using HEAD requests
-    let found = false;
-    let foundPath = null;
-    
-    // First try the most common paths
     const pathsToTry = [
         '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName),
         '/geotraverse/frontend/assets/uploads/reports/' + cleanName,
@@ -1187,10 +1170,8 @@ function downloadReportFile(fileName) {
         '/geotraverse/backend/uploads/reports/' + cleanName
     ];
     
-    // Try to download directly using the API with file parameter
     const apiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName);
     
-    // Open in new window - API will handle file retrieval
     window.open(apiUrl, '_blank');
     showToast('Downloading: ' + cleanName, false);
 }
@@ -1198,7 +1179,6 @@ function downloadReportFile(fileName) {
 function viewUploadedReportDocument(docId) {
     const doc = uploadedReportsData.find(d => d.id === docId);
     if(doc) {
-        // Mark as viewed if unviewed
         if (doc._is_unviewed === true) {
             markReportViewed(docId);
             doc._is_unviewed = false;
@@ -1230,7 +1210,6 @@ function viewUploadedReportDocument(docId) {
             }
         });
         
-        // Use the download API with file parameter
         const downloadApiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(cleanName);
         
         document.getElementById('documentInfoButtons').innerHTML = `
@@ -1239,50 +1218,6 @@ function viewUploadedReportDocument(docId) {
         `;
         openModal('documentInfoModal');
     }
-}
-function downloadReportFile(fileName) {
-    if (!fileName) {
-        showToast('No file specified', true);
-        return;
-    }
-    
-    const fileInfo = getReportFileUrl(fileName);
-    
-    // First try the download API (most reliable)
-    const apiUrl = '/geotraverse/backend/api/download_report_document.php?file=' + encodeURIComponent(fileInfo.cleanName);
-    
-    fetch(apiUrl, { method: 'HEAD' })
-        .then(response => {
-            if (response.ok) {
-                // API endpoint exists, use it
-                window.open(apiUrl, '_blank');
-                showToast('Downloading: ' + fileInfo.cleanName, false);
-                return;
-            }
-            // Try direct paths
-            let found = false;
-            for (let path of fileInfo.possiblePaths) {
-                fetch(path, { method: 'HEAD' })
-                    .then(res => {
-                        if (res.ok && !found) {
-                            found = true;
-                            window.open(path, '_blank');
-                            showToast('Downloading: ' + fileInfo.cleanName, false);
-                        }
-                    })
-                    .catch(() => {});
-            }
-            // If none found, try the API anyway
-            if (!found) {
-                window.open(apiUrl, '_blank');
-                showToast('Attempting download via API: ' + fileInfo.cleanName, false);
-            }
-        })
-        .catch(() => {
-            // Fallback: try direct download
-            window.open(apiUrl, '_blank');
-            showToast('Downloading via API: ' + fileInfo.cleanName, false);
-        });
 }
 
 function previewUploadedFile() { 
@@ -1304,49 +1239,6 @@ function removeUploadedFile() {
     currentUploadedFile = null; 
     document.getElementById('reportFileInput').value = ''; 
     document.getElementById('uploadedFilePreview').classList.add('hidden'); 
-}
-
-function viewUploadedReportDocument(docId) {
-    const doc = uploadedReportsData.find(d => d.id === docId);
-    if(doc) {
-        // Mark as viewed if unviewed
-        if (doc._is_unviewed === true) {
-            markReportViewed(docId);
-            doc._is_unviewed = false;
-            doc.is_viewed_by_department = 1;
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
-            updateReportBadge();
-        }
-        
-        let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-        let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-        let fileInfo = getReportFileUrl(doc.file_name);
-        let downloadUrl = fileInfo ? fileInfo.downloadApiUrl : '#';
-        
-        document.getElementById('documentInfoContent').innerHTML = `
-            <div class="doc-info-item"><div class="doc-info-label">Report Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">${doc.period}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
-        `;
-        
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { 
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
-            }
-        });
-        
-        document.getElementById('documentInfoButtons').innerHTML = `
-            <button onclick="downloadReportFile('${escapeHtml(doc.file_name)}')" class="btn-download"><i class="fas fa-download"></i> Download</button>
-            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
-        `;
-        openModal('documentInfoModal');
-    }
 }
 
 document.getElementById('reportFileInput')?.addEventListener('change', function(e) { 
@@ -1409,7 +1301,6 @@ async function loadBricksDailyWork() {
     console.log('Loading Bricks Daily Work...');
     await fetchBricksDailyWork();
     
-    // Calculate summary totals
     let totalIncome = 0, totalExpenses = 0, totalPaid = 0;
     for (let w of bricksDailyWork) {
         let totalVal = parseFloat(w.amount || w.total_amount || 0);
@@ -1434,7 +1325,6 @@ async function loadBricksDailyWork() {
                 </div>
             </div>
             <div class="dailywork-section-body">
-                <!-- Summary Cards -->
                 <div class="dailywork-summary">
                     <div class="summary-card income"><div class="summary-icon">💰</div><div class="summary-label">Total Income</div><div class="summary-value">${formatMoney(totalIncome)}</div></div>
                     <div class="summary-card expenses"><div class="summary-icon">💸</div><div class="summary-label">Total Expenses</div><div class="summary-value">${formatMoney(totalExpenses)}</div></div>
@@ -1443,7 +1333,6 @@ async function loadBricksDailyWork() {
                     <div class="summary-card remaining"><div class="summary-icon">⏳</div><div class="summary-label">Remaining Balance</div><div class="summary-value">${formatMoney(remainingTotal)}</div></div>
                 </div>
                 
-                <!-- Daily Work Table -->
                 <div class="dailywork-table-container">
                     <table class="dailywork-table" style="width: 100%; border-collapse: collapse;">
                         <thead>
@@ -2557,11 +2446,13 @@ async function loadReports(highlightId = null) {
     updateReportBadge();
 }
 
-// ==================== SEND REPORT (Using send_report_advanced.php) ====================
+// ==================== SEND REPORT - FORWARDING ALLOWED ====================
 async function sendReportToDept(reportId, deptId) { 
     const r = reportsData.find(r => r.id === reportId); 
     if (!r) { showToast('Report not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // FORWARDING ALLOWED - No restriction on sending received reports
     
     const dept = allDepartmentsForSend.find(d=>d.id==deptId);
     const deptName = dept ? dept.name : 'Department';
@@ -2615,11 +2506,13 @@ async function sendReportToDept(reportId, deptId) {
     }
 }
 
-// ==================== SEND UPLOADED REPORT (Using send_document_advanced.php) ====================
+// ==================== SEND UPLOADED REPORT - FORWARDING ALLOWED ====================
 async function sendUploadedReportToDept(reportId, deptId) {
     const doc = uploadedReportsData.find(d => d.id === reportId);
     if (!doc) { showToast('Uploaded report not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // FORWARDING ALLOWED - No restriction on sending received reports
     
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';

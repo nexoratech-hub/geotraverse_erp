@@ -23,6 +23,8 @@ $title = isset($_POST['title']) ? trim($_POST['title']) : '';
 $description = isset($_POST['description']) ? trim($_POST['description']) : '';
 $department_id = isset($_POST['department_id']) ? intval($_POST['department_id']) : 0;
 $uploaded_by = isset($_POST['uploaded_by']) ? trim($_POST['uploaded_by']) : 'System';
+$doc_type = isset($_POST['doc_type']) ? trim($_POST['doc_type']) : 'general'; // NEW
+$project_id = isset($_POST['project_id']) ? intval($_POST['project_id']) : null; // NEW
 
 // Validate
 if (empty($title)) {
@@ -45,7 +47,7 @@ $fileType = $file['type'];
 $fileExt = pathinfo($fileName, PATHINFO_EXTENSION);
 $newFileName = time() . '_' . bin2hex(random_bytes(8)) . '.' . $fileExt;
 
-// Define upload path - CORRECT PATH
+// Define upload path
 $uploadDir = '../../frontend/assets/uploads/projects/projects_documents/';
 $uploadPath = $uploadDir . $newFileName;
 
@@ -62,13 +64,14 @@ if (!move_uploaded_file($fileTmpPath, $uploadPath)) {
 
 // Save to database
 try {
+    // UPDATE SQL to include doc_type and project_id
     $stmt = $pdo->prepare("
         INSERT INTO project_documents (
             title, description, file_name, file_path, file_size, file_type,
-            uploaded_by, department_id, created_at
+            uploaded_by, department_id, doc_type, project_id, created_at
         ) VALUES (
             ?, ?, ?, ?, ?, ?,
-            ?, ?, NOW()
+            ?, ?, ?, ?, NOW()
         )
     ");
     
@@ -82,7 +85,9 @@ try {
         $fileSize,
         $fileType,
         $uploaded_by,
-        $department_id
+        $department_id,
+        $doc_type,
+        $project_id
     ]);
     
     $documentId = $pdo->lastInsertId();
@@ -95,7 +100,9 @@ try {
             'title' => $title,
             'file_name' => $fileName,
             'file_path' => $filePath,
-            'file_size' => $fileSize
+            'file_size' => $fileSize,
+            'doc_type' => $doc_type,
+            'project_id' => $project_id
         ]
     ]);
     

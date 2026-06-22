@@ -484,7 +484,7 @@
 
 <!-- MODALS -->
 <div id="projectModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-plus-circle mr-2"></i>Add/Edit Project</h3><button onclick="closeModal('projectModal')">&times;</button></div><div class="modal-body"><input type="hidden" id="editProjectId"><div class="form-group"><label>Project Name *</label><input type="text" id="projectName"></div><div class="form-group"><label>Client Name</label><input type="text" id="projectClient"></div><div class="form-group"><label>Amount (TZS)</label><input type="text" id="projectAmount" class="amount-input"></div><div class="form-group"><label>Location</label><input type="text" id="projectLocation"></div><div class="form-group"><label>Description</label><textarea id="projectDesc" rows="2"></textarea></div><div class="form-group"><label>Status</label><select id="projectStatus"><option>pending</option><option>in_progress</option><option>completed</option><option>approved</option></select></div><div class="form-group"><label>Progress (%)</label><input type="number" id="projectProgress" min="0" max="100"></div><div class="form-group"><label>Start Date</label><input type="date" id="projectStartDate"></div><div class="form-group"><label>End Date</label><input type="date" id="projectEndDate"></div>
-<div class="form-group"><label>Upload Image</label><div id="projImageUploadArea" class="image-upload-area" onclick="document.getElementById('projImageFile').click()"><i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i><p>Click to upload image (JPG, PNG, GIF - max 5MB)</p></div><input type="file" id="projImageFile" accept="image/*" class="hidden"><div id="projImagePreviewContainer" class="hidden mt-2"><div id="projPreviewFile" class="flex items-center gap-2 p-2 bg-gray-100 rounded"><i id="previewIcon" class="fas fa-image text-indigo-600 text-2xl"></i><span id="previewFileName"></span></div><button type="button" onclick="removeProjectImage()" class="mt-1 text-red-500 text-sm w-full">Remove</button></div></div>
+<div class="form-group"><label>Upload Image</label><div id="projImageUploadArea" class="image-upload-area" onclick="document.getElementById('projImageFile').click()"><i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i><p>Click to upload image (JPG, PNG, GIF - max 5MB)</p></div><input type="file" id="projImageFile" accept="image/*" class="hidden"><div id="projImagePreviewContainer" class="hidden mt-2"><img id="projImagePreview" class="w-full h-32 object-contain rounded-lg border border-gray-200" style="display:none; background:#f9fafb; padding:8px;"><div id="projPreviewFile" class="flex items-center gap-2 p-2 bg-gray-100 rounded"><i id="previewIcon" class="fas fa-image text-indigo-600 text-2xl"></i><span id="previewFileName"></span></div><button type="button" onclick="removeProjectImage()" class="mt-1 text-red-500 text-sm w-full">Remove</button></div></div>
 <div class="flex gap-3"><button onclick="saveProject()" class="flex-1 btn-primary py-2 rounded">Save</button><button onclick="closeModal('projectModal')" class="flex-1 bg-gray-200 py-2 rounded">Cancel</button></div></div></div></div>
 
 <div id="viewProjectModal" class="modal"><div class="modal-content"><div class="modal-header"><h3><i class="fas fa-folder-open mr-2"></i>Project Details</h3><button onclick="closeModal('viewProjectModal')">&times;</button></div><div class="modal-body"><div id="viewProjectContent"></div><div id="viewProjButtons" class="detail-buttons"></div></div></div></div>
@@ -568,11 +568,24 @@
 
 <script>
 // ============================================================
-// MONEY FORMATTING
+// MONEY FORMATTING - 1,000,000,000,000
 // ============================================================
 function formatNumberWithCommas(num) {
     if (num === null || num === undefined || isNaN(num)) return '0';
-    let parts = num.toString().split('.');
+    let number = typeof num === 'string' ? parseFloat(num.replace(/,/g, '')) : num;
+    if (isNaN(number)) return '0';
+    
+    // Handle very large numbers beyond MAX_SAFE_INTEGER
+    if (number > Number.MAX_SAFE_INTEGER) {
+        let str = Math.round(number).toString();
+        let parts = [];
+        for (let i = str.length - 3; i > -3; i -= 3) {
+            parts.unshift(str.substring(Math.max(0, i), i + 3));
+        }
+        return parts.join(',');
+    }
+    
+    let parts = number.toString().split('.');
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return parts.join('.');
 }
@@ -587,7 +600,9 @@ function formatMoneyInput(input) {
 
 function parseMoneyValue(value) {
     if (!value) return 0;
-    return parseFloat(String(value).replace(/,/g, '')) || 0;
+    let clean = String(value).replace(/,/g, '');
+    let parsed = parseFloat(clean);
+    return isNaN(parsed) ? 0 : parsed;
 }
 
 function formatMoney(amt) {
@@ -841,23 +856,17 @@ const REPORTS_UPLOAD_PATH = '/geotraverse/frontend/assets/uploads/reports/';
 // ============================================================
 function getCleanFileUrl(filePath, type) {
     if (!filePath || filePath === '' || filePath === 'null' || filePath === 'undefined') {
-        console.log('getCleanFileUrl: No file path provided');
         return null;
     }
     
-    // If it's already a full URL
     if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-        console.log('getCleanFileUrl: Full URL:', filePath);
         return filePath;
     }
     
-    // If it's a data URL (base64)
     if (filePath.startsWith('data:')) {
-        console.log('getCleanFileUrl: Data URL');
         return filePath;
     }
     
-    // Clean the path
     let cleanPath = filePath;
     while (cleanPath.startsWith('../')) {
         cleanPath = cleanPath.substring(3);
@@ -866,11 +875,8 @@ function getCleanFileUrl(filePath, type) {
         cleanPath = cleanPath.substring(2);
     }
     
-    // Get just the filename
     let fileName = cleanPath.split('/').pop();
-    console.log('getCleanFileUrl: fileName:', fileName, 'type:', type);
     
-    // Build possible URLs based on type
     let possibleUrls = [];
     
     if (type === 'project_document' || type === 'project') {
@@ -893,8 +899,6 @@ function getCleanFileUrl(filePath, type) {
         return null;
     }
     
-    // Return the first one - the browser will try to load it
-    console.log('getCleanFileUrl: Using URL:', possibleUrls[0]);
     return possibleUrls[0];
 }
 
@@ -1179,7 +1183,7 @@ async function fetchDailyWork() {
 }
 
 // ============================================================
-// IMAGE FUNCTIONS
+// IMAGE FUNCTIONS - DISPLAY PREVIEW BEFORE SAVE
 // ============================================================
 async function uploadProjectImage(file) {
     if (!file || !(file instanceof File)) return '';
@@ -1216,26 +1220,59 @@ async function uploadProjectImage(file) {
     }
 }
 
+// IMAGE UPLOAD - DISPLAY PREVIEW BEFORE SAVE - FIXED
 document.getElementById('projImageFile')?.addEventListener('change', function(e) { 
     if(e.target.files && e.target.files[0]) { 
         currentProjectImageFile = e.target.files[0]; 
         const fileName = currentProjectImageFile.name;
+        const fileSize = (currentProjectImageFile.size / 1024).toFixed(2);
         const previewContainer = document.getElementById('projImagePreviewContainer');
         const previewIcon = document.getElementById('previewIcon');
         const previewFileName = document.getElementById('previewFileName');
         const uploadArea = document.getElementById('projImageUploadArea');
+        const previewImg = document.getElementById('projImagePreview');
+        
+        // Validate file size (5MB max)
+        if (currentProjectImageFile.size > 5 * 1024 * 1024) {
+            showToast('Image too large. Max size is 5MB', true);
+            this.value = '';
+            return;
+        }
+        
+        // Validate file type
+        if (!currentProjectImageFile.type.startsWith('image/')) {
+            showToast('Please select an image file (JPG, PNG, GIF)', true);
+            this.value = '';
+            return;
+        }
+        
         const reader = new FileReader();
         reader.onload = function(ev) {
+            // Update preview icon
             if (previewIcon) {
                 previewIcon.className = "fas fa-image text-indigo-600 text-2xl";
             }
-            if (previewFileName) previewFileName.innerText = fileName;
-            if (previewContainer) previewContainer.classList.remove('hidden');
-            if (uploadArea) uploadArea.classList.add('hidden');
-            const previewImg = document.getElementById('projImagePreview');
+            if (previewFileName) {
+                previewFileName.innerText = fileName + ' (' + fileSize + ' KB)';
+            }
+            if (previewContainer) {
+                previewContainer.classList.remove('hidden');
+            }
+            if (uploadArea) {
+                uploadArea.classList.add('hidden');
+            }
+            
+            // DISPLAY IMAGE PREVIEW - KABLA YA KUSAVE
             if (previewImg) {
                 previewImg.src = ev.target.result;
                 previewImg.style.display = 'block';
+                previewImg.style.width = '100%';
+                previewImg.style.maxHeight = '200px';
+                previewImg.style.objectFit = 'contain';
+                previewImg.style.borderRadius = '8px';
+                previewImg.style.border = '1px solid #e5e7eb';
+                previewImg.style.backgroundColor = '#f9fafb';
+                previewImg.style.padding = '8px';
             }
         };
         reader.readAsDataURL(currentProjectImageFile);
@@ -1247,11 +1284,11 @@ function removeProjectImage() {
     const fileInput = document.getElementById('projImageFile');
     const previewContainer = document.getElementById('projImagePreviewContainer');
     const uploadArea = document.getElementById('projImageUploadArea');
+    const previewImg = document.getElementById('projImagePreview');
     if (fileInput) fileInput.value = ''; 
     if (previewContainer) previewContainer.classList.add('hidden'); 
     if (uploadArea) uploadArea.classList.remove('hidden'); 
     existingImagePath = '';
-    const previewImg = document.getElementById('projImagePreview');
     if (previewImg) {
         previewImg.src = '';
         previewImg.style.display = 'none';
@@ -1287,7 +1324,6 @@ function showDocumentInfo(doc, type) {
         }
     });
     
-    // Use the correct URL for download - try multiple approaches
     let downloadUrl = fileUrl ? fileUrl : '#';
     
     document.getElementById('documentInfoButtons').innerHTML = `
@@ -1307,11 +1343,7 @@ function downloadDocumentFile(url, fileName) {
         showToast('File URL not available', true);
         return;
     }
-    
-    // Try multiple ways to download
     showToast(`Downloading: ${fileName}...`, false);
-    
-    // Method 1: Direct link
     const link = document.createElement('a');
     link.href = url;
     link.download = fileName;
@@ -1319,10 +1351,7 @@ function downloadDocumentFile(url, fileName) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    // If the above fails, try a fallback after 2 seconds
     setTimeout(() => {
-        // If the file hasn't downloaded, try opening in new window
         const win = window.open(url, '_blank');
         if (!win) {
             showToast('Please allow popups to download files', true);
@@ -1333,7 +1362,6 @@ function downloadDocumentFile(url, fileName) {
 // ============================================================
 // SEND FUNCTIONS - KWA NOTIFICATIONS
 // ============================================================
-
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p => p.id === projectId);
     if (!p) {
@@ -1634,6 +1662,27 @@ function viewUploadedReportDocument(docId) {
 }
 
 // ============================================================
+// MONEY INPUT SETUP
+// ============================================================
+function setupMoneyInputs() {
+    const moneyFields = [
+        'projectAmount',
+        'dailyworkBudget',
+        'dailyworkAmount',
+        'reqAmount'
+    ];
+    
+    moneyFields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', function() {
+                formatMoneyInput(this);
+            });
+        }
+    });
+}
+
+// ============================================================
 // DASHBOARD WITH 4 CARDS
 // ============================================================
 async function renderDashboard() {
@@ -1856,9 +1905,9 @@ function editProject(id) {
             const previewIcon = document.getElementById('previewIcon');
             const previewFileName = document.getElementById('previewFileName');
             const uploadArea = document.getElementById('projImageUploadArea');
+            const previewImg = document.getElementById('projImagePreview');
             const imgUrl = getCleanImageUrl(p.image);
             if (imgUrl) {
-                const previewImg = document.getElementById('projImagePreview');
                 if (previewImg) {
                     previewImg.src = imgUrl + '?t=' + Date.now();
                     previewImg.style.display = 'block';
@@ -2079,7 +2128,7 @@ async function renderProjects(highlightId = null) {
                 let imageHtml = '';
                 if (imageUrl) {
                     imageHtml = `<div class="project-image-wrapper" onclick="event.stopPropagation(); showFullImage('${imageUrl}')">
-                        <img src="${imageUrl}?t=${Date.now()}" class="project-image" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\'no-image\'><i class=\'fas fa-image\'></i><p>Image failed</p></div>'">
+                        <img src="${imageUrl}?t=${Date.now()}" class="project-image" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>Image failed</p></div>'">
                     </div>`;
                 } else {
                     imageHtml = `<div class="project-image-wrapper">
@@ -4307,6 +4356,7 @@ function initScrollTop() {
 
 async function init() {
     await loadRecycleBinFromDB();
+    setupMoneyInputs();
     const container = document.getElementById("mainContentContainer");
     if (container) {
         container.innerHTML = `<div id="dashboardSection"></div><div id="projectsSection" class="hidden"></div><div id="requestsSection" class="hidden"></div><div id="reportsSection" class="hidden"></div><div id="settingsSection" class="hidden"></div>`;
@@ -4438,6 +4488,7 @@ window.showDocumentInfo = showDocumentInfo;
 window.fetchUnviewedCounts = fetchUnviewedCounts;
 window.markNotificationViewed = markNotificationViewed;
 window.getCleanFileUrl = getCleanFileUrl;
+window.setupMoneyInputs = setupMoneyInputs;
 
 init();
 </script>

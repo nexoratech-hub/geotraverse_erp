@@ -212,7 +212,6 @@
             .stat-number { font-size: 14px; }
         }
 
-        /* Daily Work Summary Cards - Beautiful Styling */
         .dailywork-summary-card {
             background: white;
             border-radius: 12px;
@@ -517,6 +516,7 @@ document.addEventListener('DOMContentLoaded', function() {
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 10;
 const PROJECT_IMAGE_PATH = '/geotraverse/frontend/assets/uploads/projects/';
+const PROJECT_DOCUMENTS_PATH = '/geotraverse/frontend/assets/uploads/projects/projects_documents/';
 const REPORT_UPLOAD_PATH = '/geotraverse/frontend/assets/uploads/reports/';
 const CURRENT_USER = "Survey Manager";
 
@@ -555,33 +555,120 @@ const allDepartmentsForSend = [
     { id: 12, name: "Hatimiliki", icon: "fa-file-contract" }
 ];
 
+// ==================== NOTIFICATION SYSTEM ====================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        var payload = {
+            department_id: parseInt(departmentId),
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle || '',
+            message: message || '',
+            from_department_id: DEPARTMENT_ID
+        };
+        var res = await apiCall('add_notification.php', 'POST', payload);
+        return res;
+    } catch(e) {
+        console.error('Add notification error:', e);
+        return { success: false };
+    }
+}
+
+async function getUnviewedNotificationsCount(itemType) {
+    try {
+        var res = await apiCall(`get_unviewed_count.php?item_type=${itemType || 'all'}&department_id=${DEPARTMENT_ID}`);
+        if (res.success && res.data) {
+            if (itemType === 'project') return res.data.projects || 0;
+            if (itemType === 'report') return res.data.reports || 0;
+            if (itemType === 'fund_request') return res.data.fund_requests || 0;
+            return res.data.count || 0;
+        }
+        return 0;
+    } catch(e) {
+        console.error('Get unviewed count error:', e);
+        return 0;
+    }
+}
+
+async function markNotificationViewed(itemType, itemId) {
+    try {
+        var res = await apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            department_id: DEPARTMENT_ID
+        });
+        if (res.success) {
+            if (itemType === 'project') await updateProjectBadge();
+            else if (itemType === 'report') await updateReportBadge();
+            else if (itemType === 'fund_request') await updateRequestBadge();
+        }
+        return res;
+    } catch(e) {
+        console.error('Mark notification viewed error:', e);
+        return { success: false };
+    }
+}
+
 function updateProjectBadge() { 
     const badge = document.getElementById('projectBadge'); 
     if (badge) { 
-        if (unviewedProjectsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; 
-        } else { badge.classList.add('hidden'); } 
+        getUnviewedNotificationsCount('project').then(count => {
+            if (count > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = count > 99 ? '99+' : count; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        }).catch(() => {
+            if (unviewedProjectsCount > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        });
     } 
 }
 
 function updateReportBadge() { 
     const badge = document.getElementById('reportBadge'); 
     if (badge) { 
-        if (unviewedReportsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { badge.classList.add('hidden'); } 
+        getUnviewedNotificationsCount('report').then(count => {
+            if (count > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = count > 99 ? '99+' : count; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        }).catch(() => {
+            if (unviewedReportsCount > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        });
     } 
 }
 
 function updateRequestBadge() { 
     const badge = document.getElementById('requestBadge'); 
     if (badge) { 
-        if (unviewedRequestsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount; 
-        } else { badge.classList.add('hidden'); } 
+        getUnviewedNotificationsCount('fund_request').then(count => {
+            if (count > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = count > 99 ? '99+' : count; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        }).catch(() => {
+            if (unviewedRequestsCount > 0) { 
+                badge.classList.remove('hidden'); 
+                badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount; 
+            } else { 
+                badge.classList.add('hidden'); 
+            } 
+        });
     } 
 }
 
@@ -1017,13 +1104,60 @@ function exportDailyWorkToPDF() {
     showToast("📄 Daily Work PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
-// ==================== IMAGE FUNCTIONS ====================
+// ==================== IMAGE AND DOCUMENT PATH FUNCTIONS - FIXED ====================
 function getFullImageUrl(imagePath) {
     if (!imagePath || imagePath === '' || imagePath === 'null') return null;
     if (imagePath.startsWith('data:image')) return imagePath;
     if (imagePath.startsWith('http')) return imagePath;
     let cleanPath = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
     return '/geotraverse/frontend/assets/uploads/projects/' + cleanPath;
+}
+
+function getCleanFileUrl(filePath, type) {
+    if (!filePath || filePath === '' || filePath === 'null' || filePath === 'undefined') {
+        return null;
+    }
+    
+    // If it's already a full URL
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+        return filePath;
+    }
+    
+    // If it's a data URI (base64)
+    if (filePath.startsWith('data:')) {
+        return filePath;
+    }
+    
+    // Clean the path - remove ../ and ./
+    let cleanPath = filePath;
+    while (cleanPath.startsWith('../')) {
+        cleanPath = cleanPath.substring(3);
+    }
+    while (cleanPath.startsWith('./')) {
+        cleanPath = cleanPath.substring(2);
+    }
+    
+    // Get just the filename
+    let fileName = cleanPath.split('/').pop();
+    if (!fileName || fileName === '') {
+        fileName = cleanPath;
+    }
+    
+    // Determine which upload path to use
+    let basePath = '';
+    
+    if (type === 'project_document' || type === 'project') {
+        // MAIN PATH: frontend/assets/uploads/projects/projects_documents/
+        basePath = '/geotraverse/frontend/assets/uploads/projects/projects_documents/';
+    } else if (type === 'uploaded_report') {
+        basePath = '/geotraverse/frontend/assets/uploads/reports/';
+    } else {
+        // Default
+        basePath = '/geotraverse/frontend/assets/uploads/projects/projects_documents/';
+    }
+    
+    // Return the full URL
+    return basePath + fileName;
 }
 
 function getFullReportPath(filePath) {
@@ -1037,6 +1171,30 @@ function getFullReportPath(filePath) {
     return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath.split('/').pop();
 }
 
+function downloadDocumentFile(docId, type) {
+    if (!docId) {
+        showToast('Document ID not available', true);
+        return;
+    }
+    
+    // Build download URL
+    let downloadUrl = '';
+    if (type === 'project' || type === 'project_document') {
+        downloadUrl = '../backend/api/download_document.php?id=' + docId + '&type=project';
+    } else if (type === 'uploaded_report') {
+        downloadUrl = '../backend/api/download_report_document.php?id=' + docId;
+    } else {
+        showToast('Unknown document type', true);
+        return;
+    }
+    
+    // Show loading message
+    showToast('📄 Downloading document...', false);
+    
+    // Open in new window/tab
+    window.open(downloadUrl, '_blank');
+}
+
 function downloadReportFile(fileUrl, fileName) {
     if (!fileUrl) {
         showToast('File URL not available', true);
@@ -1044,12 +1202,12 @@ function downloadReportFile(fileUrl, fileName) {
     }
     const link = document.createElement('a');
     link.href = fileUrl;
-    link.download = fileName;
+    link.download = fileName || 'document.pdf';
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`Downloading: ${fileName}`, false);
+    showToast(`Downloading: ${fileName || 'document.pdf'}`, false);
 }
 
 async function uploadProjectImage(file) {
@@ -1084,9 +1242,15 @@ async function fetchProjects() {
                 !viewedProjectIds.includes(p.id);
         });
         
-        unviewedProjectsCount = projectsData.filter(p => p._is_unviewed).length;
-    } else { projectsData = []; unviewedProjectsCount = 0; } 
-    updateProjectBadge(); 
+        // Update unviewed count
+        getUnviewedNotificationsCount('project').then(count => {
+            unviewedProjectsCount = count;
+            updateProjectBadge();
+        }).catch(() => {
+            unviewedProjectsCount = projectsData.filter(p => p._is_unviewed).length;
+            updateProjectBadge();
+        });
+    } else { projectsData = []; unviewedProjectsCount = 0; updateProjectBadge(); } 
 }
 
 async function fetchProjectDocuments() { 
@@ -1116,9 +1280,14 @@ async function fetchReports() {
                 !viewedReportIds.includes(r.id);
         });
         
-        unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
-    } else { reportsData = []; unviewedReportsCount = 0; }
-    updateReportBadge();
+        getUnviewedNotificationsCount('report').then(count => {
+            unviewedReportsCount = count;
+            updateReportBadge();
+        }).catch(() => {
+            unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
+            updateReportBadge();
+        });
+    } else { reportsData = []; unviewedReportsCount = 0; updateReportBadge(); }
 }
 
 // ==================== FUND REQUESTS - USING fund_requests TABLE ====================
@@ -1134,8 +1303,13 @@ async function fetchRequests() {
     } catch(e) {
         requestsData = [];
     }
-    unviewedRequestsCount = requestsData.filter(r => !viewedRequestIds.includes(r.id) && r.status === 'pending').length;
-    updateRequestBadge();
+    getUnviewedNotificationsCount('fund_request').then(count => {
+        unviewedRequestsCount = count;
+        updateRequestBadge();
+    }).catch(() => {
+        unviewedRequestsCount = requestsData.filter(r => !viewedRequestIds.includes(r.id) && r.status === 'pending').length;
+        updateRequestBadge();
+    });
 }
 
 function markProjectViewed(id) { 
@@ -1147,8 +1321,10 @@ function markProjectViewed(id) {
             p._is_unviewed = false;
             p.is_viewed_by_department = 1;
         }
-        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
-        updateProjectBadge(); 
+        // Mark notification as viewed
+        markNotificationViewed('project', id).then(() => {
+            updateProjectBadge();
+        });
         
         // Remove NEW badge from card
         const card = document.getElementById(`proj-card-${id}`);
@@ -1169,8 +1345,9 @@ function markReportViewed(id) {
             r._is_unviewed = false;
             r.is_viewed_by_department = 1;
         }
-        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-        updateReportBadge();
+        markNotificationViewed('report', id).then(() => {
+            updateReportBadge();
+        });
         
         const card = document.getElementById(`report-card-${id}`);
         if (card) {
@@ -1192,26 +1369,33 @@ function markRequestViewed(id) {
     if(!viewedRequestIds.includes(id)) { 
         viewedRequestIds.push(id); 
         localStorage.setItem('survey_viewedRequestIds', JSON.stringify(viewedRequestIds)); 
-        unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1); 
-        updateRequestBadge(); 
+        markNotificationViewed('fund_request', id).then(() => {
+            updateRequestBadge();
+        });
+        const row = document.getElementById(`req-row-${id}`);
+        if (row) {
+            row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+            row.style.backgroundColor = '';
+        }
     } 
 }
 
-// ==================== DOCUMENT FUNCTIONS ====================
+// ==================== DOCUMENT FUNCTIONS - FIXED ====================
 function showDocumentInfo(doc, type) {
     let fileSize = doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown';
     let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    let fileUrl = type === 'project' ? `/geotraverse/backend/api/download_document.php?id=${doc.id}&type=project` : `/geotraverse/backend/api/download_report_document.php?id=${doc.id}`;
+    let fileUrl = getCleanFileUrl(doc.file_path || doc.file_name, type);
     
     let infoHtml = `
         <div class="doc-info-container">
-            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
+            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>${escapeHtml(doc.title)}</strong></div></div>
+            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name || 'N/A')}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
             <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+            ${doc.sent_from_department ? `<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="text-purple-600"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}</span></div></div>` : ''}
         </div>
     `;
     document.getElementById('documentInfoContent').innerHTML = infoHtml;
@@ -1223,8 +1407,16 @@ function showDocumentInfo(doc, type) {
         }
     });
     
+    // Use download function with doc ID
+    let downloadBtn = `<button onclick="downloadDocumentFile(${doc.id}, '${type}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>`;
+    
+    // Alternative: direct file URL download
+    if (fileUrl) {
+        downloadBtn += `<button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm" style="margin-left:4px;"><i class="fas fa-external-link-alt"></i> View</button>`;
+    }
+    
     document.getElementById('documentInfoButtons').innerHTML = `
-        <button onclick="window.open('${fileUrl}', '_blank')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-download"></i> Download</button>
+        ${downloadBtn}
         <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div></div>
     `;
     openModal('documentInfoModal');
@@ -1234,7 +1426,13 @@ function showDocumentInfo(doc, type) {
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p=>p.id===projectId); 
     if(!p) { showToast('Project not found', true); return; }
-    if(deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; } 
+    if(deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // KUZUIA FORWARDING - Ikiwa project ilitumwa kutoka department nyingine, usiruhusu kutumwa tena
+    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Project uliyopokea kutoka idara nyingine.', true);
+        return;
+    }
     
     const dept = allDepartmentsForSend.find(d=>d.id==deptId);
     const deptName = dept ? dept.name : 'Department';
@@ -1302,8 +1500,11 @@ async function sendProjectToDept(projectId, deptId) {
             p.last_sent_at = new Date().toISOString();
             p._is_unviewed = true;
             
-            unviewedProjectsCount++;
-            updateProjectBadge();
+            // Add notification to recipient
+            await addNotification(deptId, 'project', p.id, p.name, `Project "${p.name}" sent from Survey Department`);
+            
+            // Update badge count
+            await updateProjectBadge();
             
             await loadProjects();
             await loadDashboard();
@@ -1327,6 +1528,12 @@ async function sendReportToDept(reportId, deptId) {
     const r = reportsData.find(r => r.id === reportId);
     if (!r) { showToast('Report not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // KUZUIA FORWARDING - Ikiwa report ilitumwa kutoka department nyingine, usiruhusu kutumwa tena
+    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Report uliyopokea kutoka idara nyingine.', true);
+        return;
+    }
     
     const dept = allDepartmentsForSend.find(d=>d.id==deptId);
     const deptName = dept ? dept.name : 'Department';
@@ -1383,8 +1590,8 @@ async function sendReportToDept(reportId, deptId) {
             r.last_sent_at = new Date().toISOString();
             r._is_unviewed = true;
             
-            unviewedReportsCount++;
-            updateReportBadge();
+            await addNotification(deptId, 'report', r.id, r.title, `Report "${r.title}" sent from Survey Department`);
+            await updateReportBadge();
             
             await loadReports();
             await loadDashboard();
@@ -1408,6 +1615,12 @@ async function sendDocumentToDept(docId, deptId, type) {
     const doc = projectDocuments.find(d => d.id === docId);
     if (!doc) { showToast('Document not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // KUZUIA FORWARDING - Ikiwa document ilitumwa kutoka department nyingine, usiruhusu kutumwa tena
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Document uliyopokea kutoka idara nyingine.', true);
+        return;
+    }
     
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
@@ -1458,8 +1671,8 @@ async function sendDocumentToDept(docId, deptId, type) {
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
             
-            unviewedProjectsCount++;
-            updateProjectBadge();
+            await addNotification(deptId, 'document', doc.id, doc.title, `Document "${doc.title}" sent from Survey Department`);
+            await updateProjectBadge();
             
             await fetchProjectDocuments();
             await loadProjects();
@@ -1484,6 +1697,12 @@ async function sendUploadedReportToDept(reportId, deptId) {
     const doc = uploadedReportsData.find(d => d.id === reportId);
     if (!doc) { showToast('Uploaded report not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    
+    // KUZUIA FORWARDING - Ikiwa uploaded report ilitumwa kutoka department nyingine, usiruhusu kutumwa tena
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine.', true);
+        return;
+    }
     
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
@@ -1532,8 +1751,8 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
             
-            unviewedReportsCount++;
-            updateReportBadge();
+            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, `Uploaded report "${doc.title}" sent from Survey Department`);
+            await updateReportBadge();
             
             await fetchUploadedReports();
             await loadReports();
@@ -1556,7 +1775,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
 
 function viewUploadedDocument(docId) {
     const doc = projectDocuments.find(d => d.id === docId);
-    if(doc) {
+    if (doc) {
         // Mark as viewed if unviewed
         if (doc._is_unviewed === true) {
             markProjectViewed(docId);
@@ -1565,7 +1784,9 @@ function viewUploadedDocument(docId) {
             unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
             updateProjectBadge();
         }
-        showDocumentInfo(doc, 'project');
+        showDocumentInfo(doc, 'project_document');
+    } else {
+        showToast('Document not found', true);
     }
 }
 
@@ -1648,7 +1869,418 @@ function editProject(id) {
         openModal('projectModal'); 
     } 
 }
+// ==================== EXPORT ALL PROJECTS TO PDF ====================
+async function exportAllProjectsToPDF() {
+    // CHECK: Hakikisha kuna projects za kuexport
+    if (projectsData.length === 0) {
+        showToast('No projects to export', true);
+        return;
+    }
 
+    // LOAD: Hakikisha daily work data ipo
+    if (dailyworkData.length === 0) {
+        await fetchDailyWork();
+    }
+
+    // CALCULATE: Hesabu totals kwa ajili ya summary
+    let totalAmount = 0;
+    let pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    let totalBudgetAll = 0, totalExpensesAll = 0, totalDailyRecords = 0;
+
+    for (let p of projectsData) {
+        totalAmount += parseFloat(p.amount) || 0;
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+
+        const projectWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(p.id) || w.project_name === p.name);
+        totalDailyRecords += projectWork.length;
+        for (let w of projectWork) {
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            totalExpensesAll += parseFloat(w.amount) || 0;
+        }
+    }
+    let totalRemainingAll = totalBudgetAll - totalExpensesAll;
+
+    // BUILD: Tengeneza HTML kwa kila project
+    let rows = '';
+    let projectIndex = 1;
+    
+    for (let p of projectsData) {
+        let imageUrl = getFullImageUrl(p.image);
+        let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) || imageUrl.startsWith('data:image/'));
+        
+        // Determine status badge
+        let statusBadgeClass = '';
+        let statusText = '';
+        let statusBg = '';
+        let statusColor = '';
+        if (p.status === 'pending') {
+            statusBadgeClass = 'status-pending';
+            statusText = 'Pending';
+            statusBg = '#fef3c7';
+            statusColor = '#d97706';
+        } else if (p.status === 'in_progress') {
+            statusBadgeClass = 'status-progress';
+            statusText = 'In Progress';
+            statusBg = '#dbeafe';
+            statusColor = '#2563eb';
+        } else if (p.status === 'completed') {
+            statusBadgeClass = 'status-completed';
+            statusText = 'Completed';
+            statusBg = '#d1fae5';
+            statusColor = '#059669';
+        } else {
+            statusBadgeClass = 'status-approved';
+            statusText = 'Approved';
+            statusBg = '#e9d5ff';
+            statusColor = '#7e22ce';
+        }
+
+        // Get daily work for this project
+        const projectWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(p.id) || w.project_name === p.name);
+
+        // Calculate project totals
+        let projBudget = 0, projExpenses = 0;
+        for (let w of projectWork) {
+            projBudget += parseFloat(w.budget) || 0;
+            projExpenses += parseFloat(w.amount) || 0;
+        }
+        let projRemaining = projBudget - projExpenses;
+        let projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+
+        // Build daily work rows
+        let dailyRows = '';
+        if (projectWork.length > 0) {
+            for (let w of projectWork) {
+                let budget = parseFloat(w.budget) || 0;
+                let amount = parseFloat(w.amount) || 0;
+                
+                let statusBgDW = w.status === 'completed' ? '#d1fae5' : 
+                                w.status === 'partial' ? '#fef3c7' : '#fee2e2';
+                let statusColorDW = w.status === 'completed' ? '#059669' : 
+                                   w.status === 'partial' ? '#d97706' : '#dc2626';
+                let statusTextDW = w.status === 'completed' ? 'Completed' : 
+                                  w.status === 'partial' ? 'Partial' : 'Pending';
+                let description = (w.work_description || '-').replace(/\n/g, '<br>');
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                
+                dailyRows += `
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; white-space: nowrap;">${recordDate}</td>
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word;">${description}</td>
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">${formatCurrency(budget)}</td>
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace;">${formatCurrency(amount)}</td>
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; background: ${statusBgDW}; color: ${statusColorDW};">${statusTextDW}</span></td>
+                        <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
+                    </tr>`;
+            }
+        } else {
+            dailyRows = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">No daily work records</td></tr>';
+        }
+
+        // Source department info
+        let sourceDeptName = 'System';
+        if (p.sent_from_dept) {
+            sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
+        } else if (p.created_by) {
+            sourceDeptName = p.created_by;
+        }
+        let isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+
+        // Build project card
+        rows += `
+            <div style="margin-bottom: 40px; border: 2px solid #0d9488; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white;">
+                <div style="background: linear-gradient(135deg, #0d9488, #0f766e); color: white; padding: 15px 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 700;">${escapeHtml(p.name)}</h3>
+                            <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #${p.id} | Client: ${escapeHtml(p.client_name || 'N/A')} | Status: ${statusText}</p>
+                        </div>
+                        <span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; background: ${statusBg}; color: ${statusColor};">${statusText}</span>
+                    </div>
+                    <div style="font-size: 10px; margin-top: 8px; opacity: 0.7;">
+                        <i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                        Source: ${escapeHtml(sourceDeptName)}
+                        ${isSent ? ' <span style="color: #6ee7b7;"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                    </div>
+                </div>
+
+                <div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                    ${imageUrl && isImage ? `<img src="${imageUrl}?t=${Date.now()}" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\\'color:#999;padding:10px;\\'>No Image</div>'">` : '<div style="color:#999;padding:10px;">No Image Available</div>'}
+                </div>
+
+                <div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; width: 35%; font-weight: 600; color: #0d9488;">📌 Amount:</td>
+                            <td style="padding: 8px 12px;"><span style="color: #059669; font-weight: bold;">${formatCurrency(p.amount)}</span></td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📈 Progress:</td>
+                            <td style="padding: 8px 12px;">${p.progress || 0}%<div style="background:#e2e8f0; border-radius:10px; margin-top:6px; height:6px; max-width:200px;"><div style="width:${p.progress||0}%; background:#0d9488; border-radius:10px; height:6px;"></div></div></td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📍 Location:</td>
+                            <td style="padding: 8px 12px;">${escapeHtml(p.location || 'N/A')}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📅 Start Date:</td>
+                            <td style="padding: 8px 12px;">${p.start_date || 'Not specified'}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📅 End Date:</td>
+                            <td style="padding: 8px 12px;">${p.end_date || 'Not specified'}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">📝 Description:</td>
+                            <td style="padding: 8px 12px;">${escapeHtml(p.description || 'No description')}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">👤 Created By:</td>
+                            <td style="padding: 8px 12px;">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td>
+                        </tr>
+                        ${p.updated_by ? `
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px 12px; font-weight: 600; color: #0d9488;">✏️ Updated By:</td>
+                            <td style="padding: 8px 12px;">${escapeHtml(p.updated_by)} on ${formatDateTime(p.updated_at)}</td>
+                        </tr>` : ''}
+                    </table>
+                </div>
+
+                <div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #0d9488;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; color: #0d9488;"><i class="fas fa-calendar-day"></i> Daily Work Records (${projectWork.length})</h4>
+                    
+                    ${projectWork.length > 0 ? `
+                    <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #d1fae5;">
+                            <div style="font-size: 10px; color: #166534;">💰 Total Budget</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #059669;">${formatCurrency(projBudget)}</div>
+                        </div>
+                        <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #fef3c7;">
+                            <div style="font-size: 10px; color: #92400e;">💸 Total Expenses</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #ea580c;">${formatCurrency(projExpenses)}</div>
+                        </div>
+                        <div style="flex: 1; background: white; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #dbeafe;">
+                            <div style="font-size: 10px; color: #1e40af;">📊 Remaining</div>
+                            <div style="font-size: 14px; font-weight: 700; color: ${projRemainingColor};">${formatCurrency(projRemaining)}</div>
+                        </div>
+                    </div>` : ''}
+                    
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                            <thead>
+                                <tr style="background: #0d9488; color: white;">
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 16%;">Date/Time</th>
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 30%;">Description</th>
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: right;">Budget (TZS)</th>
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: right;">Expenses (TZS)</th>
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 12%; text-align: center;">Status</th>
+                                    <th style="padding: 10px 8px; border: 1px solid #0f766e; width: 18%; text-align: center;">Created By</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${dailyRows}
+                            </tbody>
+                            ${projectWork.length > 0 ? `
+                            <tfoot>
+                                <tr style="background: #fef3c7; font-weight: bold;">
+                                    <td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>TOTAL:</strong></td>
+                                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>${formatCurrency(projBudget)}</strong></td>
+                                    <td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right;"><strong>${formatCurrency(projExpenses)}</strong></td>
+                                    <td colspan="2" style="border: 1px solid #cbd5e1;"></td>
+                                </tr>
+                            </tfoot>` : ''}
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+        projectIndex++;
+    }
+
+    // OPEN: Fungua window mpya kwa ajili ya PDF
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+
+    // WRITE: Andika HTML kwa ajili ya PDF
+    printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>All Projects Report - Survey Department</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
+                background: #f0f2f5; 
+                padding: 30px; 
+            }
+            .container { 
+                max-width: 1300px; 
+                margin: 0 auto; 
+                background: white; 
+                border-radius: 16px; 
+                overflow: hidden; 
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
+                border: 2px solid #0d9488; 
+            }
+            .header { 
+                background: linear-gradient(135deg, #0d9488, #0f766e); 
+                color: white; 
+                padding: 25px; 
+                text-align: center; 
+            }
+            .header h1 { 
+                font-size: 24px; 
+                margin: 0; 
+            }
+            .header p { 
+                font-size: 12px; 
+                opacity: 0.85; 
+                margin-top: 6px; 
+            }
+            .info-bar { 
+                background: #f8fafc; 
+                padding: 12px 25px; 
+                display: flex; 
+                justify-content: space-between; 
+                border-bottom: 1px solid #e5e7eb; 
+                flex-wrap: wrap; 
+                gap: 10px; 
+                font-size: 12px; 
+            }
+            .summary-cards { 
+                display: grid; 
+                grid-template-columns: repeat(6, 1fr); 
+                gap: 15px; 
+                padding: 20px 25px; 
+                background: #f9fafb; 
+                border-bottom: 1px solid #e5e7eb; 
+            }
+            .summary-card { 
+                background: white; 
+                border-radius: 10px; 
+                padding: 12px; 
+                text-align: center; 
+                border: 1px solid #e5e7eb; 
+            }
+            .summary-card .label { 
+                font-size: 10px; 
+                font-weight: 600; 
+                color: #6b7280; 
+                text-transform: uppercase; 
+            }
+            .summary-card .value { 
+                font-size: 16px; 
+                font-weight: 800; 
+                margin-top: 5px; 
+            }
+            .summary-card.total .value { color: #0d9488; }
+            .summary-card.amount .value { color: #059669; }
+            .summary-card.budget .value { color: #3b82f6; }
+            .summary-card.expenses .value { color: #dc2626; }
+            .summary-card.records .value { color: #8b5cf6; }
+            .summary-card.remaining .value { color: #f59e0b; }
+            .projects-section { 
+                padding: 20px 25px; 
+            }
+            .status-badge { 
+                display: inline-block; 
+                padding: 4px 12px; 
+                border-radius: 20px; 
+                font-size: 11px; 
+                font-weight: 500; 
+            }
+            .status-pending { background: #fef3c7; color: #d97706; }
+            .status-progress { background: #dbeafe; color: #2563eb; }
+            .status-completed { background: #d1fae5; color: #059669; }
+            .status-approved { background: #e9d5ff; color: #7e22ce; }
+            .footer { 
+                text-align: center; 
+                font-size: 10px; 
+                color: #6b7280; 
+                padding: 15px; 
+                border-top: 1px solid #e5e7eb; 
+                background: #f9fafb; 
+            }
+            .print-btn { 
+                text-align: center; 
+                padding: 15px; 
+                background: #f9fafb; 
+                border-top: 1px solid #e5e7eb; 
+            }
+            .print-btn button { 
+                background: #0d9488; 
+                color: white; 
+                border: none; 
+                padding: 10px 24px; 
+                border-radius: 6px; 
+                cursor: pointer; 
+                font-size: 13px; 
+                font-weight: 600; 
+            }
+            .print-btn button:hover { 
+                background: #0f766e; 
+            }
+            .print-btn button.close-btn { 
+                background: #6b7280; 
+                margin-left: 10px; 
+            }
+            .print-btn button.close-btn:hover { 
+                background: #4b5563; 
+            }
+            @media print { 
+                .print-btn { display: none; } 
+                body { background: white; padding: 0; } 
+                .header { background: #0d9488 !important; -webkit-print-color-adjust: exact; } 
+                .summary-cards { background: #f9fafb !important; -webkit-print-color-adjust: exact; } 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 All Projects Report</h1>
+                <p>Survey Department - Complete Project Overview with Daily Work Records</p>
+            </div>
+            <div class="info-bar">
+                <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                <span><strong>Total Projects:</strong> ${projectsData.length}</span>
+                <span><strong>Total Daily Records:</strong> ${totalDailyRecords}</span>
+                <span><strong>Generated By:</strong> ${escapeHtml(CURRENT_USER)}</span>
+                <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+
+            <div class="summary-cards">
+                <div class="summary-card total"><div class="label">Total Projects</div><div class="value">${projectsData.length}</div></div>
+                <div class="summary-card amount"><div class="label">Total Amount</div><div class="value">${formatCurrency(totalAmount)}</div></div>
+                <div class="summary-card budget"><div class="label">Total Budget</div><div class="value">${formatCurrency(totalBudgetAll)}</div></div>
+                <div class="summary-card expenses"><div class="label">Total Expenses</div><div class="value">${formatCurrency(totalExpensesAll)}</div></div>
+                <div class="summary-card remaining"><div class="label">Remaining Budget</div><div class="value" style="color: ${totalRemainingAll >= 0 ? '#059669' : '#dc2626'};">${formatCurrency(totalRemainingAll)}</div></div>
+                <div class="summary-card records"><div class="label">Total Daily Records</div><div class="value">${totalDailyRecords}</div></div>
+            </div>
+
+            <div class="projects-section">
+                ${rows}
+            </div>
+
+            <div class="footer">GeoTraverse ERP System - Survey Department | Official All Projects Report</div>
+            <div class="print-btn">
+                <button onclick="window.print(); setTimeout(() => window.close(), 1500);">🖨️ Save as PDF / Print</button>
+                <button class="close-btn" onclick="window.close();">❌ Close</button>
+            </div>
+        </div>
+    </body>
+    </html>`);
+
+    printWindow.document.close();
+    printWindow.focus();
+    showToast("📄 All Projects PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function removeProjectImage() { 
     currentProjectImageFile = null; 
     document.getElementById('projectImageFile').value = ''; 

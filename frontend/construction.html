@@ -940,6 +940,55 @@ function getProjectImageForExport(project) {
     return null;
 }
 
+// ==================== NOTIFICATION FUNCTIONS ====================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        const payload = {
+            department_id: parseInt(departmentId),
+            from_department_id: DEPARTMENT_ID,
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle || '',
+            message: message || ''
+        };
+        const res = await apiCall('add_notification.php', 'POST', payload);
+        return res;
+    } catch(e) {
+        console.error('Add notification error:', e);
+        return { success: false };
+    }
+}
+
+async function fetchUnviewedCounts() {
+    try {
+        const res = await apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID);
+        if (res.success && res.data) {
+            unviewedProjectsCount = parseInt(res.data.projects) || 0;
+            unviewedReportsCount = parseInt(res.data.reports) || 0;
+            unviewedRequestsCount = parseInt(res.data.fund_requests) || 0;
+            updateProjectBadge();
+            updateReportBadge();
+            updateRequestBadge();
+        }
+    } catch(e) {
+        console.log('Error fetching unviewed counts:', e);
+    }
+}
+
+async function markNotificationViewed(itemType, itemId) {
+    try {
+        const res = await apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            department_id: DEPARTMENT_ID
+        });
+        return res;
+    } catch(e) {
+        console.log('Mark viewed error:', e);
+        return { success: false };
+    }
+}
+
 // ==================== FETCH FUNCTIONS ====================
 async function fetchProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
@@ -1042,22 +1091,6 @@ async function fetchUploadedReports() {
     }
 }
 
-async function fetchUnviewedCounts() {
-    try {
-        const res = await apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID);
-        if (res.success && res.data) {
-            unviewedProjectsCount = parseInt(res.data.projects) || 0;
-            unviewedReportsCount = parseInt(res.data.reports) || 0;
-            unviewedRequestsCount = parseInt(res.data.fund_requests) || 0;
-            updateProjectBadge();
-            updateReportBadge();
-            updateRequestBadge();
-        }
-    } catch(e) {
-        console.log('Error fetching unviewed counts:', e);
-    }
-}
-
 async function loadDepartmentsForDropdowns() {
     const res = await apiCall('get_departments.php');
     if (res.success && res.data) departmentsList = res.data.filter(d => d.id !== DEPARTMENT_ID && d.id !== 1);
@@ -1110,11 +1143,7 @@ function markProjectViewed(id) {
         localStorage.setItem('construction_viewedProjectIds', JSON.stringify(viewedProjectIds)); 
         unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1); 
         updateProjectBadge(); 
-        apiCall('mark_notification_viewed.php', 'POST', {
-            item_type: 'project',
-            item_id: id,
-            department_id: DEPARTMENT_ID
-        });
+        markNotificationViewed('project', id);
     } 
 }
 function markReportViewed(id) { 
@@ -1123,11 +1152,7 @@ function markReportViewed(id) {
         localStorage.setItem('construction_viewedReportIds', JSON.stringify(viewedReportIds)); 
         unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
         updateReportBadge(); 
-        apiCall('mark_notification_viewed.php', 'POST', {
-            item_type: 'report',
-            item_id: id,
-            department_id: DEPARTMENT_ID
-        });
+        markNotificationViewed('report', id);
     } 
 }
 function markRequestViewed(id) { 
@@ -1136,11 +1161,7 @@ function markRequestViewed(id) {
         localStorage.setItem('construction_viewedRequestIds', JSON.stringify(viewedRequestIds)); 
         unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1); 
         updateRequestBadge(); 
-        apiCall('mark_notification_viewed.php', 'POST', {
-            item_type: 'fund_request',
-            item_id: id,
-            department_id: DEPARTMENT_ID
-        });
+        markNotificationViewed('fund_request', id);
     } 
 }
 
@@ -1319,7 +1340,7 @@ function viewUploadedReportDocument(docId) {
     }
 }
 
-// ==================== SEND FUNCTIONS ====================
+// ==================== SEND FUNCTIONS (WITH FORWARDING ENABLED) ====================
 async function sendProjectToDept(projectId, deptId) { 
     const p = projectsData.find(p => p.id === projectId); 
     if (!p) { showToast('Project not found', true); return; }
@@ -1336,48 +1357,63 @@ async function sendProjectToDept(projectId, deptId) {
         await fetchDailyWork();
         const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
         let totalBudget = 0, totalExpenses = 0;
+        let completedCount = 0, partialCount = 0, pendingCount = 0;
         for (let w of projectDailyWork) {
             totalBudget += parseFloat(w.budget) || 0;
             totalExpenses += parseFloat(w.amount) || 0;
+            if (w.status === 'completed') completedCount++;
+            else if (w.status === 'partial') partialCount++;
+            else pendingCount++;
         }
         let remainingBudget = totalBudget - totalExpenses;
+        
+        // Get full image URL or path
+        let imagePath = p.image || '';
+        if (imagePath && !imagePath.startsWith('data:') && !imagePath.startsWith('http')) {
+            if (!imagePath.startsWith('/')) {
+                imagePath = PROJECTS_UPLOAD_PATH + imagePath;
+            }
+        }
+        
         const payload = {
             project_id: parseInt(projectId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             sent_by: CURRENT_USER,
-            project_data: {
-                id: p.id,
-                name: p.name || '',
-                client_name: p.client_name || '',
-                amount: parseFloat(p.amount) || 0,
-                location: p.location || '',
-                description: p.description || '',
-                status: p.status || 'pending',
-                progress: parseInt(p.progress) || 0,
-                start_date: p.start_date || '',
-                end_date: p.end_date || '',
-                image: p.image || '',
-                project_type: p.project_type || 'general',
-                department_id: parseInt(p.department_id) || DEPARTMENT_ID,
-                created_by: p.created_by || CURRENT_USER,
-                created_at: p.created_at || new Date().toISOString(),
-                daily_summary: {
-                    total_budget: totalBudget,
-                    total_expenses: totalExpenses,
-                    remaining_budget: remainingBudget,
-                    records_count: projectDailyWork.length
-                },
-                sent_from_dept: DEPARTMENT_ID,
-                sent_to_dept: parseInt(deptId),
-                is_viewed_by_department: 0,
-                sent_count: (p.sent_count || 0) + 1,
-                is_sent: 1
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
+            project_name: p.name,
+            client_name: p.client_name || '',
+            amount: parseFloat(p.amount) || 0,
+            status: p.status,
+            progress: p.progress || 0,
+            location: p.location || '',
+            description: p.description || '',
+            image: imagePath,  // ⬅️ IMAGE INCLUDED
+            start_date: p.start_date || '',
+            end_date: p.end_date || '',
+            duplicate_send: true,
+            daily_work_records: projectDailyWork.map(w => ({
+                id: w.id,
+                date: w.date,
+                work_description: w.work_description || '',
+                budget: parseFloat(w.budget) || 0,
+                amount: parseFloat(w.amount) || 0,
+                status: w.status || 'pending',
+                created_by: w.created_by || 'System'
+            })),
+            daily_summary: {
+                total_budget: totalBudget,
+                total_expenses: totalExpenses,
+                remaining_budget: remainingBudget,
+                records_count: projectDailyWork.length,
+                completed_count: completedCount,
+                partial_count: partialCount,
+                pending_count: pendingCount
             }
         };
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
         if (res && res.success) {
-            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records (summary)`, false);
+            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records`, false);
             addLog(`Project sent: "${p.name}" to ${deptName}`);
             p.sent_to_dept = parseInt(deptId);
             p.sent_from_dept = DEPARTMENT_ID;
@@ -1385,18 +1421,10 @@ async function sendProjectToDept(projectId, deptId) {
             p.sent_count = (p.sent_count || 0) + 1;
             p.is_sent = 1;
             p._is_unviewed = true;
-            unviewedProjectsCount++;
-            updateProjectBadge();
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                from_department_id: DEPARTMENT_ID,
-                item_type: 'project',
-                item_id: p.id,
-                item_title: p.name,
-                message: `Project "${p.name}" sent from Construction Department`
-            });
+            // Add notification for recipient
+            await addNotification(deptId, 'project', p.id, p.name, `Project "${p.name}" sent from Construction Department`);
             await fetchProjects();
-            await fetchDailyWork();
+            await fetchUnviewedCounts();
             await loadProjects();
             await loadDashboard();
         } else {
@@ -1448,18 +1476,12 @@ async function sendReportToDept(reportId, deptId) {
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             sent_by: CURRENT_USER,
-            report_data: {
-                id: r.id,
-                title: r.title,
-                period: r.period,
-                content: r.content,
-                status: r.status || 'draft',
-                department_id: r.department_id || DEPARTMENT_ID,
-                created_by: r.created_by || CURRENT_USER,
-                created_at: r.created_at || new Date().toISOString(),
-                sent_count: (r.sent_count || 0) + 1,
-                daily_summary: dailySummary
-            }
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
+            report_title: r.title,
+            report_period: r.period,
+            report_content: r.content,
+            daily_summary: dailySummary,
+            duplicate_send: true
         };
         const res = await apiCall('send_report_advanced.php', 'POST', payload);
         if (res && res.success) {
@@ -1471,17 +1493,9 @@ async function sendReportToDept(reportId, deptId) {
             r.sent_count = (r.sent_count || 0) + 1;
             r.is_sent = 1;
             r._is_unviewed = true;
-            unviewedReportsCount++;
-            updateReportBadge();
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                from_department_id: DEPARTMENT_ID,
-                item_type: 'report',
-                item_id: r.id,
-                item_title: r.title,
-                message: `Report "${r.title}" sent from Construction Department`
-            });
+            await addNotification(deptId, 'report', r.id, r.title, `Report "${r.title}" sent from Construction Department`);
             await fetchReports();
+            await fetchUnviewedCounts();
             await loadReports();
             await loadDashboard();
         } else {
@@ -1506,7 +1520,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
-    const btn = document.querySelector(`#docSendDropdown-${reportId} .dropdown-trigger`);
+    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
@@ -1514,12 +1528,17 @@ async function sendUploadedReportToDept(reportId, deptId) {
     }
     try {
         const payload = {
-            document_id: parseInt(reportId),
+            uploaded_report_id: parseInt(reportId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             sent_by: CURRENT_USER,
-            doc_type: 'uploaded_report',
-            doc_data: {
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
+            document_title: doc.title,
+            document_file: doc.file_name,
+            description: doc.description || '',
+            period: doc.period || 'monthly',
+            duplicate_send: true,
+            uploaded_report_data: {
                 id: doc.id,
                 title: doc.title,
                 description: doc.description || '',
@@ -1529,11 +1548,10 @@ async function sendUploadedReportToDept(reportId, deptId) {
                 period: doc.period || 'monthly',
                 uploaded_by: doc.uploaded_by || CURRENT_USER,
                 department_id: doc.department_id || DEPARTMENT_ID,
-                created_at: doc.created_at || new Date().toISOString(),
-                sent_count: (doc.sent_count || 0) + 1
+                created_at: doc.created_at || new Date().toISOString()
             }
         };
-        const res = await apiCall('send_document_advanced.php', 'POST', payload);
+        const res = await apiCall('send_uploaded_report_advanced.php', 'POST', payload);
         if (res && res.success) {
             showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
             addLog(`Uploaded report sent: "${doc.title}" to ${deptName}`);
@@ -1543,18 +1561,10 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
             doc._is_unviewed = true;
-            unviewedReportsCount++;
-            updateReportBadge();
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                from_department_id: DEPARTMENT_ID,
-                item_type: 'uploaded_report',
-                item_id: doc.id,
-                item_title: doc.title,
-                message: `Uploaded report "${doc.title}" sent from Construction Department`
-            });
+            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, `Uploaded report "${doc.title}" sent from Construction Department`);
             closeModal('documentInfoModal');
             await fetchUploadedReports();
+            await fetchUnviewedCounts();
             await loadReports();
             await loadDashboard();
         } else {
@@ -1568,16 +1578,16 @@ async function sendUploadedReportToDept(reportId, deptId) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown(`docSendDropdown-${reportId}`);
+        toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
     }
 }
 
 async function sendDocumentToDept(docId, deptId, type) { 
-    const dept = allDepartmentsForSend.find(d => d.id == deptId);
-    const deptName = dept ? dept.name : 'Department';
     const doc = projectDocuments.find(d => d.id === docId);
     if (!doc) { showToast('Document not found', true); return; }
     if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
     const btn = document.querySelector(`#docSendDropdown-${docId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
@@ -1590,7 +1600,12 @@ async function sendDocumentToDept(docId, deptId, type) {
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             sent_by: CURRENT_USER,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
             doc_type: type || 'project',
+            document_title: doc.title,
+            document_file: doc.file_name,
+            description: doc.description || '',
+            duplicate_send: true,
             doc_data: {
                 id: doc.id,
                 title: doc.title,
@@ -1600,8 +1615,7 @@ async function sendDocumentToDept(docId, deptId, type) {
                 file_size: doc.file_size || 0,
                 uploaded_by: doc.uploaded_by || CURRENT_USER,
                 department_id: doc.department_id || DEPARTMENT_ID,
-                created_at: doc.created_at || new Date().toISOString(),
-                sent_count: (doc.sent_count || 0) + 1
+                created_at: doc.created_at || new Date().toISOString()
             }
         };
         const res = await apiCall('send_document_advanced.php', 'POST', payload);
@@ -1614,18 +1628,10 @@ async function sendDocumentToDept(docId, deptId, type) {
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
             doc._is_unviewed = true;
-            unviewedProjectsCount++;
-            updateProjectBadge();
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                from_department_id: DEPARTMENT_ID,
-                item_type: 'document',
-                item_id: doc.id,
-                item_title: doc.title,
-                message: `Document "${doc.title}" sent from Construction Department`
-            });
+            await addNotification(deptId, 'document', doc.id, doc.title, `Document "${doc.title}" sent from Construction Department`);
             closeModal('documentInfoModal');
             await fetchProjectDocuments();
+            await fetchUnviewedCounts();
             await loadProjects();
             await loadDashboard();
         } else {
