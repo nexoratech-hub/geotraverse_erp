@@ -1051,9 +1051,8 @@ function setLoading(buttonId, isLoading) {
         btn.disabled = false;
     }
 }
-
 // ============================================================
-// ==================== ADMIN LOGIN - WITH NETWORK DEBUG ====================
+// ==================== ADMIN LOGIN - FIXED ====================
 // ============================================================
 async function loginAdmin() {
     const email = document.getElementById('adminEmail').value.trim();
@@ -1074,33 +1073,49 @@ async function loginAdmin() {
     setLoading('adminLoginBtn', true);
     
     try {
-        const url = API_BASE + 'login.php';
+        // Build the correct API URL
+        const baseUrl = window.location.origin + '/geotraverse/backend/api/';
+        const url = baseUrl + 'login.php';
+        
         console.log('Sending request to:', url);
-        console.log('Payload:', { email, password });
+        
+        const payload = {
+            email: email,
+            password: password
+        };
+        
+        console.log('Payload:', payload);
         
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
             credentials: 'include',
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify(payload)
         });
         
         console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
         
-        // Check if response is OK
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        // Try to parse JSON
+        // Get response as text first
         const text = await response.text();
         console.log('Raw response:', text);
         
+        // Try to parse JSON
         let result;
         try {
             result = JSON.parse(text);
         } catch (parseError) {
             console.error('JSON parse error:', parseError);
+            // Check if response contains HTML
+            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                showMessage('adminMessage', 'adminMessageText', 'Server returned HTML instead of JSON. Check API path.', 'error');
+                showToast('API path error. Check console.', true);
+                setLoading('adminLoginBtn', false);
+                return;
+            }
             throw new Error('Server returned invalid response');
         }
         
@@ -1131,20 +1146,14 @@ async function loginAdmin() {
         }
     } catch (error) {
         console.error('Login error:', error);
-        
-        // Show detailed error
-        let errorMsg = 'Network error. Please check your connection.';
-        if (error.message) {
-            errorMsg = error.message;
-        }
-        
-        showMessage('adminMessage', 'adminMessageText', '❌ ' + errorMsg, 'error');
-        showToast('❌ ' + errorMsg, true);
+        showMessage('adminMessage', 'adminMessageText', '❌ Network error: ' + error.message, 'error');
+        showToast('❌ ' + error.message, true);
         setLoading('adminLoginBtn', false);
     }
 }
+
 // ============================================================
-// ==================== DEPARTMENT LOGIN ====================
+// ==================== DEPARTMENT LOGIN - FIXED ====================
 // ============================================================
 async function loginDepartment() {
     const deptId = document.getElementById('deptSelect').value;
@@ -1171,26 +1180,30 @@ async function loginDepartment() {
     setLoading('deptLoginBtn', true);
     
     try {
-        const url = API_BASE + 'login.php';
+        const baseUrl = window.location.origin + '/geotraverse/backend/api/';
+        const url = baseUrl + 'login.php';
+        
         console.log('Sending request to:', url);
-        console.log('Payload:', { email, password, department_id: parseInt(deptId) });
+        
+        const payload = {
+            email: email,
+            password: password,
+            department_id: parseInt(deptId)
+        };
+        
+        console.log('Payload:', payload);
         
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
             credentials: 'include',
-            body: JSON.stringify({ 
-                email, 
-                password, 
-                department_id: parseInt(deptId) 
-            })
+            body: JSON.stringify(payload)
         });
         
         console.log('Response status:', response.status);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
         
         const text = await response.text();
         console.log('Raw response:', text);
@@ -1200,6 +1213,12 @@ async function loginDepartment() {
             result = JSON.parse(text);
         } catch (parseError) {
             console.error('JSON parse error:', parseError);
+            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                showMessage('deptMessage', 'deptMessageText', 'Server returned HTML instead of JSON. Check API path.', 'error');
+                showToast('API path error. Check console.', true);
+                setLoading('deptLoginBtn', false);
+                return;
+            }
             throw new Error('Server returned invalid response');
         }
         
@@ -1229,12 +1248,8 @@ async function loginDepartment() {
         }
     } catch (error) {
         console.error('Login error:', error);
-        let errorMsg = 'Network error. Please check your connection.';
-        if (error.message) {
-            errorMsg = error.message;
-        }
-        showMessage('deptMessage', 'deptMessageText', '❌ ' + errorMsg, 'error');
-        showToast('❌ ' + errorMsg, true);
+        showMessage('deptMessage', 'deptMessageText', '❌ Network error: ' + error.message, 'error');
+        showToast('❌ ' + error.message, true);
         setLoading('deptLoginBtn', false);
     }
 }
