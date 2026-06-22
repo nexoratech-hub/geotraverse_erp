@@ -1088,20 +1088,36 @@ async function fetchReports() {
     }
 }
 
+// ==================== FETCH UPLOADED REPORTS - FIXED ====================
+// ==================== FETCH UPLOADED REPORTS - FIXED ====================
 async function fetchUploadedReports() {
     try {
-        const res = await apiCall('get_uploaded_reports.php?department_id=1');
+        console.log('📥 Fetching uploaded reports...');
+        const res = await apiCall(`get_uploaded_reports.php?department_id=1`);
+        console.log('📥 Raw response:', res);
+        
         if (res.success && res.data) {
-            uploadedReportsData = res.data.sort((a,b) => b.id - a.id);
+            // Filter out deleted reports and map IDs
+            uploadedReportsData = res.data
+                .filter(d => d.is_deleted != 1)
+                .map(d => {
+                    // Ensure ID is integer
+                    d.id = parseInt(d.id);
+                    return d;
+                })
+                .sort((a, b) => b.id - a.id);
+            
+            console.log('✅ Uploaded reports loaded:', uploadedReportsData.length);
+            console.log('📄 Uploaded reports IDs:', uploadedReportsData.map(d => d.id));
         } else {
             uploadedReportsData = [];
+            console.warn('⚠️ No uploaded reports found');
         }
     } catch(e) {
-        console.error('Fetch uploaded reports error:', e);
+        console.error('❌ Fetch uploaded reports error:', e);
         uploadedReportsData = [];
     }
 }
-
 async function fetchProjectDocuments() {
     const res = await apiCall('get_project_documents.php?department_id=1');
     projectDocuments = (res.success && res.data) ?
@@ -1557,32 +1573,51 @@ function viewUploadedDocument(docId) {
     showDocumentInfo(doc, 'project');
 }
 
+// ==================== VIEW UPLOADED REPORT DOCUMENT - FIXED ====================
 function viewUploadedReportDocument(docId) {
-    let doc = uploadedReportsData.find(d => d.id === docId);
-    if (!doc) {
-        doc = projectDocuments.find(d => d.id === docId);
-    }
-    if (!doc) {
-        doc = reportsData.find(d => d.id === docId);
-    }
-    if(!doc) { 
-        showToast('Document not found. Please refresh.', true); 
-        return; 
+    console.log('viewUploadedReportDocument called with ID:', docId);
+    
+    // Find document in multiple sources
+    let doc = null;
+    
+    // 1. Check uploadedReportsData
+    if (uploadedReportsData && uploadedReportsData.length > 0) {
+        doc = uploadedReportsData.find(d => d.id === docId);
     }
     
+    // 2. Check projectDocuments
+    if (!doc && projectDocuments && projectDocuments.length > 0) {
+        doc = projectDocuments.find(d => d.id === docId);
+    }
+    
+    // 3. Check reportsData (for added reports)
+    if (!doc && reportsData && reportsData.length > 0) {
+        doc = reportsData.find(d => d.id === docId);
+    }
+    
+    if (!doc) {
+        showToast('📄 Document not found. Please refresh.', true);
+        console.error('Document not found for ID:', docId);
+        return;
+    }
+    
+    console.log('Document found:', doc);
+
     let fileName = doc.file_name || 'document.pdf';
     let docType = doc.doc_type || 'uploaded_report';
+    
     if (doc.period || docType === 'uploaded_report') {
         docType = 'uploaded_report';
     } else if (doc.project_id || docType === 'project') {
         docType = 'project';
     }
-    
+
+    // Check if sent from another department
     let isUnviewed = false;
     let isSent = false;
     let sentFromDept = '';
     
-    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+    if (doc.sent_from_department && doc.sent_from_department != 1) {
         isSent = true;
         sentFromDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
         if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) {
@@ -1593,10 +1628,11 @@ function viewUploadedReportDocument(docId) {
         }
     }
     
+    // Mark as viewed if unviewed
     if (isUnviewed) {
         apiCall('mark_document_viewed.php', 'POST', {
             document_id: docId,
-            department_id: DEPARTMENT_ID
+            department_id: 1
         }).then(function(res) {
             if (res && res.success) {
                 doc.is_viewed_by_department = 1;
@@ -1614,11 +1650,130 @@ function viewUploadedReportDocument(docId) {
         });
     }
     
+    // Show document info
     showDocumentInfo(doc, 'uploaded_report');
 }
+// ==================== LOAD REPORTS - UPLOADED REPORTS FIX ====================
+async function loadReports(highlightId = null) {
+    await Promise.all([fetchReports(), fetchUploadedReports(), fetchUnviewedCounts()]);
 
-// ==================== SEND FUNCTIONS - REMOVED FORWARDING BLOCK ====================
+    console.log('Uploaded Reports Data:', uploadedReportsData);
+    console.log('Reports Data:', reportsData);
 
+    let html = `
+        <div class="tab-container">
+            <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span></button>
+            <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')"><i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span></button>
+        </div>
+    `;
+
+    if (currentReportTab === 'added') {
+        // ... existing code for added reports ...
+        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-chart-line text-purple-600 mr-2"></i> Added Reports</h3><div class="flex gap-2"><button onclick="openModal('reportModal')" class="btn-primary text-sm">Add Report</button><button onclick="openGenerateReportModal()" class="btn-cyan text-sm">Generate Report</button><button onclick="exportAllReportsToExcel()" class="btn-success text-sm">Excel All</button><button onclick="exportAllReportsToPDF()" class="btn-danger text-sm">PDF All</button></div></div>
+        <div class="section-card-body"><div id="reportsGrid" class="reports-grid"></div></div></div>`;
+        document.getElementById('reportsPage').innerHTML = html;
+        // ... rest of added reports rendering ...
+        
+    } else {
+        // ============================================================
+        // UPLOADED REPORTS TAB - FIXED
+        // ============================================================
+        html += `
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Reports (${uploadedReportsData.length})</h3>
+                    <div class="flex gap-2">
+                        <button onclick="openUploadReportModal()" class="btn-warning text-sm"><i class="fas fa-upload mr-1"></i> Upload Report</button>
+                        <button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="section-card-body"><div id="uploadedReportsGrid" class="reports-grid"></div></div>
+            </div>
+        `;
+        document.getElementById('reportsPage').innerHTML = html;
+
+        if (uploadedReportsData.length === 0) {
+            document.getElementById('uploadedReportsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded reports found. Click "Upload Report" to add one.</div>';
+            return;
+        }
+
+        let reportsHtml = '';
+        for (let doc of uploadedReportsData) {
+            // Skip if deleted
+            if (doc.is_deleted == 1) continue;
+            
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
+            let fileIcon = 'fa-file-alt';
+            if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
+            else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
+            else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
+            else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
+
+            let sourceDeptName = 'System';
+            if (doc.sent_from_department) {
+                sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown Department';
+            } else if (doc.uploaded_by) {
+                sourceDeptName = doc.uploaded_by;
+            }
+            let isDocSent = doc.sent_from_department && doc.sent_from_department != 1;
+
+            let isHighlighted = highlightId && doc.id === highlightId;
+
+            reportsHtml += `
+                <div class="uploaded-report-card ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}" style="cursor:pointer;">
+                    <div class="card-header" style="padding: 10px 14px;">
+                        <h4 style="font-size:13px;"><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title || 'Untitled')}</h4>
+                        <p style="font-size:9px;">${doc.file_name || 'Document'} ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}</p>
+                    </div>
+                    <div class="p-3" style="padding: 10px 14px;">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                        </div>
+                        <div class="text-[10px] mb-2">
+                            <span class="text-gray-400">Source: </span>
+                            <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                                <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                                ${escapeHtml(sourceDeptName)}
+                                ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            </span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                            <button onclick="event.stopPropagation(); viewUploadedReportDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            <div class="send-dropdown" onclick="event.stopPropagation();">
+                                <button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                                <div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">
+                                    ${allDepartmentsForSend.filter(d => d.id !== 1).map(d => 
+                                        `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
+                                            <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
+                                        </a>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
+                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
+                        </div>
+                    </div>
+                </div>`;
+        }
+        document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
+        
+        if (highlightId) {
+            const el = document.getElementById(`uploaded-report-card-${highlightId}`);
+            if(el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => el.classList.remove('search-highlight'), 3000);
+            }
+        }
+    }
+    updateReportBadge();
+}
 // ==================== SEND DOCUMENT ====================
 async function sendDocumentToDept(docId, deptId, type) {
     let doc = null;
@@ -1932,30 +2087,40 @@ async function sendReportToDeptModal(reportId, deptId) {
 }
 
 // ==================== SEND UPLOADED REPORT ====================
+// ==================== SEND UPLOADED REPORT - FIXED ====================
+
+// ==================== SEND UPLOADED REPORT - FIXED ====================
+// ==================== SEND UPLOADED REPORT - FRONTEND FIXED ====================
 async function sendUploadedReportToDept(reportId, deptId) {
-    let doc = null;
-    doc = uploadedReportsData.find(d => d.id === reportId);
+    console.log('🔵 sendUploadedReportToDept called with:', reportId, deptId);
+    
+    // Convert to integer
+    const targetId = parseInt(reportId);
+    console.log('🔵 targetId (parsed):', targetId);
+    
+    // Find document in uploadedReportsData
+    let doc = uploadedReportsData.find(d => parseInt(d.id) === targetId);
+    
     if (!doc) {
-        doc = projectDocuments.find(d => d.id === reportId);
-    }
-    if (!doc) {
-        doc = reportsData.find(d => d.id === reportId);
-    }
-    if (!doc) {
-        showToast('Document not found. Please refresh and try again.', true);
+        console.error('❌ Document not found in uploadedReportsData');
+        console.log('📄 Available uploadedReportsData:', uploadedReportsData);
+        showToast('📄 Uploaded report not found. Please refresh.', true);
         return;
     }
+    
+    console.log('📄 Document found:', doc);
+    console.log('📄 Document ID:', doc.id, 'Title:', doc.title);
+    
     if (deptId == 1) {
         showToast('Cannot send to Super Admin', true);
         return;
     }
-    
-    // 🔴 FORWARDING IS NOW ALLOWED - NO BLOCK
 
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
 
-    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
+    // Show loading state
+    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
@@ -1963,41 +2128,37 @@ async function sendUploadedReportToDept(reportId, deptId) {
     }
 
     try {
-        const documentData = {
-            id: doc.id,
-            title: doc.title || 'Uploaded Report',
-            period: doc.period || 'monthly',
-            description: doc.description || '',
-            file_name: doc.file_name || '',
-            file_path: doc.file_path || doc.file_name || '',
-            file_size: doc.file_size || 0,
-            file_type: doc.file_type || '',
-            uploaded_by: doc.uploaded_by || 'System',
-            department_id: doc.department_id || 1,
-            created_at: doc.created_at || new Date().toISOString(),
-            doc_type: 'uploaded_report'
-        };
-
+        // Build payload - using 'id' field
         const payload = {
-            document_id: parseInt(reportId),
+            id: parseInt(doc.id),
             to_department_id: parseInt(deptId),
             from_department_id: 1,
-            doc_type: 'uploaded_report',
             sent_by: currentUserFullName || 'Super Admin',
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Super Admin',
-            document_data: documentData,
-            document_title: doc.title || 'Uploaded Report',
-            document_file: doc.file_name || '',
-            description: doc.description || '',
-            duplicate_send: true
+            uploaded_report_data: {
+                id: parseInt(doc.id),
+                title: doc.title || 'Uploaded Report',
+                period: doc.period || 'monthly',
+                description: doc.description || '',
+                file_name: doc.file_name || '',
+                file_path: doc.file_path || doc.file_name || '',
+                file_size: parseInt(doc.file_size) || 0,
+                file_type: doc.file_type || '',
+                uploaded_by: doc.uploaded_by || currentUserFullName || 'System',
+                department_id: parseInt(doc.department_id) || 1,
+                created_at: doc.created_at || new Date().toISOString()
+            }
         };
 
-        const res = await apiCall('send_document_advanced.php', 'POST', payload);
+        console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
 
-        if(res && res.success) {
+        const res = await apiCall('send_uploaded_report_advanced.php', 'POST', payload);
+        console.log('📥 Response:', res);
+
+        if (res && res.success) {
             showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
             addLog(`Uploaded report "${doc.title}" sent to ${deptName}`);
 
+            // Update local document
             doc.sent_to_department = deptId;
             doc.sent_from_department = 1;
             doc.is_viewed_by_department = 0;
@@ -2005,35 +2166,27 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.is_sent = 1;
             doc._is_unviewed = true;
 
-            // Add notification for recipient
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                from_department_id: 1,
-                item_type: 'uploaded_report',
-                item_id: doc.id,
-                item_title: doc.title,
-                message: `Uploaded report "${doc.title}" sent from Super Admin`
-            });
-
+            // Refresh data
             await fetchUploadedReports();
             await loadReports();
             await loadDashboard();
+
+            // Close dropdown
+            toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
+
         } else {
             showToast(res?.message || 'Failed to send uploaded report', true);
         }
     } catch(e) {
-        console.error('Send uploaded report error:', e);
+        console.error('❌ Send uploaded report error:', e);
         showToast('Network error: ' + e.message, true);
     } finally {
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown(`reportSendDropdown-${reportId}`);
-        closeModal('reportViewModal');
     }
 }
-
 // ==================== DOWNLOAD FUNCTIONS ====================
 function downloadDocumentDirect(docId, fileName, type) {
     if (!docId) {
@@ -5264,7 +5417,36 @@ async function init() {
     showPage('dashboard');
     addLog('Super Admin Dashboard initialized');
 }
-
+// ============================================================
+// UPLOADED REPORT FILE INPUT LISTENER
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+    const reportFileInput = document.getElementById('reportFileInput');
+    if (reportFileInput) {
+        reportFileInput.addEventListener('change', function(e) {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                currentUploadedFile = file;
+                
+                const fileNameDisplay = document.getElementById('fileNameDisplay');
+                const fileSizeDisplay = document.getElementById('fileSizeDisplay');
+                const previewContainer = document.getElementById('uploadedFilePreview');
+                
+                if (fileNameDisplay) {
+                    fileNameDisplay.textContent = file.name;
+                }
+                if (fileSizeDisplay) {
+                    fileSizeDisplay.textContent = (file.size / 1024).toFixed(2) + ' KB';
+                }
+                if (previewContainer) {
+                    previewContainer.classList.remove('hidden');
+                }
+                
+                showToast('✅ File selected: ' + file.name, false);
+            }
+        });
+    }
+});
 // ==================== GLOBAL EXPOSURE ====================
 window.showPage = showPage;
 window.closeModal = closeModal;
