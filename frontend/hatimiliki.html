@@ -987,18 +987,19 @@ function apiCall(endpoint, method, data) {
 }
 
 // ==================== RECYCLE BIN ====================
+// ==================== RECYCLE BIN ====================
 function loadRecycleBinFromDB() {
     return apiCall('get_recycle_bin.php').then(function(res) {
         recycleBinData = (res.success && res.data) ? res.data.filter(function(i) { 
             return i.deleted_by_department_id === DEPARTMENT_ID || i.deleted_by_admin === 1; 
         }) : [];
+        return recycleBinData; // Always return something
     }).catch(function(e) {
-        console.warn('Recycle bin API not available, using empty data');
+        console.warn('Recycle bin API not available, using empty data', e);
         recycleBinData = [];
-        return { success: true, data: [] };
+        return recycleBinData; // Return empty array on error
     });
 }
-
 function addToRecycleBin(itemId, itemType, itemName) {
     return apiCall('add_to_recycle_bin.php', 'POST', { 
         item_id: itemId, item_type: itemType, item_name: itemName, 
@@ -1265,72 +1266,81 @@ function markRequestViewed(id) {
 
 // ==================== DASHBOARD ====================
 function loadDashboard() {
-    document.getElementById("dashboardSection").innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading...</span></div>';
-    
-    Promise.all([fetchProjects(), fetchRequests(), fetchReports(), getUnviewedNotificationsCount()]).then(function() {
-        var totalProjects = projects.length;
-        var pending = projects.filter(function(p) { return p.status === 'pending'; }).length;
-        var inProgress = projects.filter(function(p) { return p.status === 'in_progress'; }).length;
-        var completed = projects.filter(function(p) { return p.status === 'completed'; }).length;
-        var totalIncome = 0, totalExpenses = 0;
-        requestsData.forEach(function(b) { 
-            var amount = parseFloat(b.amount) || 0; 
-            if (b.type === 'income' && b.status === 'paid') totalIncome += amount; 
-            else if (b.type === 'expense' && b.status === 'paid') totalExpenses += amount; 
-        });
-        var pendingRequests = requestsData.filter(function(r) { return r.status === 'pending'; }).length;
-        var approvedRequests = requestsData.filter(function(r) { return r.status === 'approved' || r.status === 'paid'; }).length;
-        var totalRequests = requestsData.length;
-        var totalRequestAmount = requestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+    // Return a Promise
+    return new Promise(function(resolve, reject) {
+        document.getElementById("dashboardSection").innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading...</span></div>';
         
-        var html = '<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Hatimiliki Dashboard</h2><p class="text-xs text-gray-500">Title Deeds & Land Registration Management</p></div>' +
-            '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
-                '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p>' + (unviewedProjectsCount > 0 ? '<p class="text-[9px] text-red-300 mt-1">' + unviewedProjectsCount + ' new</p>' : '') + '</div>' +
-                '<div class="stat-card card-pending" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending</p><p class="stat-number">' + formatNumberWithCommas(pending) + '</p></div>' +
-                '<div class="stat-card card-progress" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-spinner text-lg"></i></div><p class="stat-label">In Progress</p><p class="stat-number">' + formatNumberWithCommas(inProgress) + '</p></div>' +
-                '<div class="stat-card card-completed" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-check-circle text-lg"></i></div><p class="stat-label">Completed</p><p class="stat-number">' + formatNumberWithCommas(completed) + '</p></div>' +
-            '</div>' +
-            '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">' +
-                '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-chart-pie text-emerald-600 mr-2"></i>Title Deeds Status</h3><canvas id="statusChart" height="180"></canvas></div>' +
-                '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-list-check text-purple-600 mr-2"></i>Request Summaries</h3>' +
-                    '<div class="grid grid-cols-2 gap-4 text-center">' +
-                        '<div class="p-3 bg-purple-50 rounded-xl"><p class="text-xs text-gray-500">Total Requests</p><p class="text-xl font-bold text-purple-600">' + totalRequests + '</p></div>' +
-                        '<div class="p-3 bg-yellow-50 rounded-xl"><p class="text-xs text-gray-500">Pending</p><p class="text-xl font-bold text-yellow-600">' + pendingRequests + '</p></div>' +
-                        '<div class="p-3 bg-green-50 rounded-xl"><p class="text-xs text-gray-500">Approved/Paid</p><p class="text-xl font-bold text-green-600">' + approvedRequests + '</p></div>' +
-                        '<div class="p-3 bg-blue-50 rounded-xl"><p class="text-xs text-gray-500">Total Amount</p><p class="text-xl font-bold text-blue-600">' + formatCurrency(totalRequestAmount) + '</p></div>' +
+        Promise.all([fetchProjects(), fetchRequests(), fetchReports(), getUnviewedNotificationsCount()])
+            .then(function() {
+                var totalProjects = projects.length;
+                var pending = projects.filter(function(p) { return p.status === 'pending'; }).length;
+                var inProgress = projects.filter(function(p) { return p.status === 'in_progress'; }).length;
+                var completed = projects.filter(function(p) { return p.status === 'completed'; }).length;
+                var totalIncome = 0, totalExpenses = 0;
+                requestsData.forEach(function(b) { 
+                    var amount = parseFloat(b.amount) || 0; 
+                    if (b.type === 'income' && b.status === 'paid') totalIncome += amount; 
+                    else if (b.type === 'expense' && b.status === 'paid') totalExpenses += amount; 
+                });
+                var pendingRequests = requestsData.filter(function(r) { return r.status === 'pending'; }).length;
+                var approvedRequests = requestsData.filter(function(r) { return r.status === 'approved' || r.status === 'paid'; }).length;
+                var totalRequests = requestsData.length;
+                var totalRequestAmount = requestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+                
+                var html = '<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Hatimiliki Dashboard</h2><p class="text-xs text-gray-500">Title Deeds & Land Registration Management</p></div>' +
+                    '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
+                        '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p>' + (unviewedProjectsCount > 0 ? '<p class="text-[9px] text-red-300 mt-1">' + unviewedProjectsCount + ' new</p>' : '') + '</div>' +
+                        '<div class="stat-card card-pending" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending</p><p class="stat-number">' + formatNumberWithCommas(pending) + '</p></div>' +
+                        '<div class="stat-card card-progress" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-spinner text-lg"></i></div><p class="stat-label">In Progress</p><p class="stat-number">' + formatNumberWithCommas(inProgress) + '</p></div>' +
+                        '<div class="stat-card card-completed" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-check-circle text-lg"></i></div><p class="stat-label">Completed</p><p class="stat-number">' + formatNumberWithCommas(completed) + '</p></div>' +
                     '</div>' +
-                '</div>' +
-            '</div>' +
-            '<div class="grid grid-cols-3 gap-3 mb-6">' +
-                '<button onclick="openAddProjectModal()" class="bg-emerald-600 text-white py-2 rounded-lg text-sm hover:bg-emerald-700"><i class="fas fa-plus-circle mr-2"></i>Add Title Deed</button>' +
-                '<button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus-circle mr-2"></i>Add Request</button>' +
-                '<button onclick="openModal(\'addReportModal\')" class="bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"><i class="fas fa-chart-line mr-2"></i>Add Report</button>' +
-            '</div>' +
-            '<div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-emerald-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">' + 
-            activityLogs.slice(0,5).map(function(l) { 
-                return '<div class="py-1 border-b flex justify-between"><span>' + escapeHtml(l.action) + '</span><span class="text-gray-400">' + new Date(l.created_at).toLocaleString() + '</span></div>';
-            }).join('') + 
-            '</div></div>';
-        
-        document.getElementById("dashboardSection").innerHTML = html;
-        var ctx = document.getElementById('statusChart')?.getContext('2d'); 
-        if (ctx) { 
-            new Chart(ctx, { 
-                type: 'doughnut', 
-                data: { 
-                    labels: ['Pending', 'In Progress', 'Completed', 'Approved'], 
-                    datasets: [{ 
-                        data: [pending, inProgress, completed, projects.filter(function(p) { return p.status === 'approved'; }).length], 
-                        backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], 
-                        borderWidth: 0 
-                    }] 
-                }, 
-                options: { responsive: true, plugins: { legend: { position: 'bottom' } } } 
-            }); 
-        }
+                    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-chart-pie text-emerald-600 mr-2"></i>Title Deeds Status</h3><canvas id="statusChart" height="180"></canvas></div>' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-list-check text-purple-600 mr-2"></i>Request Summaries</h3>' +
+                            '<div class="grid grid-cols-2 gap-4 text-center">' +
+                                '<div class="p-3 bg-purple-50 rounded-xl"><p class="text-xs text-gray-500">Total Requests</p><p class="text-xl font-bold text-purple-600">' + totalRequests + '</p></div>' +
+                                '<div class="p-3 bg-yellow-50 rounded-xl"><p class="text-xs text-gray-500">Pending</p><p class="text-xl font-bold text-yellow-600">' + pendingRequests + '</p></div>' +
+                                '<div class="p-3 bg-green-50 rounded-xl"><p class="text-xs text-gray-500">Approved/Paid</p><p class="text-xl font-bold text-green-600">' + approvedRequests + '</p></div>' +
+                                '<div class="p-3 bg-blue-50 rounded-xl"><p class="text-xs text-gray-500">Total Amount</p><p class="text-xl font-bold text-blue-600">' + formatCurrency(totalRequestAmount) + '</p></div>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="grid grid-cols-3 gap-3 mb-6">' +
+                        '<button onclick="openAddProjectModal()" class="bg-emerald-600 text-white py-2 rounded-lg text-sm hover:bg-emerald-700"><i class="fas fa-plus-circle mr-2"></i>Add Title Deed</button>' +
+                        '<button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus-circle mr-2"></i>Add Request</button>' +
+                        '<button onclick="openModal(\'addReportModal\')" class="bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"><i class="fas fa-chart-line mr-2"></i>Add Report</button>' +
+                    '</div>' +
+                    '<div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-emerald-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">' + 
+                    activityLogs.slice(0,5).map(function(l) { 
+                        return '<div class="py-1 border-b flex justify-between"><span>' + escapeHtml(l.action) + '</span><span class="text-gray-400">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                    }).join('') + 
+                    '</div></div>';
+                
+                document.getElementById("dashboardSection").innerHTML = html;
+                var ctx = document.getElementById('statusChart')?.getContext('2d'); 
+                if (ctx) { 
+                    new Chart(ctx, { 
+                        type: 'doughnut', 
+                        data: { 
+                            labels: ['Pending', 'In Progress', 'Completed', 'Approved'], 
+                            datasets: [{ 
+                                data: [pending, inProgress, completed, projects.filter(function(p) { return p.status === 'approved'; }).length], 
+                                backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], 
+                                borderWidth: 0 
+                            }] 
+                        }, 
+                        options: { responsive: true, plugins: { legend: { position: 'bottom' } } } 
+                    }); 
+                }
+                resolve(); // Resolve the promise
+            })
+            .catch(function(error) {
+                console.error('Dashboard load error:', error);
+                document.getElementById("dashboardSection").innerHTML = '<div class="text-center py-12 text-red-500">Error loading dashboard. Please refresh.</div>';
+                resolve(); // Still resolve to continue
+            });
     });
 }
-
 // ==================== TITLE DEEDS SECTION ====================
 function getProjectStatusClass(s) { 
     var map = { pending: "status-pending", in_progress: "status-progress", completed: "status-completed", approved: "status-approved" };
@@ -1571,7 +1581,48 @@ function deleteTitleDeed(id) {
         }
     }
 }
+async function getCurrentUser() {
+    try {
+        const res = await apiCall('get_current_user.php');
+        if (res && res.success && res.data) {
+            CURRENT_USER = res.data.name || "User";
+            // Weka kwenye sessionStorage kwa matumizi ya baadaye
+            sessionStorage.setItem('user_name', CURRENT_USER);
+            sessionStorage.setItem('user_id', res.data.id);
+            sessionStorage.setItem('department_id', res.data.department_id);
+            sessionStorage.setItem('is_admin', res.data.is_admin);
+        }
+    } catch(e) {
+        console.log('Could not fetch current user:', e);
+        // Tumia sessionStorage kama backup
+        const sessionUser = sessionStorage.getItem('user_name');
+        if (sessionUser) {
+            CURRENT_USER = sessionUser;
+        }
+    }
+}
 
+// Hii function inaweza kuwa kwenye kila dashboard
+async function loadUserInfo() {
+    try {
+        const res = await apiCall('get_current_user.php');
+        if (res.success && res.data) {
+            // Onyesha jina kwenye sidebar
+            document.getElementById('userNameDisplay').textContent = res.data.name;
+            
+            // Onyesha department
+            const deptNames = {
+                2: "Finance", 3: "Sales & Marketing", 4: "Manager",
+                5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium",
+                8: "Town Planning", 9: "Architectural", 10: "Survey",
+                11: "Construction", 12: "Hatimiliki"
+            };
+            document.getElementById('userDeptDisplay').textContent = deptNames[res.data.department_id] || 'Unknown';
+        }
+    } catch(e) {
+        console.log('Error loading user info:', e);
+    }
+}
 // ==================== SEND TITLE DEED - WITH FORWARD SUPPORT ====================
 function sendTitleDeedToDept(projectId, toDeptId) {
     var p = projects.find(function(proj) { return proj.id === projectId; });
@@ -4060,49 +4111,62 @@ async function logout() {
 }
 
 function init() {
-    // Load recycle bin first, but don't fail if it doesn't work
-    loadRecycleBinFromDB().catch(function(e) {
-        console.warn('Recycle bin not available:', e);
-        recycleBinData = [];
-    }).then(function() {
-        var container = document.getElementById("mainContentContainer");
-        container.innerHTML = '<div id="dashboardSection"></div><div id="titledeedsSection" class="hidden"></div><div id="requestsSection" class="hidden"></div><div id="reportsSection" class="hidden"></div><div id="settingsSection" class="hidden"></div>';
-        
-        document.querySelectorAll(".nav-item").forEach(function(nav) {
-            nav.addEventListener("click", function(e) {
-                e.preventDefault();
-                showSection(nav.dataset.section);
-            });
+    // Load recycle bin first, then initialize the app
+    loadRecycleBinFromDB()
+        .then(function() {
+            initializeApp();
+        })
+        .catch(function(e) {
+            console.warn('Recycle bin error:', e);
+            recycleBinData = [];
+            initializeApp();
         });
-        
-        document.getElementById("mobileMenuBtn").addEventListener("click", function() {
-            document.getElementById("mainSidebar").classList.add("mobile-open");
-            document.getElementById("mobileMenuOverlay").classList.remove("hidden");
+}
+
+// Separate function for app initialization
+function initializeApp() {
+    var container = document.getElementById("mainContentContainer");
+    container.innerHTML = '<div id="dashboardSection"></div><div id="titledeedsSection" class="hidden"></div><div id="requestsSection" class="hidden"></div><div id="reportsSection" class="hidden"></div><div id="settingsSection" class="hidden"></div>';
+    
+    document.querySelectorAll(".nav-item").forEach(function(nav) {
+        nav.addEventListener("click", function(e) {
+            e.preventDefault();
+            showSection(nav.dataset.section);
         });
-        document.getElementById("logoutBtn").addEventListener("click", logout);
-        document.getElementById("profileBtn").addEventListener("click", function() {
-            document.getElementById("profileDropdown").classList.toggle("hidden");
-        });
-        document.addEventListener("click", function(e) {
-            if (!document.getElementById("profileBtn").contains(e.target)) {
-                document.getElementById("profileDropdown").classList.add("hidden");
-            }
-        });
-        document.getElementById("globalSearchInput").addEventListener("input", performGlobalSearch);
-        
-        // Setup Title Deed file upload
-        setupTitleDeedFileUpload();
-        
-        initDarkMode();
-        var savedColor = localStorage.getItem("sidebar_color");
-        if (savedColor) document.getElementById("mainSidebar").style.background = savedColor;
-        
-        initScrollTop();
-        setInterval(updateConnectionStatus, 30000);
-        updateConnectionStatus();
-        loadDashboard().then(function() {
-            addLog("Hatimiliki Dashboard initialized");
-        });
+    });
+    
+    document.getElementById("mobileMenuBtn").addEventListener("click", function() {
+        document.getElementById("mainSidebar").classList.add("mobile-open");
+        document.getElementById("mobileMenuOverlay").classList.remove("hidden");
+    });
+    
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+    
+    document.getElementById("profileBtn").addEventListener("click", function() {
+        document.getElementById("profileDropdown").classList.toggle("hidden");
+    });
+    
+    document.addEventListener("click", function(e) {
+        if (!document.getElementById("profileBtn").contains(e.target)) {
+            document.getElementById("profileDropdown").classList.add("hidden");
+        }
+    });
+    
+    document.getElementById("globalSearchInput").addEventListener("input", performGlobalSearch);
+    
+    // Setup Title Deed file upload
+    setupTitleDeedFileUpload();
+    
+    initDarkMode();
+    var savedColor = localStorage.getItem("sidebar_color");
+    if (savedColor) document.getElementById("mainSidebar").style.background = savedColor;
+    
+    initScrollTop();
+    setInterval(updateConnectionStatus, 30000);
+    updateConnectionStatus();
+    
+    loadDashboard().then(function() {
+        addLog("Hatimiliki Dashboard initialized");
     });
 }
 
