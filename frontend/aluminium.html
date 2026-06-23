@@ -456,55 +456,6 @@
             background-color: #1e293b;
         }
         
-        /* View Report Modal Styles */
-        #viewReportModal .modal-content {
-            max-width: 850px;
-            border-radius: 20px;
-            overflow: hidden;
-        }
-        #viewReportModal .view-buttons-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-            padding-top: 15px;
-            border-top: 1px solid #e5e7eb;
-        }
-        #viewReportModal .dropdown-trigger {
-            background: #8b5cf6;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        #viewReportModal .dropdown-trigger:hover {
-            background: #7c3aed;
-            transform: translateY(-1px);
-        }
-        #viewReportModal .send-dropdown-content {
-            min-width: 200px;
-        }
-        .report-content-box {
-            background: #1e293b;
-            color: #f1f5f9;
-            padding: 20px;
-            border-radius: 12px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            font-size: 13px;
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #334155;
-        }
-        body.dark-mode .report-content-box {
-            background: #0f172a;
-        }
     </style>
 </head>
 <body>
@@ -4021,6 +3972,7 @@ function switchReportTab(tab) {
     loadReports();
 }
 // ==================== VIEW REPORT DETAILS - FIXED ====================
+// ==================== VIEW REPORT DETAILS - FIXED ====================
 function viewReportDetails(id) { 
     const r = reportsList.find(r => r.id === id); 
     if (!r) {
@@ -4036,48 +3988,119 @@ function viewReportDetails(id) {
         markReportViewed(id);
     }
     
-    document.getElementById('viewReportTitle').textContent = r.title || 'Untitled Report';
-    document.getElementById('viewReportPeriod').textContent = `Period: ${r.period || 'Not specified'}`;
-    document.getElementById('viewReportContent').textContent = r.content || 'No content available';
-    document.getElementById('viewReportCreated').textContent = formatDateTime(r.created_at);
-    document.getElementById('viewReportAuthor').textContent = r.created_by || 'System';
-    document.getElementById('viewReportId').textContent = '#' + r.id;
+    // ============================================================
+    // STATUS BADGE
+    // ============================================================
+    let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+    let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
     
-    const statusEl = document.getElementById('viewReportStatus');
-    if (r.status === 'sent') {
-        statusEl.textContent = 'Sent';
-        statusEl.className = 'status-badge bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs';
-    } else {
-        statusEl.textContent = 'Draft';
-        statusEl.className = 'status-badge bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs';
+    // ============================================================
+    // BUILD FULL HTML - WHITE BACKGROUND, BLACK TEXT
+    // ============================================================
+    let html = `
+        <div class="space-y-3" style="background: #ffffff; color: #1e293b;">
+            <!-- Report Header - White background with border -->
+            <div style="background: #ffffff; border: 2px solid #4b5563; border-radius: 12px; padding: 14px 18px;">
+                <h3 style="font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 6px 0;">${escapeHtml(r.title)}</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #475569;">
+                    <span><i class="fas fa-calendar" style="color: #6b7280; margin-right: 4px;"></i> Period: <strong>${r.period || 'N/A'}</strong></span>
+                    <span style="display: inline-block; padding: 2px 12px; border-radius: 20px; font-size: 11px; font-weight: 500; background: ${statusBg}; color: ${statusColor};">${statusText}</span>
+                    ${r.sent_from_department && r.sent_from_department != DEPARTMENT_ID ? 
+                        `<span style="display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 10px; background: #fef3c7; color: #d97706;"><i class="fas fa-paper-plane" style="margin-right: 4px;"></i> From: ${escapeHtml(departmentNames[r.sent_from_department] || 'Unknown')}</span>` : ''}
+                </div>
+            </div>
+            
+            <!-- Report Content - Light gray background -->
+            <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: #1e293b; font-family: monospace;">
+                ${escapeHtml(r.content || 'No content available')}
+            </div>
+            
+            <!-- Report Metadata -->
+            <div style="font-size: 11px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 16px;">
+                <span><strong style="color: #374151;">Created:</strong> ${formatDateTime(r.created_at)}</span>
+                <span><strong style="color: #374151;">By:</strong> ${escapeHtml(r.created_by || 'System')}</span>
+                <span><strong style="color: #374151;">ID:</strong> #${r.id}</span>
+                ${r.updated_by ? `<span><strong style="color: #374151;">Updated:</strong> ${formatDateTime(r.updated_at)} by ${escapeHtml(r.updated_by)}</span>` : ''}
+            </div>
+            
+            <!-- BUTTONS - Small size, white background -->
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; padding-top: 12px; border-top: 2px solid #e5e7eb; background: #ffffff; position: sticky; bottom: 0; z-index: 10;">
+                <button onclick="exportSingleReportExcel(${r.id})" style="background: #10b981; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s;">
+                    <i class="fas fa-file-excel" style="font-size: 12px;"></i> Excel
+                </button>
+                <button onclick="exportSingleReportPDF(${r.id})" style="background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s;">
+                    <i class="fas fa-file-pdf" style="font-size: 12px;"></i> PDF
+                </button>
+                <div class="send-dropdown" style="display: inline-block; position: relative;">
+                    <button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')" style="background: #8b5cf6; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s;">
+                        <i class="fas fa-paper-plane" style="font-size: 12px;"></i> Send
+                    </button>
+                    <div id="reportSendDropdown-${r.id}" class="send-dropdown-content" style="display: none; position: absolute; right: 0; top: 100%; background: #1e293b; min-width: 170px; border-radius: 8px; z-index: 100; border: 1px solid #334155; max-height: 280px; overflow-y: auto; margin-top: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                        ${allDepartmentsForSend.filter(d => d.id !== DEPARTMENT_ID).map(d => 
+                            `<a onclick="sendReportToDept(${r.id}, ${d.id})" style="display: block; padding: 8px 14px; text-decoration: none; color: #ffffff !important; font-size: 12px; cursor: pointer; border-bottom: 1px solid #334155; transition: background 0.2s;">
+                                <i class="fas ${d.icon}" style="margin-right: 8px;"></i> ${escapeHtml(d.name)}
+                            </a>`
+                        ).join('') || '<div style="padding: 10px 14px; color: #94a3b8; font-size: 12px; text-align: center;">No departments available</div>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // ============================================================
+    // UPDATE MODAL CONTENT
+    // ============================================================
+    const contentEl = document.getElementById('viewReportContent');
+    const buttonsEl = document.getElementById('viewReportButtons');
+    
+    if (contentEl) {
+        contentEl.innerHTML = html;
+        contentEl.style.background = '#ffffff';
+        contentEl.style.color = '#1e293b';
+        contentEl.style.padding = '0';
+        contentEl.style.borderRadius = '0';
+        contentEl.style.maxHeight = 'none';
+        contentEl.style.overflow = 'visible';
     }
     
-    let deptOptions = '';
-    allDepartmentsForSend.forEach(d => {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += `
-                <a onclick="sendReportToDept(${r.id}, ${d.id})" 
-                   class="block px-4 py-2 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-sm">
-                    <i class="fas ${d.icon} mr-2"></i> ${escapeHtml(d.name)}
-                </a>
-            `;
-        }
-    });
-    
-    const sendDropdown = document.getElementById('reportSendDropdown-current');
-    if (sendDropdown) {
-        sendDropdown.innerHTML = deptOptions || '<div class="px-4 py-2 text-gray-400 text-sm">No departments available</div>';
-        sendDropdown.id = 'reportSendDropdown-' + r.id;
+    if (buttonsEl) {
+        buttonsEl.innerHTML = '';
+        buttonsEl.style.display = 'none';
     }
     
-    const excelBtn = document.querySelector('#viewReportButtons .btn-success');
-    const pdfBtn = document.querySelector('#viewReportButtons .btn-danger');
-    if (excelBtn) excelBtn.onclick = function() { exportSingleReportExcel(r.id); };
-    if (pdfBtn) pdfBtn.onclick = function() { exportSingleReportPDF(r.id); };
+    // ============================================================
+    // UPDATE MODAL HEADER - Keep as is
+    // ============================================================
+    const modalHeader = document.querySelector('#viewReportModal .modal-header');
+    if (modalHeader) {
+        modalHeader.style.background = 'linear-gradient(135deg, #4b5563, #374151)';
+    }
     
+    // ============================================================
+    // UPDATE MODAL STYLES
+    // ============================================================
+    const modalContent = document.querySelector('#viewReportModal .modal-content');
+    if (modalContent) {
+        modalContent.style.maxHeight = '90vh';
+        modalContent.style.overflow = 'hidden';
+        modalContent.style.display = 'flex';
+        modalContent.style.flexDirection = 'column';
+    }
+    
+    const modalBody = document.querySelector('#viewReportModal .modal-body');
+    if (modalBody) {
+        modalBody.style.flex = '1';
+        modalBody.style.overflowY = 'auto';
+        modalBody.style.padding = '20px';
+        modalBody.style.background = '#ffffff';
+    }
+    
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
     openModal('viewReportModal');
 }
-
 // ==================== EXPORT SINGLE REPORT EXCEL ====================
 function exportSingleReportExcel(id) {
     const r = reportsList.find(r => r.id === id);
@@ -4729,48 +4752,7 @@ function exportAllUploadedReportsToPDF() {
     w.document.close(); 
     showToast("PDF preview opened - Click Print/Save to download"); 
 }
-async function getCurrentUser() {
-    try {
-        const res = await apiCall('get_current_user.php');
-        if (res && res.success && res.data) {
-            CURRENT_USER = res.data.name || "User";
-            // Weka kwenye sessionStorage kwa matumizi ya baadaye
-            sessionStorage.setItem('user_name', CURRENT_USER);
-            sessionStorage.setItem('user_id', res.data.id);
-            sessionStorage.setItem('department_id', res.data.department_id);
-            sessionStorage.setItem('is_admin', res.data.is_admin);
-        }
-    } catch(e) {
-        console.log('Could not fetch current user:', e);
-        // Tumia sessionStorage kama backup
-        const sessionUser = sessionStorage.getItem('user_name');
-        if (sessionUser) {
-            CURRENT_USER = sessionUser;
-        }
-    }
-}
 
-// Hii function inaweza kuwa kwenye kila dashboard
-async function loadUserInfo() {
-    try {
-        const res = await apiCall('get_current_user.php');
-        if (res.success && res.data) {
-            // Onyesha jina kwenye sidebar
-            document.getElementById('userNameDisplay').textContent = res.data.name;
-            
-            // Onyesha department
-            const deptNames = {
-                2: "Finance", 3: "Sales & Marketing", 4: "Manager",
-                5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium",
-                8: "Town Planning", 9: "Architectural", 10: "Survey",
-                11: "Construction", 12: "Hatimiliki"
-            };
-            document.getElementById('userDeptDisplay').textContent = deptNames[res.data.department_id] || 'Unknown';
-        }
-    } catch(e) {
-        console.log('Error loading user info:', e);
-    }
-}
 // ==================== SETTINGS ====================
 // ==================== ADD LOG FUNCTION ====================
 function addLog(action) {
