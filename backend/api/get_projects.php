@@ -1,5 +1,5 @@
 <?php
-// get_projects.php - Fetch projects including sent ones with daily work summaries
+// get_projects.php - Fetch projects including sent ones with daily work records
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -25,7 +25,9 @@ if (!$departmentId) {
 }
 
 try {
-    // Get regular projects
+    // ============================================================
+    // 1. GET REGULAR PROJECTS (from projects table)
+    // ============================================================
     $stmt = $pdo->prepare("SELECT * FROM projects WHERE 
         (department_id = ? OR sent_to_dept = ?) 
         AND (deleted_by_department != 1 OR deleted_by_department IS NULL)
@@ -33,8 +35,31 @@ try {
         ORDER BY id DESC");
     $stmt->execute([$departmentId, $departmentId]);
     $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Get sent projects (from sent_projects table)
+
+    // ============================================================
+    // 2. GET DAILY WORK FOR REGULAR PROJECTS
+    // ============================================================
+    foreach ($projects as &$project) {
+        $projectId = $project['id'];
+        $dailyWork = [];
+        
+        try {
+            $dwStmt = $pdo->prepare("SELECT * FROM dailywork WHERE project_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY date DESC");
+            $dwStmt->execute([$projectId]);
+            $dailyWork = $dwStmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch(PDOException $e) {
+            $dailyWork = [];
+        }
+        
+        $summary = calculateDailyWorkSummary($dailyWork);
+        $project['daily_work'] = $dailyWork;
+        $project['daily_work_summary'] = $summary;
+        $project['daily_work_count'] = count($dailyWork);
+    }
+
+    // ============================================================
+    // 3. GET SENT PROJECTS (from sent_projects table)
+    // ============================================================
     $sentStmt = $pdo->prepare("SELECT 
         sp.*,
         sp.id as sent_id,
@@ -52,19 +77,75 @@ try {
         ORDER BY sp.sent_at DESC");
     $sentStmt->execute([$departmentId]);
     $sentProjects = $sentStmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Merge sent projects with daily work summaries
+
+    // ============================================================
+    // 4. GET DAILY WORK FOR SENT PROJECTS - FIXED!
+    // ============================================================
     foreach ($sentProjects as &$sent) {
         // Decode project data
         $projectData = json_decode($sent['project_data'], true);
-        if ($projectData) {
-            // Add daily work summary if exists
-            if (isset($projectData['daily_work_summary'])) {
-                $sent['daily_work_summary'] = $projectData['daily_work_summary'];
-                $sent['daily_work_count'] = isset($projectData['daily_work_count']) ? $projectData['daily_work_count'] : 0;
-            }
+        
+        // ============================================================
+        // GET DAILY WORK FROM sent_dailywork TABLE - MAIN FIX
+        // ============================================================
+        $dailyWork = [];
+        
+        // Method 1: By project_name
+        try {
+            $dwStmt = $pdo->prepare("SELECT * FROM sent_dailywork WHERE 
+                to_department_id = ? AND 
+                dailywork_project_name = ? AND 
+                is_deleted = 0 
+                ORDER BY sent_at DESC");
+            $dwStmt->execute([$departmentId, $sent['project_name']]);
+            $dailyWork = $dwStmt->fetchAll(PDO::FETCH_ASSOC);
             
-            // Merge other fields
+            // Decode dailywork_data if found
+            if (!empty($dailyWork)) {
+                $decodedDailyWork = [];
+                foreach ($dailyWork as $dw) {
+                    if (isset($dw['dailywork_data'])) {
+                        $decoded = json_decode($dw['dailywork_data'], true);
+                        if ($decoded) {
+                            // Add sent metadata
+                            $decoded['sent_from_department'] = $dw['from_department_id'];
+                            $decoded['sent_to_department'] = $dw['to_department_id'];
+                            $decoded['sent_by'] = $dw['sent_by'];
+                            $decoded['sent_at'] = $dw['sent_at'];
+                            $decoded['is_sent_record'] = true;
+                            $decodedDailyWork[] = $decoded;
+                        }
+                    }
+                }
+                $dailyWork = $decodedDailyWork;
+            }
+        } catch(PDOException $e) {
+            // Ignore
+        }
+        
+        // Method 2: If no records, try using original_project_id
+        if (empty($dailyWork) && isset($sent['original_project_id']) && $sent['original_project_id'] > 0) {
+            try {
+                $dwStmt = $pdo->prepare("SELECT * FROM dailywork WHERE project_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY date DESC");
+                $dwStmt->execute([$sent['original_project_id']]);
+                $dailyWork = $dwStmt->fetchAll(PDO::FETCH_ASSOC);
+            } catch(PDOException $e) {
+                // Ignore
+            }
+        }
+        
+        // ============================================================
+        // CALCULATE SUMMARY
+        // ============================================================
+        $summary = calculateDailyWorkSummary($dailyWork);
+        
+        // ADD TO PROJECT
+        $sent['daily_work'] = $dailyWork;
+        $sent['daily_work_summary'] = $summary;
+        $sent['daily_work_count'] = count($dailyWork);
+        
+        // Merge project data fields
+        if ($projectData) {
             $sent['client_name'] = isset($projectData['client_name']) ? $projectData['client_name'] : '';
             $sent['location'] = isset($projectData['location']) ? $projectData['location'] : '';
             $sent['description'] = isset($projectData['description']) ? $projectData['description'] : '';
@@ -82,18 +163,67 @@ try {
             $sent['sent_to_name'] = $sent['to_department_name'];
         }
     }
-    
-    // Merge all projects
+
+    // ============================================================
+    // 5. MERGE ALL PROJECTS
+    // ============================================================
     $allProjects = array_merge($projects, $sentProjects);
-    
+
+    // ============================================================
+    // 6. RETURN RESPONSE
+    // ============================================================
     echo json_encode([
         'success' => true,
         'data' => $allProjects,
         'total' => count($allProjects),
-        'sent_count' => count($sentProjects)
+        'sent_count' => count($sentProjects),
+        'sent_daily_work_total' => array_sum(array_column($sentProjects, 'daily_work_count'))
     ]);
-    
+
 } catch(PDOException $e) {
     echo json_encode(['success' => false, 'message' => 'Query failed: ' . $e->getMessage()]);
+}
+
+// ============================================================
+// HELPER FUNCTION: Calculate Daily Work Summary
+// ============================================================
+function calculateDailyWorkSummary($dailyWorkRecords) {
+    $summary = [
+        'total_records' => count($dailyWorkRecords),
+        'total_budget' => 0,
+        'total_expenses' => 0,
+        'total_income' => 0,
+        'total_amount' => 0,
+        'total_profit' => 0,
+        'total_produced' => 0,
+        'total_sold' => 0,
+        'remaining_budget' => 0,
+        'completed' => 0,
+        'partial' => 0,
+        'pending' => 0
+    ];
+    
+    foreach ($dailyWorkRecords as $dw) {
+        $summary['total_budget'] += (float)($dw['budget'] ?? 0);
+        $summary['total_expenses'] += (float)($dw['expenses'] ?? $dw['amount'] ?? 0);
+        $summary['total_income'] += (float)($dw['income'] ?? $dw['total_amount'] ?? 0);
+        $summary['total_amount'] += (float)($dw['amount'] ?? 0);
+        $summary['total_produced'] += (int)($dw['quantity_produced'] ?? 0);
+        $summary['total_sold'] += (int)($dw['quantity_sold'] ?? 0);
+        
+        $status = $dw['status'] ?? 'pending';
+        if ($status === 'completed' || $status === 'Completed') {
+            $summary['completed']++;
+        } else if ($status === 'partial' || $status === 'Partial') {
+            $summary['partial']++;
+        } else {
+            $summary['pending']++;
+        }
+    }
+    
+    $summary['total_profit'] = $summary['total_income'] - $summary['total_expenses'];
+    $summary['remaining_budget'] = $summary['total_budget'] - $summary['total_expenses'];
+    
+    return $summary;
 }
 ?>
