@@ -2642,43 +2642,326 @@ async function deleteProject(id) {
 }
 
 async function viewProjectDetails(id) {
+    // ============================================================
+    // TAFUTA PROJECT KWA ID
+    // ============================================================
     const p = projectsData.find(p => p.id === id);
-    if(p) {
-        if (p._is_unviewed) {
-            markProjectViewed(id);
-            p._is_unviewed = false;
-            p.is_viewed_by_department = 1;
-            const card = document.getElementById('proj-card-' + id);
-            if (card) {
-                const badge = card.querySelector('.new-badge');
-                if (badge) badge.remove();
-            }
-        }
-        currentProjectId = id;
-        let filePreviewHtml = renderProjectImageInView(p);
-        document.getElementById('viewProjContent').innerHTML = `${filePreviewHtml}<div class="space-y-2 text-sm"><p><strong>Name:</strong> ${escapeHtml(p.name)}</p><p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p><p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></p><p><strong>Status:</strong> <span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></p><p><strong>Progress:</strong> ${p.progress}%</p><p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p><p><strong>Start Date:</strong> ${p.start_date || 'N/A'}</p><p><strong>End Date:</strong> ${p.end_date || 'N/A'}</p><p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p><div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div></div>`;
-        let actionHtml = '';
-        if (p.created_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(p.created_by)} | ${formatDateTime(p.created_at)}</div>`;
-        if (p.updated_by && p.updated_by !== p.created_by) actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(p.updated_by)} | ${formatDateTime(p.updated_at)}</div>`;
-        document.getElementById('projActionHistory').innerHTML = actionHtml || '<div>No history available</div>';
-        await loadDailyWorkForProject(id);
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { 
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
-            }
-        });
-        const safeSrc = getSafeImageSrc(p.image);
-        const hasImage = safeSrc !== null && safeSrc !== '' && safeSrc !== 'null';
-        document.getElementById('viewProjButtons').innerHTML = `
-            <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-            <button onclick="exportProjectToPDF(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
-            ${hasImage ? `<button onclick="showFullImage('${safeSrc}')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> View Image</button>` : ''}
-            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
-        `;
-        openModal('viewProjModal');
-        loadProjects();
+    if(!p) {
+        showToast('Project not found', true);
+        return;
     }
+    
+    console.log('📋 Viewing project:', p.name, 'ID:', p.id, 'Daily Work:', p.daily_work_count || 0);
+    
+    // ============================================================
+    // MARK AS VIEWED IKIWA IMETUMWA
+    // ============================================================
+    if (p._is_unviewed) {
+        markProjectViewed(id);
+        p._is_unviewed = false;
+        p.is_viewed_by_department = 1;
+        const card = document.getElementById('proj-card-' + id);
+        if (card) {
+            const badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+        }
+    }
+    
+    currentProjectId = id;
+    
+    // ============================================================
+    // HAKIKISHA DAILY WORK IMELOAD
+    // ============================================================
+    let dailyWork = p.daily_work || [];
+    
+    // If no daily work, try to fetch it
+    if (dailyWork.length === 0) {
+        try {
+            const projectId = p.original_project_id || p.id;
+            const projectName = p.name || '';
+            
+            // Try by project_id
+            let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}`);
+            if (dwRes && dwRes.success && dwRes.data) {
+                dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+            }
+            
+            // Try by project_name
+            if (dailyWork.length === 0) {
+                dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}`);
+                if (dwRes && dwRes.success && dwRes.data) {
+                    dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                }
+            }
+            
+            p.daily_work = dailyWork;
+            p.daily_work_count = dailyWork.length;
+            p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
+            
+            console.log(`📋 Loaded ${dailyWork.length} daily work records for project ${p.name}`);
+        } catch(e) {
+            console.error('Error fetching daily work:', e);
+        }
+    }
+    
+    // ============================================================
+    // HESABU TOTALS
+    // ============================================================
+    let totalBudget = 0, totalExpenses = 0;
+    for (let w of dailyWork) {
+        totalBudget += parseFloat(w.budget || 0);
+        totalExpenses += parseFloat(w.amount || 0);
+    }
+    let remainingBudget = totalBudget - totalExpenses;
+    
+    // ============================================================
+    // BUILD IMAGE HTML
+    // ============================================================
+    let filePreviewHtml = renderProjectImageInView(p);
+    
+    // ============================================================
+    // BUILD PROJECT DETAILS
+    // ============================================================
+    document.getElementById('viewProjContent').innerHTML = `
+        ${filePreviewHtml}
+        <div class="space-y-2 text-sm">
+            <div class="grid grid-cols-2 gap-2">
+                <div><strong>Name:</strong></div><div>${escapeHtml(p.name)}</div>
+                <div><strong>Client:</strong></div><div>${escapeHtml(p.client_name || 'N/A')}</div>
+                <div><strong>Amount:</strong></div><div><span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></div>
+                <div><strong>Status:</strong></div><div><span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></div>
+                <div><strong>Progress:</strong></div><div>${p.progress || 0}%</div>
+                <div><strong>Location:</strong></div><div>${escapeHtml(p.location || 'N/A')}</div>
+                <div><strong>Start Date:</strong></div><div>${p.start_date || 'N/A'}</div>
+                <div><strong>End Date:</strong></div><div>${p.end_date || 'N/A'}</div>
+                <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(p.description || 'N/A')}</div>
+                ${p.sent_from_dept ? `<div><strong>Received From:</strong></div><div><span class="from-badge">${escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown')}</span></div>` : ''}
+                <div><strong>Daily Work Records:</strong></div><div><strong>${dailyWork.length} records</strong></div>
+                <div><strong>Total Budget (Daily Work):</strong></div><div class="text-blue-600 font-bold">${formatMoney(totalBudget)}</div>
+                <div><strong>Total Expenses (Daily Work):</strong></div><div class="text-orange-600 font-bold">${formatMoney(totalExpenses)}</div>
+                <div><strong>Remaining Budget:</strong></div><div style="color: ${remainingBudget >= 0 ? '#059669' : '#dc2626'}; font-weight: bold;">${formatMoney(remainingBudget)}</div>
+            </div>
+            <div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
+        </div>
+    `;
+    
+    // ============================================================
+    // BUILD DAILY WORK TABLE
+    // ============================================================
+    let dailyWorkHtml = '';
+    if (dailyWork.length > 0) {
+        let tableRows = '';
+        for (let w of dailyWork) {
+            const isSent = w.is_sent_record === 1 || w.source === 'sent';
+            const sentBadge = isSent ? 
+                `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || 'another department'}"><i class="fas fa-paper-plane"></i></span>` : '';
+            
+            const budget = parseFloat(w.budget || 0);
+            const expenses = parseFloat(w.amount || 0);
+            const status = w.status || 'pending';
+            const recordDate = w.date || 'N/A';
+            const description = w.work_description || '';
+            const createdBy = w.sent_by || w.created_by || 'System';
+            
+            let statusClassDw = status === 'completed' ? 'status-completed' :
+                               status === 'partial' ? 'status-partial' : 'status-pending';
+            let statusTextDw = status === 'completed' ? 'Completed' :
+                              status === 'partial' ? 'Partial' : 'Pending';
+            
+            tableRows += `
+                <tr style="border-bottom: 1px solid #e5e7eb; ${isSent ? 'background: #faf5ff;' : ''}">
+                    <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
+                        ${new Date(recordDate).toLocaleString()}
+                        ${sentBadge}
+                    </td>
+                    <td style="padding: 10px 8px; word-break: break-word; font-size:12px;">
+                        ${escapeHtml(description || '-')}
+                        ${isSent ? `<div class="text-[8px] text-purple-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || 'Unknown')}</div>` : ''}
+                    </td>
+                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(budget)}</td>
+                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(expenses)}</td>
+                    <td style="padding: 10px 8px; text-align: center; font-size:12px;"><span class="status-badge ${statusClassDw}">${statusTextDw}</span></td>
+                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">${escapeHtml(createdBy)}</td>
+                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">
+                        <div class="flex gap-1 justify-center">
+                            <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                            ${!isSent ? `<button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
+                            ${!isSent ? `<button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>` : ''}
+                            ${isSent ? `<span class="text-[8px] text-purple-500"><i class="fas fa-check-circle"></i> Received</span>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+        
+        dailyWorkHtml = `
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; padding: 15px; background: #f0fdf4; border-radius: 12px; margin-bottom: 15px;">
+                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #d1fae5;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💰 Total Budget</div>
+                    <div style="font-size: 18px; font-weight: 800; color: #059669; margin-top: 4px;">${formatMoney(totalBudget)}</div>
+                </div>
+                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #fef3c7;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💸 Total Expenses</div>
+                    <div style="font-size: 18px; font-weight: 800; color: #ea580c; margin-top: 4px;">${formatMoney(totalExpenses)}</div>
+                </div>
+                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #dbeafe;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">📊 Remaining Budget</div>
+                    <div style="font-size: 18px; font-weight: 800; color: ${remainingBudget >= 0 ? '#3b82f6' : '#dc2626'}; margin-top: 4px;">${formatMoney(remainingBudget)}</div>
+                </div>
+            </div>
+            <div style="overflow-x: auto; margin-top: 15px; border: 1px solid #e5e7eb; border-radius: 8px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 750px;">
+                    <thead>
+                        <tr style="background: #f3f4f6;">
+                            <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Date/Time</th>
+                            <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Description</th>
+                            <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Budget (TZS)</th>
+                            <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Expenses (TZS)</th>
+                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Status</th>
+                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Created By</th>
+                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                </table>
+            </div>
+        `;
+    } else {
+        dailyWorkHtml = `
+            <div style="text-align: center; padding: 30px; color: #9ca3af;">
+                <i class="fas fa-calendar-day text-4xl mb-3 block"></i>
+                <p>No daily work records found for this project</p>
+                <p class="text-xs text-gray-400 mt-2">Click "Add" to create a new daily work record</p>
+            </div>
+        `;
+    }
+    
+    // Update daily work summary in the modal
+    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget);
+    document.getElementById('totalExpenses').innerHTML = formatMoney(totalExpenses);
+    const remainingSpan = document.getElementById('remainingBudget');
+    if (remainingSpan) {
+        remainingSpan.innerHTML = formatMoney(remainingBudget);
+        if (remainingBudget < 0) {
+            remainingSpan.className = 'value negative';
+        } else if (remainingBudget === 0) {
+            remainingSpan.className = 'value remaining';
+        } else {
+            remainingSpan.className = 'value remaining';
+        }
+    }
+    
+    // Show daily work table
+    const container = document.getElementById('dailyWorkListContainer');
+    if (container) {
+        container.style.display = 'block';
+    }
+    const tbody = document.getElementById('dailyWorkTableBody');
+    if (tbody) {
+        if (dailyWork.length > 0) {
+            // Build table rows
+            let rows = '';
+            for (let w of dailyWork) {
+                const budget = parseFloat(w.budget || 0);
+                const expenses = parseFloat(w.amount || 0);
+                const status = w.status || 'pending';
+                const statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+                const statusClass = status === 'completed' ? 'status-completed' : status === 'partial' ? 'status-partial' : 'status-pending';
+                const recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                const description = w.work_description || '-';
+                
+                rows += `
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 10px 8px; white-space: nowrap;">${recordDate}</td>
+                        <td style="padding: 10px 8px; word-break: break-word;">${escapeHtml(description)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${formatMoney(budget)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${formatMoney(expenses)}</td>
+                        <td style="padding: 10px 8px; text-align: center;"><span class="status-badge ${statusClass}">${statusText}</span></td>
+                        <td style="padding: 10px 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
+                        <td style="padding: 10px 8px; text-align: center;">
+                            <div class="flex gap-1 justify-center">
+                                <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                                <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                                <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            tbody.innerHTML = rows;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">No daily work records for this project</td></tr>';
+        }
+    }
+    
+    // ============================================================
+    // BUILD BUTTONS
+    // ============================================================
+    let deptOptions = ''; 
+    allDepartmentsForSend.forEach(d => { 
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+        }
+    });
+    
+    const safeSrc = getSafeImageSrc(p.image);
+    const hasImage = safeSrc !== null && safeSrc !== '' && safeSrc !== 'null';
+    
+    document.getElementById('viewProjButtons').innerHTML = `
+        <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
+        <button onclick="exportProjectToPDF(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
+        ${hasImage ? `<button onclick="showFullImage('${safeSrc}')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> View Image</button>` : ''}
+        <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
+    `;
+    
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
+    openModal('viewProjModal');
+    loadProjects();
+}
+
+// ============================================================
+// HELPER: Calculate Daily Work Summary
+// ============================================================
+function calculateDailyWorkSummary(dailyWorkRecords) {
+    const summary = {
+        total_records: dailyWorkRecords.length || 0,
+        total_budget: 0,
+        total_expenses: 0,
+        total_income: 0,
+        total_amount: 0,
+        total_profit: 0,
+        total_produced: 0,
+        total_sold: 0,
+        remaining_budget: 0,
+        completed: 0,
+        partial: 0,
+        pending: 0
+    };
+    
+    for (let dw of dailyWorkRecords) {
+        summary.total_budget += parseFloat(dw.budget || 0);
+        summary.total_expenses += parseFloat(dw.expenses || dw.amount || 0);
+        summary.total_income += parseFloat(dw.income || dw.total_amount || 0);
+        summary.total_amount += parseFloat(dw.amount || 0);
+        summary.total_produced += parseInt(dw.quantity_produced || 0);
+        summary.total_sold += parseInt(dw.quantity_sold || 0);
+        
+        const status = dw.status || 'pending';
+        if (status === 'completed' || status === 'Completed') {
+            summary.completed++;
+        } else if (status === 'partial' || status === 'Partial') {
+            summary.partial++;
+        } else {
+            summary.pending++;
+        }
+    }
+    
+    summary.total_profit = summary.total_income - summary.total_expenses;
+    summary.remaining_budget = summary.total_budget - summary.total_expenses;
+    
+    return summary;
 }
 
 // ==================== PROJECT DOCUMENTS FUNCTIONS ====================
