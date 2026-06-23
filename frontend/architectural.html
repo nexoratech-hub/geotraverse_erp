@@ -1041,11 +1041,29 @@ function emptyRecycleBin() {
 }
 
 // ============================================================
-// ==================== FETCH FUNCTIONS ====================
+// ==================== FETCH PROJECTS - WITH DEBUG ====================
 // ============================================================
 function fetchProjects() {
     return apiCall('get_projects.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
+            console.log('📋 Full API Response:', res);
+            console.log('📋 Projects Data:', res.data);
+            
+            // Log the first project to see its structure
+            if (res.data.length > 0) {
+                console.log('📋 First project structure:', JSON.stringify(res.data[0], null, 2));
+                console.log('📋 First project keys:', Object.keys(res.data[0]));
+                
+                // Check specifically for daily work related fields
+                var firstProject = res.data[0];
+                console.log('📋 daily_work_records:', firstProject.daily_work_records);
+                console.log('📋 daily_work_summary:', firstProject.daily_work_summary);
+                console.log('📋 daily_work:', firstProject.daily_work);
+                console.log('📋 daily_work_data:', firstProject.daily_work_data);
+                console.log('📋 work_records:', firstProject.work_records);
+                console.log('📋 daily_records:', firstProject.daily_records);
+            }
+            
             projectsData = res.data.filter(function(p) {
                 return (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
                     (!p.deleted_by_department || p.deleted_by_department != 1) && 
@@ -1062,6 +1080,116 @@ function fetchProjects() {
                 return b.id - a.id;
             });
             
+            projectsData.forEach(function(p) {
+                p._is_unviewed = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
+                    p.sent_to_dept === DEPARTMENT_ID && 
+                    (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
+                    viewedProjectIds.indexOf(p.id) === -1;
+                
+                // ============================================================
+                // TRY ALL POSSIBLE FIELD NAMES FOR DAILY WORK RECORDS
+                // ============================================================
+                var dailyRecords = [];
+                var possibleFields = [
+                    'daily_work_records',
+                    'daily_work_data',
+                    'daily_work',
+                    'work_records',
+                    'daily_records',
+                    'records',
+                    'dailywork_records',
+                    'dailywork_data'
+                ];
+                
+                possibleFields.forEach(function(field) {
+                    if (p[field] && dailyRecords.length === 0) {
+                        console.log('📋 Found field:', field, 'with value:', p[field]);
+                        
+                        if (typeof p[field] === 'string') {
+                            try {
+                                var parsed = JSON.parse(p[field]);
+                                if (Array.isArray(parsed)) {
+                                    dailyRecords = parsed;
+                                } else if (parsed && typeof parsed === 'object') {
+                                    // Check if it has records array
+                                    if (parsed.records && Array.isArray(parsed.records)) {
+                                        dailyRecords = parsed.records;
+                                    } else if (parsed.data && Array.isArray(parsed.data)) {
+                                        dailyRecords = parsed.data;
+                                    } else if (parsed.daily_work_records && Array.isArray(parsed.daily_work_records)) {
+                                        dailyRecords = parsed.daily_work_records;
+                                    } else {
+                                        // Try to convert object to array
+                                        var values = Object.values(parsed);
+                                        if (values.length > 0 && Array.isArray(values[0])) {
+                                            dailyRecords = values[0];
+                                        }
+                                    }
+                                }
+                                console.log('📋 Parsed from', field, ':', dailyRecords.length);
+                            } catch(e) {
+                                console.log('❌ Failed to parse', field, ':', e);
+                            }
+                        } else if (Array.isArray(p[field])) {
+                            dailyRecords = p[field];
+                            console.log('📋 Array from', field, ':', dailyRecords.length);
+                        } else if (p[field] && typeof p[field] === 'object') {
+                            // Check for records inside object
+                            if (p[field].records && Array.isArray(p[field].records)) {
+                                dailyRecords = p[field].records;
+                            } else if (p[field].data && Array.isArray(p[field].data)) {
+                                dailyRecords = p[field].data;
+                            } else if (p[field].daily_work_records && Array.isArray(p[field].daily_work_records)) {
+                                dailyRecords = p[field].daily_work_records;
+                            }
+                            console.log('📋 Object from', field, ':', dailyRecords.length);
+                        }
+                    }
+                });
+                
+                // If still empty, check if summary has records
+                if (dailyRecords.length === 0 && p.daily_work_summary) {
+                    var summary = p.daily_work_summary;
+                    if (typeof summary === 'string') {
+                        try {
+                            summary = JSON.parse(summary);
+                        } catch(e) {}
+                    }
+                    if (summary && summary.records && Array.isArray(summary.records)) {
+                        dailyRecords = summary.records;
+                        console.log('📋 Got records from summary.records:', dailyRecords.length);
+                    }
+                }
+                
+                p._daily_work_records = dailyRecords;
+                console.log('📋 Project:', p.name, 'final daily records count:', dailyRecords.length);
+                
+                // Log first record if exists
+                if (dailyRecords.length > 0) {
+                    console.log('📋 First daily record:', dailyRecords[0]);
+                }
+                
+                // ============================================================
+                // CHAKATA DAILY_WORK_SUMMARY
+                // ============================================================
+                if (p.daily_work_summary) {
+                    if (typeof p.daily_work_summary === 'string') {
+                        try {
+                            p._daily_summary = JSON.parse(p.daily_work_summary);
+                        } catch(e) {
+                            console.error('❌ Failed to parse daily_work_summary:', e);
+                            p._daily_summary = null;
+                        }
+                    } else if (typeof p.daily_work_summary === 'object') {
+                        p._daily_summary = p.daily_work_summary;
+                    } else {
+                        p._daily_summary = null;
+                    }
+                } else {
+                    p._daily_summary = null;
+                }
+            });
+            
             unviewedProjectsCount = projectsData.filter(function(p) {
                 return p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && 
                     p.sent_to_dept === DEPARTMENT_ID && 
@@ -1073,18 +1201,270 @@ function fetchProjects() {
             unviewedProjectsCount = 0;
         }
         updateProjectBadge();
+        return projectsData;
     });
 }
 
+// ============================================================
+// ==================== LOAD DAILY WORK FOR PROJECT - DIRECT FROM DATA ====================
+// ============================================================
+function loadDailyWorkForProject(projectId) {
+    console.log('📋 loadDailyWorkForProject called with ID:', projectId);
+    
+    try {
+        var project = projectsData.find(function(p) { return parseInt(p.id) === parseInt(projectId); });
+        if (!project) {
+            console.log('❌ Project not found:', projectId);
+            return;
+        }
+        
+        console.log('📋 Loading daily work for project:', projectId, project.name);
+        console.log('📋 Project._daily_work_records:', project._daily_work_records);
+        console.log('📋 Project._daily_summary:', project._daily_summary);
+        console.log('📋 Full project object keys:', Object.keys(project));
+        
+        var allRecords = [];
+        
+        // STEP 1: Get daily work records from project data (already parsed in fetchProjects)
+        if (project._daily_work_records && project._daily_work_records.length > 0) {
+            console.log('📋 Found daily work records:', project._daily_work_records.length);
+            
+            project._daily_work_records.forEach(function(w, index) {
+                console.log('📋 Processing record', index, ':', w);
+                
+                var isSent = w.sent_from_dept || project.sent_from_dept || false;
+                var sentFromName = w.sent_from_name || departmentNames[project.sent_from_dept] || 'Unknown';
+                
+                var record = {
+                    id: w.id || 'record-' + Date.now() + '-' + index,
+                    date: w.date || w.created_at || w.record_date || w.timestamp || new Date().toISOString(),
+                    project_id: parseInt(projectId),
+                    project_name: w.project_name || project.name,
+                    work_description: w.work_description || w.description || w.work_desc || w.desc || 'Daily work record',
+                    budget: parseFloat(w.budget) || parseFloat(w.budget_amount) || 0,
+                    amount: parseFloat(w.amount) || parseFloat(w.expenses) || parseFloat(w.amount_spent) || parseFloat(w.spent) || 0,
+                    status: w.status || w.payment_status || 'pending',
+                    created_by: w.created_by || w.uploaded_by || w.creator || 'System',
+                    created_at: w.created_at || w.timestamp || new Date().toISOString(),
+                    _is_sent: isSent,
+                    _sent_from: w.sent_from_dept || project.sent_from_dept,
+                    _sent_from_name: sentFromName,
+                    sent_from_dept: w.sent_from_dept || project.sent_from_dept || null
+                };
+                
+                console.log('📋 Created record:', record);
+                allRecords.push(record);
+            });
+        }
+        
+        // STEP 2: Also check local dailyworkData for this project
+        var localRecords = dailyworkData.filter(function(w) { 
+            return parseInt(w.project_id) === parseInt(projectId); 
+        });
+        
+        console.log('📋 Local daily work records:', localRecords.length);
+        
+        localRecords.forEach(function(w) {
+            // Check if already exists
+            var exists = allRecords.some(function(record) { 
+                return record.id === w.id; 
+            });
+            
+            if (!exists) {
+                allRecords.push({
+                    id: w.id || 'local-' + Date.now() + Math.random(),
+                    date: w.date || new Date().toISOString(),
+                    project_id: parseInt(w.project_id) || parseInt(projectId),
+                    project_name: w.project_name || project.name,
+                    work_description: w.work_description || '-',
+                    budget: parseFloat(w.budget) || 0,
+                    amount: parseFloat(w.amount) || 0,
+                    status: w.status || 'pending',
+                    created_by: w.created_by || 'System',
+                    created_at: w.created_at || new Date().toISOString(),
+                    _is_sent: false,
+                    _sent_from: null,
+                    _sent_from_name: null,
+                    sent_from_dept: null
+                });
+            }
+        });
+        
+        // STEP 3: Sort by date (newest first)
+        allRecords.sort(function(a, b) {
+            return new Date(b.date || b.created_at) - new Date(a.date || a.created_at);
+        });
+        
+        console.log('📋 Total daily work records:', allRecords.length);
+        
+        if (allRecords.length > 0) {
+            console.log('📋 All records:', allRecords);
+        }
+        
+        // STEP 4: Render the table
+        renderDailyWorkTable(allRecords);
+        
+        // STEP 5: Update summary
+        if (project._daily_summary) {
+            updateDailyWorkSummaryFromData(project._daily_summary);
+        } else {
+            updateDailyWorkSummary(allRecords);
+        }
+        
+        // STEP 6: Show/hide summary
+        var summaryDiv = document.getElementById('dailyWorkSummary');
+        if (summaryDiv) {
+            if (allRecords.length > 0 || project._daily_summary) {
+                summaryDiv.style.display = 'grid';
+                console.log('📋 Showing daily work summary');
+            } else {
+                summaryDiv.style.display = 'none';
+                console.log('📋 Hiding daily work summary');
+            }
+        }
+        
+        // STEP 7: Show/hide add button
+        var addBtn = document.getElementById('addDailyWorkBtn');
+        if (addBtn) {
+            var isSent = project.sent_from_dept && parseInt(project.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+            if (isSent) {
+                addBtn.style.display = 'none';
+                console.log('📋 Hiding add button for received project');
+            } else {
+                addBtn.style.display = 'inline-flex';
+                console.log('📋 Showing add button for local project');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in loadDailyWorkForProject:', error);
+    }
+}
+
+// ============================================================
+// ==================== UPDATE DAILY WORK SUMMARY FROM DATA ====================
+// ============================================================
+function updateDailyWorkSummaryFromData(summary) {
+    console.log('📋 Updating summary from data:', summary);
+    
+    if (!summary) return;
+    
+    var totalBudget = summary.total_budget || summary.totalBudget || 0;
+    var totalExpenses = summary.total_expenses || summary.totalExpenses || 0;
+    var remainingBudget = (summary.remaining_budget || summary.remainingBudget) || (totalBudget - totalExpenses);
+    var recordsCount = summary.records_count || summary.recordsCount || 0;
+    
+    var totalBudgetSpan = document.getElementById('totalBudget');
+    var totalAmountSpan = document.getElementById('totalAmount');
+    var remainingAmountSpan = document.getElementById('remainingAmount');
+    
+    if (totalBudgetSpan) {
+        totalBudgetSpan.innerHTML = formatMoney(totalBudget);
+        totalBudgetSpan.className = 'value budget';
+    }
+    if (totalAmountSpan) {
+        totalAmountSpan.innerHTML = formatMoney(totalExpenses);
+        totalAmountSpan.className = 'value expenses';
+    }
+    if (remainingAmountSpan) {
+        remainingAmountSpan.innerHTML = formatMoney(remainingBudget);
+        if (remainingBudget < 0) {
+            remainingAmountSpan.className = 'value negative';
+            remainingAmountSpan.style.color = '#ef4444';
+        } else if (remainingBudget === 0) {
+            remainingAmountSpan.className = 'value zero';
+            remainingAmountSpan.style.color = '#f59e0b';
+        } else {
+            remainingAmountSpan.className = 'value remaining';
+            remainingAmountSpan.style.color = '#10b981';
+        }
+    }
+}
+
+// ============================================================
+// ==================== RENDER DAILY WORK TABLE ====================
+// ============================================================
+function renderDailyWorkTable(records) {
+    console.log('📋 renderDailyWorkTable called with', records ? records.length : 0, 'records');
+    
+    try {
+        var tbody = document.getElementById('dailyWorkTableBody');
+        if (!tbody) {
+            console.error('❌ dailyWorkTableBody element not found');
+            return;
+        }
+        
+        if (!records || records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-gray-400">No daily work records found for this project</td></tr>';
+            return;
+        }
+        
+        var html = '';
+        records.forEach(function(w) {
+            var budgetValue = parseFloat(w.budget) || 0;
+            var amountValue = parseFloat(w.amount) || 0;
+            var workDesc = w.work_description || '-';
+            var recordDate = w.date ? new Date(w.date).toLocaleString() : (w.created_at ? new Date(w.created_at).toLocaleString() : 'N/A');
+            
+            var statusClass = '';
+            var statusText = w.status || 'pending';
+            if (statusText === 'completed' || statusText === 'Completed') {
+                statusClass = 'status-completed';
+                statusText = 'Completed';
+            } else if (statusText === 'partial' || statusText === 'Partial') {
+                statusClass = 'status-partial';
+                statusText = 'Partial';
+            } else {
+                statusClass = 'status-pending';
+                statusText = 'Pending';
+            }
+            
+            var sentFromBadge = '';
+            var isSent = w._is_sent || w.sent_from_dept || (w._sent_from && parseInt(w._sent_from) !== parseInt(DEPARTMENT_ID));
+            
+            if (isSent) {
+                var fromName = w._sent_from_name || departmentNames[w.sent_from_dept] || w._sent_from || 'Unknown';
+                sentFromBadge = '<span class="sent-from-badge" style="font-size:8px;padding:2px 8px;background:#fef3c7;color:#d97706;border-radius:12px;margin-left:4px;"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(fromName) + '</span>';
+            }
+            
+            var actionsHtml = '';
+            if (isSent) {
+                actionsHtml = '<span class="text-[8px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">Received</span>';
+            } else {
+                actionsHtml = 
+                    '<button onclick="viewDailyWork(' + w.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>' +
+                    '<button onclick="editDailyWork(' + w.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>' +
+                    '<button onclick="deleteDailyWork(' + w.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>';
+            }
+            
+            html += '<tr id="daily-row-' + w.id + '">' +
+                '<td class="p-2 text-xs date-cell">' + escapeHtml(recordDate) + '</td>' +
+                '<td class="p-2 text-xs">' + escapeHtml(workDesc) + ' ' + sentFromBadge + '</td>' +
+                '<td class="p-2 text-xs text-right font-mono">' + formatMoney(budgetValue) + '</td>' +
+                '<td class="p-2 text-xs text-right font-mono">' + formatMoney(amountValue) + '</td>' +
+                '<td class="p-2 text-center"><span class="status-badge ' + statusClass + '" style="font-size:10px;padding:2px 10px;">' + escapeHtml(statusText) + '</span></td>' +
+                '<td class="p-2 text-center"><div class="flex gap-1 justify-center">' + actionsHtml + '</div></td>' +
+            '</tr>';
+        });
+        tbody.innerHTML = html;
+        console.log('✅ Daily work table rendered successfully');
+        
+    } catch (error) {
+        console.error('❌ Error in renderDailyWorkTable:', error);
+    }
+}
+// ============================================================
+// ==================== FETCH SENT PROJECTS ====================
+// ============================================================
 function fetchSentProjects() {
     return apiCall('get_sent_projects.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
+            console.log('📋 Sent projects found:', res.data.length);
             return res.data;
         }
         return [];
     });
 }
-
 function fetchFundRequests() {
     return apiCall('get_fund_requests.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
@@ -1152,14 +1532,21 @@ function fetchUploadedReports() {
     });
 }
 
+// ============================================================
+// ==================== FETCH DAILY WORK (KUTOKA get_dailywork.php) ====================
+// ============================================================
 function fetchDailyWork() {
     return apiCall('get_dailywork.php?department_id=' + DEPARTMENT_ID).then(function(res) {
-        dailyworkData = (res.success && res.data) ? res.data.filter(function(w) {
-            return (!w.is_deleted || w.is_deleted != 1);
-        }) : [];
+        if (res.success && res.data) {
+            dailyworkData = res.data.filter(function(w) {
+                return (!w.is_deleted || w.is_deleted != 1);
+            });
+        } else {
+            dailyworkData = [];
+        }
+        return dailyworkData;
     });
 }
-
 function fetchProjectDocuments() {
     return apiCall('get_project_documents.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
@@ -1712,200 +2099,155 @@ function deleteProject(id) {
     }
 }
 
-// ============================================================
-// ==================== VIEW PROJECT DETAILS ====================
-// ============================================================
-function viewProjectDetails(id) {
-    var p = projectsData.find(function(p) { return p.id === id; });
-    if (!p) return;
-    
-    if (p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && viewedProjectIds.indexOf(id) === -1) {
-        markProjectViewed(id);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: id,
-            department_id: DEPARTMENT_ID,
-            item_type: 'project'
-        }).catch(function(e) {});
-    }
-    
-    currentProjectId = id;
-    var fileUrl = getFullImageUrl(p.image);
-    var isImage = fileUrl && isImageFile(fileUrl);
-    
-    var filePreviewHtml = '';
-    if (fileUrl && isImage) {
-        filePreviewHtml = '<img src="' + fileUrl + '?t=' + Date.now() + '" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage(\'' + fileUrl + '\')" onerror="this.parentElement.innerHTML=\'<div class=\'no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-sm ml-2\'>No Image</p></div>\'">';
-    } else if (fileUrl && !isImage) {
-        filePreviewHtml = '<div class="w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded cursor-pointer" onclick="window.open(\'' + fileUrl + '\', \'_blank\')"><i class="fas fa-file-alt text-4xl text-gray-500"></i><p class="text-sm ml-2">Click to view file</p></div>';
-    } else {
-        filePreviewHtml = '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i><p class="text-sm ml-2">No Image</p></div>';
-    }
-    
-    var detailsHtml = 
-        '<table class="project-details-table">' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Name:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(p.name) + '</strong></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Client:</td><td style="padding: 10px 8px;">' + escapeHtml(p.client_name || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Amount:</td><td style="padding: 10px 8px;"><span class="text-green-600 font-bold">' + formatMoney(p.amount) + '</span></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Status:</td><td style="padding: 10px 8px;"><span class="status-badge ' + (p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved') + '">' + (p.status === 'in_progress' ? 'In Progress' : p.status) + '</span></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Progress:</td><td style="padding: 10px 8px;">' + p.progress + '%<div class="w-full bg-gray-200 rounded-full h-1.5 mt-1"><div class="bg-pink-600 h-1.5 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div></td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Location:</td><td style="padding: 10px 8px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Start Date:</td><td style="padding: 10px 8px;">' + (p.start_date || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">End Date:</td><td style="padding: 10px 8px;">' + (p.end_date || 'N/A') + '</td></tr>' +
-            '<tr><td style="padding: 10px 8px; font-weight: 600;">Description:</td><td style="padding: 10px 8px;">' + escapeHtml(p.description || 'N/A') + '</td></tr>' +
-        '</table>' +
-        '<div class="user-info mt-2">Created by: ' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div>';
-    
-    document.getElementById('viewProjContent').innerHTML = filePreviewHtml + detailsHtml;
-    
-    loadDailyWorkForProject(id);
-    updateDailyWorkSummary();
-    
-    var deptOptions = '';
-    // Only show send button if project is NOT received (own project)
-    var canSend = !p.sent_from_dept || p.sent_from_dept == DEPARTMENT_ID;
-    if (canSend) {
-        allDepartmentsForSend.forEach(function(d) {
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-            }
-        });
-    }
-    
-    var buttonsHtml = 
-        '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
-        '<button onclick="exportProjectToPDF(' + p.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (Full Report)</button>' +
-        (fileUrl ? '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View File</button>' : '');
-    
-    if (canSend) {
-        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    }
-    
-    document.getElementById('viewProjButtons').innerHTML = buttonsHtml;
-    openModal('viewProjModal');
-    loadProjects();
-}
 
 // ============================================================
-// ==================== SEND PROJECT - WITH IMAGE & DAILY WORK ====================
+// ==================== FIX: sendProjectToDept ====================
 // ============================================================
 function sendProjectToDept(projectId, deptId) {
-    var p = projectsData.find(function(p) { return p.id === projectId; });
-    if (!p) { showToast('Project not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    console.log('📋 sendProjectToDept called with:', projectId, deptId);
     
-    var deptName = null;
-    for (var d = 0; d < allDepartmentsForSend.length; d++) {
-        if (allDepartmentsForSend[d].id == deptId) {
-            deptName = allDepartmentsForSend[d].name;
-            break;
+    try {
+        var p = projectsData.find(function(p) { return parseInt(p.id) === parseInt(projectId); });
+        if (!p) {
+            showToast('Project not found', true);
+            return;
         }
-    }
-    deptName = deptName || 'Department';
-    
-    var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) {
-        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
-        btn.disabled = true;
-    }
-    
-    // Get daily work records for this project
-    var projectDailyWork = dailyworkData.filter(function(w) { 
-        return parseInt(w.project_id) === parseInt(projectId); 
-    });
-    
-    // Calculate daily work summary
-    var totalBudget = 0, totalExpenses = 0;
-    var completedCount = 0, partialCount = 0, pendingCount = 0;
-    for (var m = 0; m < projectDailyWork.length; m++) {
-        var w = projectDailyWork[m];
-        totalBudget += parseFloat(w.budget) || 0;
-        totalExpenses += parseFloat(w.amount) || 0;
-        if (w.status === 'completed') completedCount++;
-        else if (w.status === 'partial') partialCount++;
-        else pendingCount++;
-    }
-    var remainingBudget = totalBudget - totalExpenses;
-    
-    // Get image path - make sure it's clean
-    var imagePath = p.image || '';
-    if (imagePath && !imagePath.startsWith('http') && !imagePath.startsWith('data:')) {
-        var cleanImage = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
-        if (cleanImage.includes('/')) {
-            cleanImage = cleanImage.split('/').pop();
+        if (parseInt(deptId) === parseInt(DEPARTMENT_ID)) {
+            showToast('Cannot send to your own department', true);
+            return;
         }
-        imagePath = cleanImage;
-    }
-    
-    var payload = {
-        project_id: parseInt(projectId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        project_name: p.name || 'Project',
-        client_name: p.client_name || '',
-        amount: parseFloat(p.amount) || 0,
-        status: p.status || 'pending',
-        progress: parseInt(p.progress) || 0,
-        location: p.location || '',
-        description: p.description || '',
-        image: imagePath, // INCLUDING IMAGE
-        start_date: p.start_date || '',
-        end_date: p.end_date || '',
-        sent_by: CURRENT_USER || 'Architectural Manager',
-        duplicate_send: true,
-        daily_work_records: projectDailyWork,
-        daily_summary: {
-            total_budget: totalBudget,
-            total_expenses: totalExpenses,
-            remaining_budget: remainingBudget,
-            records_count: projectDailyWork.length,
-            completed_count: completedCount,
-            partial_count: partialCount,
-            pending_count: pendingCount
+        
+        var deptName = null;
+        for (var d = 0; d < allDepartmentsForSend.length; d++) {
+            if (allDepartmentsForSend[d].id == deptId) {
+                deptName = allDepartmentsForSend[d].name;
+                break;
+            }
         }
-    };
-    
-    apiCall('send_project_advanced.php', 'POST', payload)
-    .then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records', false);
-            addLog('Project sent: "' + p.name + '" to ' + deptName);
-            
-            // Update local project
-            p.sent_to_dept = deptId;
-            p.sent_from_dept = DEPARTMENT_ID;
-            p.is_viewed_by_department = 0;
-            p.sent_count = (p.sent_count || 0) + 1;
-            p.is_sent = 1;
-            p._is_sent = true;
-            
-            // Update badges
-            unviewedProjectsCount = projectsData.filter(function(proj) {
-                return proj.sent_from_dept && proj.sent_from_dept != DEPARTMENT_ID && 
-                    proj.sent_to_dept === DEPARTMENT_ID && 
-                    (proj.is_viewed_by_department == 0 || proj.is_viewed_by_department === null);
-            }).length;
-            updateProjectBadge();
-            
-            loadProjects();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send project', true);
-        }
-    })
-    .catch(function(e) {
-        console.error('Send project error:', e);
-        showToast('Network error: ' + e.message, true);
-    })
-    .finally(function() {
+        deptName = deptName || 'Department';
+        
+        var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
+        var originalText = btn ? btn.innerHTML : 'Sending...';
         if (btn) {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
+            btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+            btn.disabled = true;
         }
-        toggleSendDropdown('projSendDropdown-' + projectId);
-        closeModal('viewProjModal');
-    });
+        
+        // Get daily work records for this project
+        var projectDailyWork = dailyworkData.filter(function(w) { 
+            return parseInt(w.project_id) === parseInt(projectId); 
+        });
+        
+        // Calculate daily work summary
+        var totalBudget = 0, totalExpenses = 0;
+        var completedCount = 0, partialCount = 0, pendingCount = 0;
+        var dailyRecords = [];
+        for (var m = 0; m < projectDailyWork.length; m++) {
+            var w = projectDailyWork[m];
+            totalBudget += parseFloat(w.budget) || 0;
+            totalExpenses += parseFloat(w.amount) || 0;
+            if (w.status === 'completed') completedCount++;
+            else if (w.status === 'partial') partialCount++;
+            else pendingCount++;
+            
+            dailyRecords.push({
+                id: w.id,
+                date: w.date,
+                work_description: w.work_description || '',
+                budget: parseFloat(w.budget) || 0,
+                amount: parseFloat(w.amount) || 0,
+                status: w.status || 'pending',
+                created_by: w.created_by || 'System',
+                created_at: w.created_at || new Date().toISOString()
+            });
+        }
+        var remainingBudget = totalBudget - totalExpenses;
+        
+        // Get image path
+        var imagePath = p.image || '';
+        if (imagePath && !imagePath.startsWith('http') && !imagePath.startsWith('data:')) {
+            var cleanImage = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
+            if (cleanImage.includes('/')) {
+                cleanImage = cleanImage.split('/').pop();
+            }
+            imagePath = cleanImage;
+        }
+        
+        var payload = {
+            project_id: parseInt(projectId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+            project_name: p.name || 'Project',
+            client_name: p.client_name || '',
+            amount: parseFloat(p.amount) || 0,
+            status: p.status || 'pending',
+            progress: parseInt(p.progress) || 0,
+            location: p.location || '',
+            description: p.description || '',
+            image: imagePath,
+            start_date: p.start_date || '',
+            end_date: p.end_date || '',
+            sent_by: 'Architectural Manager', // Hardcoded instead of CURRENT_USER
+            duplicate_send: true,
+            daily_work_records: dailyRecords,
+            daily_summary: {
+                total_budget: totalBudget,
+                total_expenses: totalExpenses,
+                remaining_budget: remainingBudget,
+                records_count: projectDailyWork.length,
+                completed_count: completedCount,
+                partial_count: partialCount,
+                pending_count: pendingCount
+            }
+        };
+        
+        console.log('📤 Sending payload:', payload);
+        
+        apiCall('send_project_advanced.php', 'POST', payload)
+        .then(function(res) {
+            console.log('📥 Response:', res);
+            if (res && res.success) {
+                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records', false);
+                addLog('Project sent: "' + p.name + '" to ' + deptName + ' with ' + projectDailyWork.length + ' daily records');
+                
+                p.sent_to_dept = deptId;
+                p.sent_from_dept = DEPARTMENT_ID;
+                p.is_viewed_by_department = 0;
+                p.sent_count = (p.sent_count || 0) + 1;
+                p.is_sent = 1;
+                p._is_sent = true;
+                
+                unviewedProjectsCount = projectsData.filter(function(proj) {
+                    return proj.sent_from_dept && proj.sent_from_dept != DEPARTMENT_ID && 
+                        proj.sent_to_dept === DEPARTMENT_ID && 
+                        (proj.is_viewed_by_department == 0 || proj.is_viewed_by_department === null);
+                }).length;
+                updateProjectBadge();
+                
+                loadProjects();
+                loadDashboard();
+            } else {
+                showToast(res?.message || 'Failed to send project', true);
+            }
+        })
+        .catch(function(e) {
+            console.error('Send project error:', e);
+            showToast('Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+            toggleSendDropdown('projSendDropdown-' + projectId);
+            closeModal('viewProjModal');
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in sendProjectToDept:', error);
+        showToast('Error: ' + error.message, true);
+    }
 }
 
 function sendDocumentToDept(docId, deptId) {
@@ -1967,50 +2309,174 @@ function sendDocumentToDept(docId, deptId) {
     });
 }
 
+
+
 // ============================================================
-// ==================== DAILY WORK FUNCTIONS ====================
+// ==================== FETCH SENT DAILY WORK BY PROJECT ====================
 // ============================================================
-function loadDailyWorkForProject(projectId) {
-    fetchDailyWork().then(function() {
-        var projectDailyWork = dailyworkData.filter(function(w) { return w.project_id == projectId; });
-        var tbody = document.getElementById('dailyWorkTableBody');
-        if (!tbody) return;
+function fetchSentDailyWork(projectId) {
+    return apiCall('get_sent_dailywork.php?department_id=' + DEPARTMENT_ID + '&project_id=' + projectId).then(function(res) {
+        if (res.success && res.data) {
+            console.log('📋 Sent daily work records found:', res.data.length);
+            return res.data;
+        }
+        console.log('📋 No sent daily work records found');
+        return [];
+    });
+}
+
+
+
+
+// ============================================================
+// ==================== FIX: VIEW PROJECT DETAILS ====================
+// ============================================================
+function viewProjectDetails(id) {
+    console.log('🔍 viewProjectDetails called with ID:', id);
+    
+    try {
+        var p = projectsData.find(function(p) { return parseInt(p.id) === parseInt(id); });
         
-        if (projectDailyWork.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>';
-            updateDailyWorkSummary();
+        if (!p) {
+            console.error('❌ Project not found for ID:', id);
+            showToast('Project not found', true);
             return;
         }
         
-        var html = '';
-        projectDailyWork.forEach(function(w) {
-            var budgetValue = parseFloat(w.budget) || 0;
-            var amountValue = parseFloat(w.amount) || 0;
-            var workDesc = w.work_description || '-';
-            var recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
-            
-            var statusClass = '';
-            var statusText = w.status || 'pending';
-            if (statusText === 'completed') {
-                statusClass = 'status-completed';
-            } else if (statusText === 'partial') {
-                statusClass = 'status-partial';
-            } else {
-                statusClass = 'status-pending';
-            }
-            
-            html += '<tr id="daily-row-' + w.id + '">' +
-                '<td class="p-2 text-xs">' + escapeHtml(recordDate) + '</td>' +
-                '<td class="p-2 text-xs">' + escapeHtml(workDesc) + '</td>' +
-                '<td class="p-2 text-xs text-right">' + formatMoney(budgetValue) + '</td>' +
-                '<td class="p-2 text-xs text-right">' + formatMoney(amountValue) + '</td>' +
-                '<td class="p-2 text-center"><span class="status-badge ' + statusClass + '">' + escapeHtml(statusText) + '</span></td>' +
-                '<td class="p-2 text-center"><div class="flex gap-1 justify-center"><button onclick="viewDailyWork(' + w.id + ')" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(' + w.id + ')" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(' + w.id + ')" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td>' +
-            '</tr>';
-        });
-        tbody.innerHTML = html;
-        updateDailyWorkSummary();
+        console.log('✅ Project found:', p.name, p.id);
+        console.log('📋 Project sent_from_dept:', p.sent_from_dept);
+        
+        // Mark as viewed if unviewed
+        if (p._is_unviewed) {
+            markProjectViewed(id);
+            apiCall('mark_notification_viewed.php', 'POST', {
+                notification_id: id,
+                department_id: DEPARTMENT_ID,
+                item_type: 'project'
+            }).catch(function(e) {});
+        }
+        
+        currentProjectId = id;
+        
+        // Get image URL
+        var fileUrl = getFullImageUrl(p.image);
+        var isImage = fileUrl && isImageFile(fileUrl);
+        
+        var filePreviewHtml = '';
+        if (fileUrl && isImage) {
+            filePreviewHtml = '<img src="' + fileUrl + '?t=' + Date.now() + '" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage(\'' + fileUrl + '\')" onerror="this.parentElement.innerHTML=\'<div class=\'no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-sm ml-2\'>No Image</p></div>\'">';
+        } else if (fileUrl && !isImage) {
+            filePreviewHtml = '<div class="w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded cursor-pointer" onclick="window.open(\'' + fileUrl + '\', \'_blank\')"><i class="fas fa-file-alt text-4xl text-gray-500"></i><p class="text-sm ml-2">Click to view file</p></div>';
+        } else {
+            filePreviewHtml = '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i><p class="text-sm ml-2">No Image</p></div>';
+        }
+        
+        // Check if project was sent from another department
+        var isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+        var sentFromDept = isSent ? (departmentNames[p.sent_from_dept] || 'Unknown') : '';
+        
+        console.log('📋 isSent:', isSent, 'sentFromDept:', sentFromDept);
+        
+        // Build details HTML
+        var detailsHtml = 
+            '<table class="project-details-table">' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600; width: 35%;">Name:</td><td style="padding: 10px 8px;"><strong>' + escapeHtml(p.name) + '</strong></td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Client:</td><td style="padding: 10px 8px;">' + escapeHtml(p.client_name || 'N/A') + '</td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Amount:</td><td style="padding: 10px 8px;"><span class="text-green-600 font-bold">' + formatMoney(p.amount) + '</span></td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Status:</td><td style="padding: 10px 8px;"><span class="status-badge ' + (p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved') + '">' + (p.status === 'in_progress' ? 'In Progress' : p.status) + '</span></td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Progress:</td><td style="padding: 10px 8px;">' + p.progress + '%<div class="w-full bg-gray-200 rounded-full h-1.5 mt-1"><div class="bg-pink-600 h-1.5 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div></td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Location:</td><td style="padding: 10px 8px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Start Date:</td><td style="padding: 10px 8px;">' + (p.start_date || 'N/A') + '</td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">End Date:</td><td style="padding: 10px 8px;">' + (p.end_date || 'N/A') + '</td></tr>' +
+                '<tr><td style="padding: 10px 8px; font-weight: 600;">Description:</td><td style="padding: 10px 8px;">' + escapeHtml(p.description || 'N/A') + '</td></tr>' +
+                (isSent ? '<tr><td style="padding: 10px 8px; font-weight: 600;">Received From:</td><td style="padding: 10px 8px;"><span class="sent-from-badge" style="font-size:11px;padding:4px 14px;background:#fef3c7;color:#d97706;border-radius:20px;"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(sentFromDept) + '</span></td></tr>' : '') +
+            '</table>' +
+            '<div class="user-info mt-2">Created by: ' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div>';
+        
+        // Set content
+        var contentDiv = document.getElementById('viewProjContent');
+        if (contentDiv) {
+            contentDiv.innerHTML = filePreviewHtml + detailsHtml;
+        } else {
+            console.error('❌ viewProjContent element not found');
+        }
+        
+        // Load daily work records - DIRECTLY without fetchSentDailyWorkByProject
+        loadDailyWorkForProject(id);
+        
+        // Build action buttons
+        var deptOptions = '';
+        var canSend = !isSent; // Only allow sending if project is NOT received
+        console.log('📋 canSend:', canSend);
+        
+        if (canSend) {
+            allDepartmentsForSend.forEach(function(d) {
+                if (d.id !== DEPARTMENT_ID) {
+                    deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+                }
+            });
+        }
+        
+        var buttonsHtml = 
+            '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
+            '<button onclick="exportProjectToPDF(' + p.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (Full Report)</button>' +
+            (fileUrl ? '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View File</button>' : '');
+        
+        if (canSend && deptOptions) {
+            buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+        } else if (isSent) {
+            buttonsHtml += '<span class="text-xs text-gray-400 px-3 py-1.5"><i class="fas fa-info-circle mr-1"></i> Received from ' + escapeHtml(sentFromDept) + ' - Cannot forward</span>';
+        }
+        
+        var buttonsDiv = document.getElementById('viewProjButtons');
+        if (buttonsDiv) {
+            buttonsDiv.innerHTML = buttonsHtml;
+        } else {
+            console.error('❌ viewProjButtons element not found');
+        }
+        
+        // Open modal
+        console.log('📋 Opening viewProjectModal...');
+        openModal('viewProjModal');
+        
+    } catch (error) {
+        console.error('❌ Error in viewProjectDetails:', error);
+        showToast('Error loading project details: ' + error.message, true);
+    }
+}
+
+
+
+function updateDailyWorkSummary(records) {
+    if (!records) records = [];
+    
+    var totalBudget = 0, totalAmount = 0;
+    records.forEach(function(w) {
+        totalBudget += parseFloat(w.budget) || 0;
+        totalAmount += parseFloat(w.amount) || 0;
     });
+    
+    var remainingBudget = totalBudget - totalAmount;
+    
+    var totalBudgetSpan = document.getElementById('totalBudget');
+    var totalAmountSpan = document.getElementById('totalAmount');
+    var remainingAmountSpan = document.getElementById('remainingAmount');
+    
+    if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatMoney(totalBudget);
+    if (totalAmountSpan) totalAmountSpan.innerHTML = formatMoney(totalAmount);
+    if (remainingAmountSpan) {
+        remainingAmountSpan.innerHTML = formatMoney(remainingBudget);
+        if (remainingBudget < 0) {
+            remainingAmountSpan.style.color = '#ef4444';
+            remainingAmountSpan.className = 'value negative';
+        } else if (remainingBudget === 0) {
+            remainingAmountSpan.style.color = '#f59e0b';
+            remainingAmountSpan.className = 'value zero';
+        } else {
+            remainingAmountSpan.style.color = '#10b981';
+            remainingAmountSpan.className = 'value remaining';
+        }
+    }
 }
 
 function updateDailyWorkSummary() {
