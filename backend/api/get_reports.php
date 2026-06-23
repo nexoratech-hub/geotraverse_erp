@@ -1,5 +1,5 @@
 <?php
-// get_reports.php - Fetch ALL reports for department
+// get_reports.php - Fetch ADDED REPORTS + SENT ADDED REPORTS + SENT REPORTS
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -51,55 +51,31 @@ if (!$departmentId) {
 
 try {
     $reports = [];
+    $addedReportIds = [];
     
     // ============================================================
-    // 1. GET ADDED REPORTS - TUMIA COLUMN SAHIHI
+    // 1. GET ADDED REPORTS (department_id = ?)
     // ============================================================
-    // Reports za department yenyewe
     $stmt = $pdo->prepare("
         SELECT 
             r.*,
             'added' as source_type,
-            'added_report' as report_type
+            'added_report' as report_type,
+            r.created_at
         FROM reports r
         WHERE r.department_id = ?
         AND (r.is_deleted = 0 OR r.is_deleted IS NULL)
+        AND (r.deleted_by_department = 0 OR r.deleted_by_department IS NULL)
+        AND (r.deleted_by_admin = 0 OR r.deleted_by_admin IS NULL)
         ORDER BY r.created_at DESC
     ");
     $stmt->execute([$departmentId]);
     $addedReports = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Reports zilizotumwa kwa department hii
-    $stmt2 = $pdo->prepare("
-        SELECT 
-            r.*,
-            'added' as source_type,
-            'added_report' as report_type
-        FROM reports r
-        WHERE r.sent_to_department = ?
-        AND (r.is_deleted = 0 OR r.is_deleted IS NULL)
-        ORDER BY r.created_at DESC
-    ");
-    $stmt2->execute([$departmentId]);
-    $sentToReports = $stmt2->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Merge reports
-    $allAddedReports = array_merge($addedReports, $sentToReports);
-    
-    // Remove duplicates (if any)
-    $uniqueAdded = [];
-    $seenIds = [];
-    foreach ($allAddedReports as $r) {
-        if (!in_array($r['id'], $seenIds)) {
-            $seenIds[] = $r['id'];
-            $uniqueAdded[] = $r;
-        }
-    }
-    
-    foreach ($uniqueAdded as $r) {
-        $sentFromDept = $r['sent_from_department'] ?? null;
-        $sentToDept = $r['sent_to_department'] ?? null;
+    foreach ($addedReports as $r) {
+        $addedReportIds[] = $r['id'];
         
+        $sentFromDept = $r['sent_from_department'] ?? null;
         $isSentReport = ($sentFromDept && $sentFromDept > 0 && $sentFromDept != $departmentId);
         
         $isUnviewed = false;
@@ -125,58 +101,37 @@ try {
         $r['sent_from_name'] = $senderName;
         $r['source_type'] = 'added';
         $r['report_type'] = 'added';
+        $r['is_sent_record'] = false;
         
         $reports[] = $r;
     }
     
     // ============================================================
-    // 2. GET UPLOADED REPORTS - TUMIA COLUMN SAHIHI
+    // 2. GET SENT ADDED REPORTS (sent_to_department = ?)
     // ============================================================
-    // Uploaded reports za department yenyewe
-    $uploadedStmt = $pdo->prepare("
+    $stmt2 = $pdo->prepare("
         SELECT 
-            ur.*,
-            'uploaded' as source_type,
-            'uploaded_report' as report_type
-        FROM uploaded_reports ur
-        WHERE ur.department_id = ?
-        AND (ur.is_deleted = 0 OR ur.is_deleted IS NULL)
-        ORDER BY ur.created_at DESC
+            r.*,
+            'added' as source_type,
+            'added_report' as report_type,
+            r.created_at
+        FROM reports r
+        WHERE r.sent_to_department = ?
+        AND (r.is_deleted = 0 OR r.is_deleted IS NULL)
+        AND (r.deleted_by_department = 0 OR r.deleted_by_department IS NULL)
+        AND (r.deleted_by_admin = 0 OR r.deleted_by_admin IS NULL)
+        ORDER BY r.created_at DESC
     ");
-    $uploadedStmt->execute([$departmentId]);
-    $uploadedReports = $uploadedStmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt2->execute([$departmentId]);
+    $sentToReports = $stmt2->fetchAll(PDO::FETCH_ASSOC);
     
-    // Uploaded reports zilizotumwa kwa department hii
-    $uploadedStmt2 = $pdo->prepare("
-        SELECT 
-            ur.*,
-            'uploaded' as source_type,
-            'uploaded_report' as report_type
-        FROM uploaded_reports ur
-        WHERE ur.sent_to_department = ?
-        AND (ur.is_deleted = 0 OR ur.is_deleted IS NULL)
-        ORDER BY ur.created_at DESC
-    ");
-    $uploadedStmt2->execute([$departmentId]);
-    $sentUploadedReports = $uploadedStmt2->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Merge uploaded reports
-    $allUploadedReports = array_merge($uploadedReports, $sentUploadedReports);
-    
-    // Remove duplicates
-    $uniqueUploaded = [];
-    $seenIds = [];
-    foreach ($allUploadedReports as $r) {
-        if (!in_array($r['id'], $seenIds)) {
-            $seenIds[] = $r['id'];
-            $uniqueUploaded[] = $r;
+    foreach ($sentToReports as $r) {
+        if (in_array($r['id'], $addedReportIds)) {
+            continue;
         }
-    }
-    
-    foreach ($uniqueUploaded as $r) {
-        $sentFromDept = $r['sent_from_department'] ?? null;
-        $sentToDept = $r['sent_to_department'] ?? null;
+        $addedReportIds[] = $r['id'];
         
+        $sentFromDept = $r['sent_from_department'] ?? null;
         $isSentReport = ($sentFromDept && $sentFromDept > 0 && $sentFromDept != $departmentId);
         
         $isUnviewed = false;
@@ -193,30 +148,35 @@ try {
         }
         
         $r['is_sent_report'] = $isSentReport;
-        $r['is_original'] = false;
-        $r['is_added_report'] = false;
-        $r['is_uploaded_report'] = true;
+        $r['is_original'] = true;
+        $r['is_added_report'] = true;
+        $r['is_uploaded_report'] = false;
         $r['is_unviewed'] = $isUnviewed;
         $r['_is_unviewed'] = $isUnviewed;
         $r['is_new'] = $isUnviewed;
         $r['sent_from_name'] = $senderName;
-        $r['source_type'] = 'uploaded';
-        $r['report_type'] = 'uploaded';
+        $r['source_type'] = 'added';
+        $r['report_type'] = 'added';
+        $r['is_sent_record'] = false;
         
         $reports[] = $r;
     }
     
     // ============================================================
-    // 3. GET SENT REPORTS (from sent_reports table)
+    // 3. GET SENT REPORTS (FROM sent_reports TABLE)
+    //    ✅ SASA INAANGAZIA deleted_by_department na deleted_by_admin
     // ============================================================
     $sentStmt = $pdo->prepare("
         SELECT 
             sr.*,
             'sent' as source_type,
-            'sent_report' as report_type
+            'sent_report' as report_type,
+            sr.sent_at as created_at
         FROM sent_reports sr
         WHERE sr.to_department_id = ?
         AND (sr.is_deleted = 0 OR sr.is_deleted IS NULL)
+        AND (sr.deleted_by_department = 0 OR sr.deleted_by_department IS NULL)
+        AND (sr.deleted_by_admin = 0 OR sr.deleted_by_admin IS NULL)
         ORDER BY sr.sent_at DESC
     ");
     $sentStmt->execute([$departmentId]);
@@ -226,126 +186,72 @@ try {
         $reportData = json_decode($r['report_data'] ?? '{}', true);
         if (!is_array($reportData)) $reportData = [];
         
-        $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null || $r['is_viewed'] === '0');
-        
-        $senderName = $r['from_department_name'] ?? '';
-        if (!$senderName && isset($r['from_department_id']) && isset($departmentNames[$r['from_department_id']])) {
-            $senderName = $departmentNames[$r['from_department_id']];
+        // Check if this sent report already exists
+        $exists = false;
+        foreach ($reports as $existing) {
+            if (isset($existing['id']) && $existing['id'] == $r['id']) {
+                $exists = true;
+                break;
+            }
+            if (isset($existing['original_report_id']) && $existing['original_report_id'] == $r['original_report_id']) {
+                $exists = true;
+                break;
+            }
         }
         
-        $sentReport = [
-            'id' => $r['id'],
-            'original_report_id' => $r['original_report_id'] ?? $r['report_id'],
-            'title' => $r['report_title'] ?? $reportData['title'] ?? 'Sent Report',
-            'period' => $r['report_period'] ?? $reportData['period'] ?? 'monthly',
-            'content' => $reportData['content'] ?? $r['report_content'] ?? 'No content available',
-            'status' => $r['report_status'] ?? $reportData['status'] ?? 'sent',
-            'department_id' => $r['to_department_id'],
-            'created_at' => $r['sent_at'],
-            'updated_at' => $r['last_sent_at'] ?? $r['sent_at'],
-            'is_deleted' => $r['is_deleted'] ?? 0,
-            'sent_from_department' => $r['from_department_id'],
-            'sent_to_department' => $r['to_department_id'],
-            'sent_count' => $r['sent_count'] ?? 0,
-            'is_sent' => 1,
-            'last_sent_at' => $r['last_sent_at'],
-            'is_original' => false,
-            'is_sent_report' => true,
-            'is_added_report' => false,
-            'is_uploaded_report' => false,
-            'sent_from_name' => $senderName,
-            'sent_to_name' => $r['to_department_name'] ?? '',
-            'source_type' => 'sent',
-            'report_type' => 'sent',
-            'sent_by' => $r['sent_by'] ?? 'System',
-            'is_viewed_by_department' => $r['is_viewed'] ?? 0,
-            'is_unviewed' => $isUnviewed,
-            '_is_unviewed' => $isUnviewed,
-            'is_new' => $isUnviewed,
-            'viewed_at' => $r['viewed_at'] ?? null,
-            'created_by' => $r['sent_by'] ?? $reportData['created_by'] ?? 'System',
-            'original_from_department_id' => $r['original_from_department_id'] ?? null,
-            'original_from_department_name' => $r['original_from_department_name'] ?? null
-        ];
-        
-        $reports[] = $sentReport;
+        if (!$exists) {
+            $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null || $r['is_viewed'] === '0');
+            
+            $senderName = $r['from_department_name'] ?? '';
+            if (!$senderName && isset($r['from_department_id']) && isset($departmentNames[$r['from_department_id']])) {
+                $senderName = $departmentNames[$r['from_department_id']];
+            }
+            
+            $sentReport = [
+                'id' => $r['id'],
+                'original_report_id' => $r['original_report_id'] ?? $r['report_id'] ?? null,
+                'title' => $r['report_title'] ?? $reportData['title'] ?? 'Sent Report',
+                'period' => $r['report_period'] ?? $reportData['period'] ?? 'monthly',
+                'content' => $reportData['content'] ?? $r['report_content'] ?? 'No content available',
+                'status' => $r['report_status'] ?? $reportData['status'] ?? 'sent',
+                'department_id' => $r['to_department_id'],
+                'created_at' => $r['sent_at'],
+                'updated_at' => $r['last_sent_at'] ?? $r['sent_at'],
+                'is_deleted' => $r['is_deleted'] ?? 0,
+                'deleted_by_department' => $r['deleted_by_department'] ?? 0,
+                'deleted_by_admin' => $r['deleted_by_admin'] ?? 0,
+                'sent_from_department' => $r['from_department_id'],
+                'sent_to_department' => $r['to_department_id'],
+                'sent_count' => $r['sent_count'] ?? 0,
+                'is_sent' => 1,
+                'last_sent_at' => $r['last_sent_at'],
+                'is_original' => false,
+                'is_sent_report' => true,
+                'is_added_report' => false,
+                'is_uploaded_report' => false,
+                'sent_from_name' => $senderName,
+                'sent_to_name' => $r['to_department_name'] ?? '',
+                'source_type' => 'sent',
+                'report_type' => 'sent',
+                'sent_by' => $r['sent_by'] ?? 'System',
+                'is_viewed_by_department' => $r['is_viewed'] ?? 0,
+                'is_unviewed' => $isUnviewed,
+                '_is_unviewed' => $isUnviewed,
+                'is_new' => $isUnviewed,
+                'viewed_at' => $r['viewed_at'] ?? null,
+                'created_by' => $r['sent_by'] ?? $reportData['created_by'] ?? 'System',
+                'original_from_department_id' => $r['original_from_department_id'] ?? null,
+                'original_from_department_name' => $r['original_from_department_name'] ?? null,
+                'is_sent_record' => true,
+                'report_data' => $reportData
+            ];
+            
+            $reports[] = $sentReport;
+        }
     }
     
     // ============================================================
-    // 4. GET SENT UPLOADED REPORTS
-    // ============================================================
-    $sentUploadedStmt = $pdo->prepare("
-        SELECT 
-            sur.*,
-            'sent_uploaded' as source_type,
-            'sent_uploaded_report' as report_type
-        FROM sent_uploaded_reports sur
-        WHERE sur.to_department_id = ?
-        AND (sur.is_deleted = 0 OR sur.is_deleted IS NULL)
-        ORDER BY sur.sent_at DESC
-    ");
-    $sentUploadedStmt->execute([$departmentId]);
-    $sentUploadedReports = $sentUploadedStmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($sentUploadedReports as $r) {
-        $reportData = json_decode($r['uploaded_report_data'] ?? '{}', true);
-        if (!is_array($reportData)) $reportData = [];
-        
-        $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null || $r['is_viewed'] === '0');
-        
-        $senderName = $r['from_department_name'] ?? '';
-        if (!$senderName && isset($r['from_department_id']) && isset($departmentNames[$r['from_department_id']])) {
-            $senderName = $departmentNames[$r['from_department_id']];
-        }
-        
-        $filePath = $r['uploaded_report_file'] ?? $reportData['file_path'] ?? $reportData['file_name'] ?? '';
-        $fileName = $r['uploaded_report_file'] ?? $reportData['file_name'] ?? '';
-        
-        $sentUploadedReport = [
-            'id' => $r['id'],
-            'original_uploaded_report_id' => $r['original_uploaded_report_id'],
-            'title' => $r['uploaded_report_title'] ?? $reportData['title'] ?? 'Sent Uploaded Report',
-            'period' => $r['uploaded_report_period'] ?? $reportData['period'] ?? 'monthly',
-            'description' => $reportData['description'] ?? '',
-            'content' => $reportData['description'] ?? '',
-            'file_name' => $fileName,
-            'file_path' => $filePath,
-            'file_size' => $reportData['file_size'] ?? 0,
-            'file_type' => $reportData['file_type'] ?? '',
-            'uploaded_by' => $reportData['uploaded_by'] ?? $r['sent_by'] ?? 'System',
-            'department_id' => $r['to_department_id'],
-            'created_at' => $r['sent_at'],
-            'updated_at' => $r['last_sent_at'] ?? $r['sent_at'],
-            'is_deleted' => $r['is_deleted'] ?? 0,
-            'sent_from_department' => $r['from_department_id'],
-            'sent_to_department' => $r['to_department_id'],
-            'sent_count' => $r['sent_count'] ?? 0,
-            'is_sent' => 1,
-            'last_sent_at' => $r['last_sent_at'],
-            'is_original' => false,
-            'is_sent_report' => true,
-            'is_added_report' => false,
-            'is_uploaded_report' => true,
-            'sent_from_name' => $senderName,
-            'sent_to_name' => $r['to_department_name'] ?? '',
-            'source_type' => 'sent_uploaded',
-            'report_type' => 'sent_uploaded',
-            'sent_by' => $r['sent_by'] ?? 'System',
-            'is_viewed_by_department' => $r['is_viewed'] ?? 0,
-            'is_unviewed' => $isUnviewed,
-            '_is_unviewed' => $isUnviewed,
-            'is_new' => $isUnviewed,
-            'viewed_at' => $r['viewed_at'] ?? null,
-            'created_by' => $r['sent_by'] ?? $reportData['created_by'] ?? 'System',
-            'original_from_department_id' => $r['original_from_department_id'] ?? null,
-            'original_from_department_name' => $r['original_from_department_name'] ?? null
-        ];
-        
-        $reports[] = $sentUploadedReport;
-    }
-    
-    // ============================================================
-    // 5. SORT: Unviewed first, then by date
+    // 4. SORT: Unviewed FIRST, then by created_at DESC
     // ============================================================
     usort($reports, function($a, $b) {
         $aUnviewed = isset($a['is_unviewed']) ? (bool)$a['is_unviewed'] : false;
@@ -360,13 +266,12 @@ try {
     });
     
     // ============================================================
-    // 6. Counts
+    // 5. COUNTS
     // ============================================================
     $unviewedCount = 0;
+    $totalCount = count($reports);
     $addedCount = 0;
-    $uploadedCount = 0;
     $sentCount = 0;
-    $sentUploadedCount = 0;
     
     foreach ($reports as $r) {
         if (isset($r['is_unviewed']) && $r['is_unviewed']) {
@@ -374,25 +279,29 @@ try {
         }
         
         $type = $r['source_type'] ?? '';
-        if ($type === 'added') $addedCount++;
-        elseif ($type === 'uploaded') $uploadedCount++;
-        elseif ($type === 'sent') $sentCount++;
-        elseif ($type === 'sent_uploaded') $sentUploadedCount++;
+        if ($type === 'added') {
+            $addedCount++;
+        } elseif ($type === 'sent') {
+            $sentCount++;
+        }
     }
     
     // ============================================================
-    // 7. Return response
+    // 6. RETURN RESPONSE
     // ============================================================
     echo json_encode([
         'success' => true,
         'data' => $reports,
-        'total' => count($reports),
+        'total' => $totalCount,
         'added_count' => $addedCount,
-        'uploaded_count' => $uploadedCount,
         'sent_count' => $sentCount,
-        'sent_uploaded_count' => $sentUploadedCount,
         'unviewed_count' => $unviewedCount,
-        'department_id' => $departmentId
+        'department_id' => $departmentId,
+        'debug' => [
+            'added_reports_count' => count($addedReports),
+            'sent_to_reports_count' => count($sentToReports),
+            'sent_reports_count' => count($sentReports)
+        ]
     ]);
     
 } catch(PDOException $e) {

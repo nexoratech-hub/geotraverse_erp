@@ -1780,51 +1780,125 @@ function exportAllRequestsToPDF() {
     showToast("📄 Budget Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
+
 // ============================================================
-// FETCH REPORTS - TUMIA API TU, USITUMIE LOCAL STORAGE
+// FETCH REPORTS - HAKIKISHA INAPATA REPORTS ZOTE (ZILIZOTUMWA NA ZAKE)
 // ============================================================
 
 async function fetchReports() {
     try {
-        const url = `get_reports.php?department_id=${DEPARTMENT_ID}`;
-        console.log('📡 Fetching reports from:', url);
+        // ============================================================
+        // WEKA CACHE BUSTING
+        // ============================================================
+        const cacheBuster = `&_t=${Date.now()}`;
         
-        const res = await apiCall(url, 'GET');
-        console.log('📥 fetchReports response:', res);
+        // ============================================================
+        // 1. CHUKUA REPORTS ZA DEPARTMENT YETU (Finance - ID: 2)
+        // ============================================================
+        const myUrl = `get_reports.php?department_id=${DEPARTMENT_ID}${cacheBuster}`;
+        console.log('📡 Fetching my reports from:', myUrl);
         
-        if (res.success && res.data) {
-            reportsData = res.data.filter(r => 
-                (!r.deleted_by_department || r.deleted_by_department != 1) && 
-                (!r.deleted_by_admin || r.deleted_by_admin != 1)
-            ).sort((a, b) => b.id - a.id);
-            
-            console.log('📊 Reports fetched from API:', reportsData.length);
-            console.log('📋 Report data sample:', reportsData.slice(0, 2));
-            
-        } else {
-            console.log('⚠️ API returned no data, using empty array');
-            reportsData = [];
+        const myResponse = await fetch(API_BASE + myUrl, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        const myData = await myResponse.json();
+        console.log('📥 My reports response:', myData);
+        
+        // ============================================================
+        // 2. CHUKUA REPORTS ZILIZOTUMWA KUTOKA IDARA NYINGINE
+        // ============================================================
+        const allUrl = `get_reports.php?all=1${cacheBuster}`;
+        console.log('📡 Fetching all reports from:', allUrl);
+        
+        const allResponse = await fetch(API_BASE + allUrl, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        const allData = await allResponse.json();
+        console.log('📥 All reports response:', allData);
+        
+        // ============================================================
+        // 3. COMBINE DATA - CHUKUA ZOTE
+        // ============================================================
+        let combinedReports = [];
+        
+        // Add my reports first
+        if (myData.success && myData.data) {
+            combinedReports = combinedReports.concat(myData.data);
         }
         
+        // Add reports sent to this department from others
+        if (allData.success && allData.data) {
+            const sentToUs = allData.data.filter(r => 
+                r.sent_to_department == DEPARTMENT_ID && 
+                r.sent_from_department != DEPARTMENT_ID
+            );
+            combinedReports = combinedReports.concat(sentToUs);
+        }
+        
+        // ============================================================
+        // 4. REMOVE DUPLICATES (Kwa ID)
+        // ============================================================
+        const seenIds = new Set();
+        combinedReports = combinedReports.filter(r => {
+            if (seenIds.has(r.id)) return false;
+            seenIds.add(r.id);
+            return true;
+        });
+        
+        // ============================================================
+        // 5. FILTER - ONDOA ZILIZOFUTWA
+        // ============================================================
+        reportsData = combinedReports.filter(r => 
+            (!r.deleted_by_department || r.deleted_by_department != 1) && 
+            (!r.deleted_by_admin || r.deleted_by_admin != 1)
+        ).sort((a, b) => b.id - a.id);
+        
+        console.log(`📊 Total reports loaded: ${reportsData.length}`);
+        console.log(`📋 Reports:`, reportsData.map(r => ({ 
+            id: r.id, 
+            title: r.title, 
+            from: r.sent_from_department, 
+            to: r.sent_to_department,
+            dept: r.department_id
+        })));
+        
+        // ============================================================
+        // 6. HESABU YA UNVIEWED REPORTS
+        // ============================================================
+        unviewedReportsCount = reportsData.filter(r => 
+            r.sent_from_department && 
+            r.sent_from_department != DEPARTMENT_ID && 
+            (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+            !viewedReportIds.includes(r.id)
+        ).length;
+        
+        console.log(`📊 Unviewed reports: ${unviewedReportsCount}`);
+        updateReportBadge();
+        
+        // ============================================================
+        // 7. RUDISHA DATA - USIITE loadReports() HAPA!
+        // ============================================================
+        return reportsData;
+        
     } catch(e) {
-        console.error('❌ API fetch error:', e);
+        console.error('❌ fetchReports error:', e);
         reportsData = [];
+        return [];
     }
-    
-    // ============================================================
-    // HESABU YA UNVIEWED REPORTS
-    // ============================================================
-    unviewedReportsCount = reportsData.filter(r => 
-        r.sent_from_department && 
-        r.sent_from_department != DEPARTMENT_ID && 
-        (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
-        !viewedReportIds.includes(r.id)
-    ).length;
-    
-    console.log('📊 Unviewed reports count:', unviewedReportsCount);
-    updateReportBadge();
-    
-    return reportsData;
 }
 
 // ============================================================
@@ -2073,24 +2147,98 @@ function exportAllUploadedReportsToPDF() {
     showToast("PDF preview opened - Click Print to save"); 
 }
 
-async function deleteUploadedReport(id) { 
-    if(confirm('Delete this uploaded report?')) { 
-        const doc = uploadedReportsData.find(d => d.id === id); 
-        if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title); 
-        const res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID }); 
-        if(res.success) { 
-            showToast('Report moved to recycle bin'); 
-            await fetchUploadedReports(); 
-            await loadReports(); 
-            await loadDashboard(); 
-        } else { 
-            uploadedReportsData = uploadedReportsData.filter(d=>d.id!==id); 
-            await loadReports(); 
-            showToast('Report removed from local view'); 
-        } 
-    } 
-}
+// ============================================================
+// DELETE UPLOADED REPORT - SAFISHA DATA BAADA YA KUFUTA
+// ============================================================
 
+async function deleteUploadedReport(id) {
+    if (!confirm('Delete this uploaded report?')) return;
+    
+    const doc = uploadedReportsData.find(d => d.id === id);
+    if (!doc) {
+        showToast('Uploaded report not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const btn = document.querySelector(`#uploaded-report-card-${id} .action-btn.delete`);
+    const originalText = btn ? btn.innerHTML : 'Deleting...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+    }
+    
+    try {
+        // Add to recycle bin
+        await addToRecycleBin(id, 'uploaded_report', doc.title);
+        
+        // ============================================================
+        // DELETE FROM API
+        // ============================================================
+        const res = await apiCall('delete_uploaded_report.php', 'POST', { 
+            id: id, 
+            department_id: DEPARTMENT_ID,
+            deleted_by: CURRENT_USER
+        });
+        
+        if (res && res.success) {
+            showToast('✅ Uploaded report moved to recycle bin');
+            addLog(`Uploaded report deleted: ${doc.title}`);
+        } else {
+            console.log('⚠️ API delete failed, removing locally');
+        }
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA - IMMEDIATELY
+        // ============================================================
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        
+        // ============================================================
+        // REMOVE FROM UI - IMMEDIATELY
+        // ============================================================
+        const card = document.getElementById(`uploaded-report-card-${id}`);
+        if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
+        
+        // ============================================================
+        // REFRESH FROM API (BACKGROUND)
+        // ============================================================
+        setTimeout(async () => {
+            await fetchUploadedReports();
+            await loadReports();
+            await loadDashboard();
+        }, 500);
+        
+    } catch(e) {
+        console.error('Delete uploaded report error:', e);
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        const card = document.getElementById(`uploaded-report-card-${id}`);
+        if (card) {
+            card.style.opacity = '0';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
+        showToast('Uploaded report removed from view', false);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+}
 // ============================================================
 // LOAD REPORTS - HAKIKISHA INAPANDA DATA KUTOKA API
 // ============================================================
@@ -2382,7 +2530,7 @@ function viewReportDetails(id) {
 }
 
 // ============================================================
-// SEND REPORT - TUMIA FUNCTIONS ZILIZOPO
+// SEND REPORT - INARUHUSU FORWARDING (ONDOA KIZUIZI)
 // ============================================================
 
 async function sendReportToDept(reportId, deptId) {
@@ -2392,9 +2540,16 @@ async function sendReportToDept(reportId, deptId) {
         return;
     }
     
-    // KUZUIA FORWARDING - Ikiwa report ilitumwa kutoka department nyingine
-    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
-        showToast('❌ Huwezi kutuma tena Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+    //     return;
+    // }
+    
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
         return;
     }
     
@@ -2409,7 +2564,7 @@ async function sendReportToDept(reportId, deptId) {
 
     try {
         // ============================================================
-        // BUILD PAYLOAD - send_report_advanced.php
+        // BUILD PAYLOAD - INCLUDES FORWARD DATA
         // ============================================================
         const payload = {
             report_id: parseInt(reportId),
@@ -2433,9 +2588,19 @@ async function sendReportToDept(reportId, deptId) {
                 created_at: r.created_at || new Date().toISOString(),
                 sent_count: (r.sent_count || 0) + 1,
                 is_sent: 1,
-                last_sent_at: new Date().toISOString()
+                last_sent_at: new Date().toISOString(),
+                // FORWARD DATA
+                original_sender: r.sent_from_department || null,
+                original_sender_name: r.sent_from_department ? departmentNames[r.sent_from_department] : null,
+                is_forward: r.sent_from_department && r.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+                forward_count: (r.forward_count || 0) + 1
             },
-            message: `📊 REPORT:\n\nTitle: ${r.title}\nPeriod: ${r.period || 'N/A'}\nFrom: Finance Department\n\nContent Preview:\n${(r.content || '').substring(0, 200)}${(r.content || '').length > 200 ? '...' : ''}`
+            // FORWARD DATA AT TOP LEVEL
+            original_sender: r.sent_from_department || null,
+            original_sender_name: r.sent_from_department ? departmentNames[r.sent_from_department] : null,
+            is_forward: r.sent_from_department && r.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+            forward_count: (r.forward_count || 0) + 1,
+            message: `📊 REPORT (Forwarded):\n\nTitle: ${r.title}\nPeriod: ${r.period || 'N/A'}\nFrom: Finance Department\nOriginal Sender: ${r.sent_from_department ? departmentNames[r.sent_from_department] : 'N/A'}\n\nContent Preview:\n${(r.content || '').substring(0, 200)}${(r.content || '').length > 200 ? '...' : ''}`
         };
 
         console.log('📤 Sending report to send_report_advanced.php:', payload);
@@ -2446,11 +2611,13 @@ async function sendReportToDept(reportId, deptId) {
         const res = await apiCall('send_report_advanced.php', 'POST', payload);
 
         if (res && res.success) {
-            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
-            addLog(`📤 Report "${r.title}" sent to ${deptName}`);
+            const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            showToast(`✅ Report "${r.title}" sent to ${deptName}${forwardMsg}`, false);
+            addLog(`📤 Report "${r.title}" sent to ${deptName}${forwardMsg}`);
 
             // ============================================================
             // UPDATE LOCAL DATA - ONLY FOR THIS REPORT
+            // KEEP A COPY FOR THE SENDER
             // ============================================================
             r.sent_to_department = deptId;
             r.sent_from_department = DEPARTMENT_ID;
@@ -2459,6 +2626,7 @@ async function sendReportToDept(reportId, deptId) {
             r._is_unviewed = true;
             r.sent_count = (r.sent_count || 0) + 1;
             r.last_sent_at = new Date().toISOString();
+            r.forward_count = (r.forward_count || 0) + 1;
 
             // ============================================================
             // ADD NOTIFICATION FOR RECIPIENT
@@ -2469,14 +2637,14 @@ async function sendReportToDept(reportId, deptId) {
                 item_type: 'report',
                 item_id: r.id,
                 item_title: r.title,
-                message: `📊 Report "${r.title}" sent from Finance Department`,
+                message: `📊 Report "${r.title}" sent from Finance Department${forwardMsg}`,
                 created_by: CURRENT_USER || 'Finance Manager'
             }).catch(e => console.log('Notification error:', e));
 
             // ============================================================
-            // REFRESH DATA - TUMIA fetchReports() SIO fetchReportsFromAPI()
+            // REFRESH DATA
             // ============================================================
-            await fetchReports();    // ✅ TUMIA HII
+            await fetchReports();
             await loadReports();
             await loadDashboard();
             await fetchNotifications();
@@ -2499,8 +2667,9 @@ async function sendReportToDept(reportId, deptId) {
         }
     }
 }
+
 // ============================================================
-// SEND UPLOADED REPORT - TUMIA FUNCTIONS ZILIZOPO
+// SEND UPLOADED REPORT - INARUHUSU FORWARDING (ONDOA KIZUIZI)
 // ============================================================
 
 async function sendUploadedReportToDept(reportId, deptId) {
@@ -2514,9 +2683,16 @@ async function sendUploadedReportToDept(reportId, deptId) {
         return;
     }
     
-    // KUZUIA FORWARDING - Ikiwa uploaded report ilitumwa kutoka department nyingine
-    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-        showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+    //     return;
+    // }
+    
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
         return;
     }
     
@@ -2531,7 +2707,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
 
     try {
         // ============================================================
-        // BUILD PAYLOAD - send_uploaded_report_advanced.php
+        // BUILD PAYLOAD - INCLUDES FORWARD DATA
         // ============================================================
         const payload = {
             uploaded_report_id: parseInt(doc.id),
@@ -2561,9 +2737,19 @@ async function sendUploadedReportToDept(reportId, deptId) {
                 created_at: doc.created_at || new Date().toISOString(),
                 sent_count: (doc.sent_count || 0) + 1,
                 is_sent: 1,
-                last_sent_at: new Date().toISOString()
+                last_sent_at: new Date().toISOString(),
+                // FORWARD DATA
+                original_sender: doc.sent_from_department || null,
+                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+                is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+                forward_count: (doc.forward_count || 0) + 1
             },
-            message: `📁 UPLOADED REPORT:\n\nTitle: ${doc.title || 'Uploaded Report'}\nFile: ${doc.file_name || 'document.pdf'}\nPeriod: ${doc.period || 'N/A'}\nFrom: Finance Department`
+            // FORWARD DATA AT TOP LEVEL
+            original_sender: doc.sent_from_department || null,
+            original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+            is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+            forward_count: (doc.forward_count || 0) + 1,
+            message: `📁 UPLOADED REPORT (Forwarded):\n\nTitle: ${doc.title || 'Uploaded Report'}\nFile: ${doc.file_name || 'document.pdf'}\nPeriod: ${doc.period || 'N/A'}\nFrom: Finance Department\nOriginal Sender: ${doc.sent_from_department ? departmentNames[doc.sent_from_department] : 'N/A'}`
         };
 
         console.log('📤 Sending uploaded report to send_uploaded_report_advanced.php:', payload);
@@ -2597,18 +2783,30 @@ async function sendUploadedReportToDept(reportId, deptId) {
                     file_type: doc.file_type || '',
                     uploaded_by: doc.uploaded_by || CURRENT_USER,
                     department_id: doc.department_id || DEPARTMENT_ID,
-                    created_at: doc.created_at || new Date().toISOString()
-                }
+                    created_at: doc.created_at || new Date().toISOString(),
+                    // FORWARD DATA
+                    original_sender: doc.sent_from_department || null,
+                    original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+                    is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+                    forward_count: (doc.forward_count || 0) + 1
+                },
+                // FORWARD DATA AT TOP LEVEL
+                original_sender: doc.sent_from_department || null,
+                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+                is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+                forward_count: (doc.forward_count || 0) + 1
             };
             res = await apiCall('send_document_advanced.php', 'POST', docPayload);
         }
 
         if (res && res.success) {
-            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
-            addLog(`📤 Uploaded report "${doc.title}" sent to ${deptName}`);
+            const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`, false);
+            addLog(`📤 Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`);
 
             // ============================================================
             // UPDATE LOCAL DATA - ONLY FOR THIS DOCUMENT
+            // KEEP A COPY FOR THE SENDER
             // ============================================================
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
@@ -2617,6 +2815,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc._is_unviewed = true;
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();
+            doc.forward_count = (doc.forward_count || 0) + 1;
 
             // ============================================================
             // ADD NOTIFICATION FOR RECIPIENT
@@ -2627,15 +2826,14 @@ async function sendUploadedReportToDept(reportId, deptId) {
                 item_type: 'uploaded_report',
                 item_id: doc.id,
                 item_title: doc.title,
-                message: `📁 Uploaded report "${doc.title}" sent from Finance Department`,
+                message: `📁 Uploaded report "${doc.title}" sent from Finance Department${forwardMsg}`,
                 created_by: CURRENT_USER || 'Finance Manager'
             }).catch(e => console.log('Notification error:', e));
 
             // ============================================================
-            // REFRESH DATA - TUMIA fetchUploadedReports() SIO fetchUploadedReportsFromAPI()
+            // REFRESH DATA
             // ============================================================
-            await fetchUploadedReports();  // ✅ TUMIA HII
-            await fetchReports();          // ✅ TUMIA HII
+            await fetchUploadedReports();
             await loadReports();
             await loadDashboard();
             await fetchNotifications();
@@ -2658,7 +2856,6 @@ async function sendUploadedReportToDept(reportId, deptId) {
         }
     }
 }
-
 // ============================================================
 // ==================== VIEW SENT REPORTS FUNCTIONS ====================
 // ============================================================
@@ -3115,7 +3312,7 @@ async function loadReportsFromAPI() {
 function editReport(id) { const r = reportsData.find(report => report.id === id); if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('addReportModal'); } }
 function openGenerateReportModal() { document.getElementById('genReportTitle').value = ''; document.getElementById('genPeriodType').value = 'daily'; openModal('generateReportModal'); }
 // ============================================================
-// DELETE REPORT - TUMIA API TU
+// DELETE REPORT - SAFISHA DATA BAADA YA KUFUTA
 // ============================================================
 
 async function deleteReportItem(id) {
@@ -3125,6 +3322,16 @@ async function deleteReportItem(id) {
     if (!r) {
         showToast('Report not found', true);
         return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const btn = document.querySelector(`#report-card-${id} .action-btn.delete`);
+    const originalText = btn ? btn.innerHTML : 'Deleting...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
     }
     
     try {
@@ -3145,28 +3352,65 @@ async function deleteReportItem(id) {
             showToast('✅ Report moved to recycle bin');
             addLog(`Report deleted: ${r.title}`);
             
-            // ============================================================
-            // REFRESH REPORTS FROM API - SI LOCAL STORAGE
-            // ============================================================
+        } else {
+            console.log('⚠️ API delete failed, but removing locally');
+        }
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA - IMMEDIATELY
+        // ============================================================
+        reportsData = reportsData.filter(report => report.id !== id);
+        
+        // ============================================================
+        // REMOVE FROM UI - IMMEDIATELY
+        // ============================================================
+        const card = document.getElementById(`report-card-${id}`);
+        if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
+        
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
+        updateReportBadge();
+        
+        // ============================================================
+        // REFRESH FROM API (BACKGROUND)
+        // ============================================================
+        setTimeout(async () => {
             await fetchReports();
             await loadReports();
             await loadDashboard();
-            
-        } else {
-            // Even if API fails, remove from local view
-            reportsData = reportsData.filter(report => report.id !== id);
-            await loadReports();
-            showToast('Report removed from view', false);
-        }
+        }, 500);
         
     } catch(e) {
         console.error('Delete report error:', e);
+        // Remove locally anyway
         reportsData = reportsData.filter(report => report.id !== id);
-        await loadReports();
+        const card = document.getElementById(`report-card-${id}`);
+        if (card) {
+            card.style.opacity = '0';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
         showToast('Report removed from view', false);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
-
 // ============================================================
 // FETCH DAILY WORK - ONGEZA HII FUNCTION
 // ============================================================
