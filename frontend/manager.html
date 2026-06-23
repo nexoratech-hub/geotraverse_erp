@@ -2143,8 +2143,9 @@ function downloadBlob(blob, fileName) {
 }
 
 // ============================================================
-// ==================== SEND FUNCTIONS ====================
+// SEND DOCUMENT - INARUHUSU FORWARDING
 // ============================================================
+
 function sendDocumentToDept(docId, deptId, type) {
     var doc = null;
     if (type === 'project') {
@@ -2163,6 +2164,14 @@ function sendDocumentToDept(docId, deptId, type) {
         return;
     }
     
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Document uliyopokea kutoka idara nyingine.', true);
+    //     return;
+    // }
+    
     var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
     
@@ -2173,6 +2182,9 @@ function sendDocumentToDept(docId, deptId, type) {
         btn.disabled = true;
     }
     
+    // ============================================================
+    // BUILD PAYLOAD - INCLUDE FORWARD DATA
+    // ============================================================
     var documentData = {
         id: doc.id,
         title: doc.title || 'Untitled Document',
@@ -2185,7 +2197,12 @@ function sendDocumentToDept(docId, deptId, type) {
         department_id: doc.department_id || DEPARTMENT_ID,
         created_at: doc.created_at || new Date().toISOString(),
         sent_count: (doc.sent_count || 0) + 1,
-        is_sent: 1
+        is_sent: 1,
+        // FORWARD DATA
+        original_sender: doc.sent_from_department || null,
+        original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+        is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (doc.forward_count || 0) + 1
     };
     
     var payload = {
@@ -2197,15 +2214,22 @@ function sendDocumentToDept(docId, deptId, type) {
         document_data: documentData,
         from_department_name: departmentNames[DEPARTMENT_ID] || 'Manager',
         to_department_name: deptName,
-        duplicate_send: true
+        duplicate_send: true,
+        // FORWARD DATA
+        original_sender: doc.sent_from_department || null,
+        original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+        is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (doc.forward_count || 0) + 1
     };
     
     apiCall('send_document_advanced.php', 'POST', payload)
     .then(function(res) {
         if (res && res.success) {
-            showToast('✅ Document "' + doc.title + '" sent to ' + deptName, false);
-            addToActionHistory('Document sent: "' + doc.title + '" to ' + deptName, CURRENT_USER);
+            var forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            showToast('✅ Document "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+            addToActionHistory('Document sent: "' + doc.title + '" to ' + deptName + forwardMsg, CURRENT_USER);
             
+            // Update local data - KEEP COPY FOR SENDER
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
@@ -2213,6 +2237,7 @@ function sendDocumentToDept(docId, deptId, type) {
             doc.is_sent = 1;
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
+            doc.forward_count = (doc.forward_count || 0) + 1;
             
             if (type === 'project') {
                 fetchProjectDocuments();
@@ -2241,8 +2266,9 @@ function sendDocumentToDept(docId, deptId, type) {
 }
 
 // ============================================================
-// ==================== SEND PROJECT WITH IMAGE AND DAILY WORK ====================
+// SEND PROJECT - INARUHUSU FORWARDING
 // ============================================================
+
 function sendProjectToDept(projectId, deptId) {
     var p = projectsData.find(function(p) { return p.id === projectId; });
     if (!p) {
@@ -2253,6 +2279,14 @@ function sendProjectToDept(projectId, deptId) {
         showToast('Cannot send to your own department', true);
         return;
     }
+    
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Project uliyopokea kutoka idara nyingine.', true);
+    //     return;
+    // }
     
     var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
@@ -2281,21 +2315,14 @@ function sendProjectToDept(projectId, deptId) {
     });
     var remainingBudget = totalBudget - totalExpenses;
     
-    // ============================================================
-    // GET FULL IMAGE PATH - ENSURE IMAGE IS INCLUDED
-    // ============================================================
+    // GET FULL IMAGE PATH
     var imagePath = p.image || '';
     var fullImagePath = '';
-    
-    // Check if image is already a full URL or data URI
     if (imagePath && imagePath !== 'null' && imagePath !== 'undefined') {
         if (imagePath.indexOf('http') === 0 || imagePath.indexOf('data:image') === 0) {
             fullImagePath = imagePath;
         } else {
-            // Try to get full path using getFullImageUrl
             fullImagePath = getFullImageUrl(imagePath);
-            
-            // If still not found, try direct path
             if (!fullImagePath) {
                 var fileName = imagePath.split('/').pop();
                 if (fileName && fileName !== '') {
@@ -2304,10 +2331,6 @@ function sendProjectToDept(projectId, deptId) {
             }
         }
     }
-    
-    // Log image path for debugging
-    console.log('Image path:', imagePath);
-    console.log('Full image path:', fullImagePath);
     
     // Build daily work records array for sending
     var dailyRecords = projectDailyWork.map(function(w) {
@@ -2325,7 +2348,9 @@ function sendProjectToDept(projectId, deptId) {
         };
     });
     
-    // Build project data with image and daily work
+    // ============================================================
+    // BUILD PAYLOAD - INCLUDE FORWARD DATA
+    // ============================================================
     var projectData = {
         id: p.id,
         name: p.name,
@@ -2337,12 +2362,12 @@ function sendProjectToDept(projectId, deptId) {
         progress: p.progress || 0,
         start_date: p.start_date || '',
         end_date: p.end_date || '',
-        image: fullImagePath || imagePath || '',  // ⬅️ IMAGE INCLUDED
+        image: fullImagePath || imagePath || '',
         department_id: p.department_id || DEPARTMENT_ID,
         created_by: p.created_by || CURRENT_USER,
         created_at: p.created_at,
         sent_count: (p.sent_count || 0) + 1,
-        daily_work_records: dailyRecords,  // ⬅️ DAILY WORK RECORDS INCLUDED
+        daily_work_records: dailyRecords,
         daily_summary: {
             total_budget: totalBudget,
             total_expenses: totalExpenses,
@@ -2351,7 +2376,12 @@ function sendProjectToDept(projectId, deptId) {
             completed_count: completedCount,
             partial_count: partialCount,
             pending_count: pendingCount
-        }
+        },
+        // FORWARD DATA - Track original sender
+        original_sender: p.sent_from_dept || p.from_department_id || null,
+        original_sender_name: p.sent_from_dept ? departmentNames[p.sent_from_dept] : null,
+        is_forward: p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (p.forward_count || 0) + 1
     };
     
     var payload = {
@@ -2363,7 +2393,6 @@ function sendProjectToDept(projectId, deptId) {
         from_department_name: departmentNames[DEPARTMENT_ID] || 'Manager',
         to_department_name: deptName,
         duplicate_send: true,
-        // Additional fields for backward compatibility
         project_name: p.name,
         client_name: p.client_name || '',
         amount: parseFloat(p.amount) || 0,
@@ -2371,10 +2400,10 @@ function sendProjectToDept(projectId, deptId) {
         progress: p.progress || 0,
         location: p.location || '',
         description: p.description || '',
-        image: fullImagePath || imagePath || '',  // ⬅️ IMAGE INCLUDED AT TOP LEVEL
+        image: fullImagePath || imagePath || '',
         start_date: p.start_date || '',
         end_date: p.end_date || '',
-        daily_work_records: dailyRecords,  // ⬅️ DAILY WORK RECORDS INCLUDED
+        daily_work_records: dailyRecords,
         daily_summary: {
             total_budget: totalBudget,
             total_expenses: totalExpenses,
@@ -2383,20 +2412,22 @@ function sendProjectToDept(projectId, deptId) {
             completed_count: completedCount,
             partial_count: partialCount,
             pending_count: pendingCount
-        }
+        },
+        // FORWARD DATA
+        original_sender: p.sent_from_dept || p.from_department_id || null,
+        original_sender_name: p.sent_from_dept ? departmentNames[p.sent_from_dept] : null,
+        is_forward: p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (p.forward_count || 0) + 1
     };
-    
-    // Log payload for debugging
-    console.log('Sending payload with image:', payload.image);
-    console.log('Daily work records:', payload.daily_work_records.length);
     
     apiCall('send_project_advanced.php', 'POST', payload)
         .then(function(res) {
             if (res && res.success) {
-                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records and image', false);
-                addToActionHistory('Project sent: "' + p.name + '" to ' + deptName + ' with ' + projectDailyWork.length + ' daily records', CURRENT_USER);
+                var forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records and image' + forwardMsg, false);
+                addToActionHistory('Project sent: "' + p.name + '" to ' + deptName + ' with ' + projectDailyWork.length + ' daily records' + forwardMsg, CURRENT_USER);
                 
-                // Update local project data
+                // Update local data - KEEP COPY FOR SENDER
                 p.sent_to_dept = parseInt(deptId);
                 p.sent_from_dept = DEPARTMENT_ID;
                 p.is_viewed_by_department = 0;
@@ -2404,6 +2435,7 @@ function sendProjectToDept(projectId, deptId) {
                 p.is_sent = 1;
                 p.last_sent_at = new Date().toISOString();
                 p._is_unviewed = true;
+                p.forward_count = (p.forward_count || 0) + 1;
                 
                 // Add notification for recipient
                 apiCall('add_notification.php', 'POST', {
@@ -2412,7 +2444,7 @@ function sendProjectToDept(projectId, deptId) {
                     item_type: 'project',
                     item_id: p.id,
                     item_title: p.name,
-                    message: 'Project "' + p.name + '" sent from Manager Department with ' + projectDailyWork.length + ' daily work records'
+                    message: 'Project "' + p.name + '" sent from Manager Department with ' + projectDailyWork.length + ' daily work records' + forwardMsg
                 }).catch(function(e) {});
                 
                 // Update unviewed count
@@ -2420,6 +2452,7 @@ function sendProjectToDept(projectId, deptId) {
                 updateProjectBadge();
                 
                 // Reload data
+                fetchProjects();
                 loadProjects();
                 loadDashboard();
             } else {
@@ -2439,6 +2472,11 @@ function sendProjectToDept(projectId, deptId) {
             closeModal('viewProjModal');
         });
 }
+
+// ============================================================
+// SEND REPORT - INARUHUSU FORWARDING
+// ============================================================
+
 function sendReportToDept(reportId, deptId) {
     var r = reportsData.find(function(r) { return r.id === reportId; });
     if (!r) {
@@ -2450,6 +2488,14 @@ function sendReportToDept(reportId, deptId) {
         return;
     }
     
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Report uliyopokea kutoka idara nyingine.', true);
+    //     return;
+    // }
+    
     var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
     
@@ -2460,6 +2506,9 @@ function sendReportToDept(reportId, deptId) {
         btn.disabled = true;
     }
     
+    // ============================================================
+    // BUILD PAYLOAD - INCLUDE FORWARD DATA
+    // ============================================================
     var reportData = {
         id: r.id,
         title: r.title,
@@ -2474,7 +2523,12 @@ function sendReportToDept(reportId, deptId) {
         updated_by: r.updated_by || null,
         updated_at: r.updated_at || null,
         sent_count: (r.sent_count || 0) + 1,
-        is_sent: 1
+        is_sent: 1,
+        // FORWARD DATA
+        original_sender: r.sent_from_department || null,
+        original_sender_name: r.sent_from_department ? departmentNames[r.sent_from_department] : null,
+        is_forward: r.sent_from_department && r.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (r.forward_count || 0) + 1
     };
     
     var payload = {
@@ -2484,14 +2538,21 @@ function sendReportToDept(reportId, deptId) {
         sent_by: CURRENT_USER,
         report_data: reportData,
         from_department_name: departmentNames[DEPARTMENT_ID] || 'Manager',
-        duplicate_send: true
+        duplicate_send: true,
+        // FORWARD DATA
+        original_sender: r.sent_from_department || null,
+        original_sender_name: r.sent_from_department ? departmentNames[r.sent_from_department] : null,
+        is_forward: r.sent_from_department && r.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (r.forward_count || 0) + 1
     };
     
     apiCall('send_report_advanced.php', 'POST', payload).then(function(res) {
         if (res && res.success) {
-            showToast('✅ Report "' + r.title + '" sent to ' + deptName, false);
-            addToActionHistory('Report sent: "' + r.title + '" to ' + deptName, CURRENT_USER);
+            var forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            showToast('✅ Report "' + r.title + '" sent to ' + deptName + forwardMsg, false);
+            addToActionHistory('Report sent: "' + r.title + '" to ' + deptName + forwardMsg, CURRENT_USER);
             
+            // Update local data - KEEP COPY FOR SENDER
             r.sent_to_department = deptId;
             r.sent_from_department = DEPARTMENT_ID;
             r.is_viewed_by_department = 0;
@@ -2499,6 +2560,7 @@ function sendReportToDept(reportId, deptId) {
             r.is_sent = 1;
             r.last_sent_at = new Date().toISOString();
             r._is_unviewed = true;
+            r.forward_count = (r.forward_count || 0) + 1;
             
             apiCall('add_notification.php', 'POST', {
                 department_id: parseInt(deptId),
@@ -2506,10 +2568,12 @@ function sendReportToDept(reportId, deptId) {
                 item_type: 'report',
                 item_id: r.id,
                 item_title: r.title,
-                message: 'Report "' + r.title + '" sent from Manager Department'
+                message: 'Report "' + r.title + '" sent from Manager Department' + forwardMsg
             }).catch(function(e) {});
             
+            fetchReports();
             loadReports();
+            loadDashboard();
         } else {
             showToast(res?.message || 'Failed to send report', true);
         }
@@ -2526,6 +2590,10 @@ function sendReportToDept(reportId, deptId) {
     });
 }
 
+// ============================================================
+// SEND UPLOADED REPORT - INARUHUSU FORWARDING
+// ============================================================
+
 function sendUploadedReportToDept(reportId, deptId) {
     var doc = uploadedReportsData.find(function(d) { return d.id === reportId; });
     if (!doc) {
@@ -2537,6 +2605,14 @@ function sendUploadedReportToDept(reportId, deptId) {
         return;
     }
     
+    // ============================================================
+    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
+    // ============================================================
+    // if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+    //     showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine.', true);
+    //     return;
+    // }
+    
     var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
     
@@ -2547,6 +2623,9 @@ function sendUploadedReportToDept(reportId, deptId) {
         btn.disabled = true;
     }
     
+    // ============================================================
+    // BUILD PAYLOAD - INCLUDE FORWARD DATA
+    // ============================================================
     var reportData = {
         id: doc.id,
         title: doc.title,
@@ -2560,7 +2639,12 @@ function sendUploadedReportToDept(reportId, deptId) {
         department_id: doc.department_id || DEPARTMENT_ID,
         created_at: doc.created_at,
         sent_count: (doc.sent_count || 0) + 1,
-        is_sent: 1
+        is_sent: 1,
+        // FORWARD DATA
+        original_sender: doc.sent_from_department || null,
+        original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+        is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (doc.forward_count || 0) + 1
     };
     
     var payload = {
@@ -2571,14 +2655,21 @@ function sendUploadedReportToDept(reportId, deptId) {
         doc_type: 'uploaded_report',
         uploaded_report_data: reportData,
         from_department_name: departmentNames[DEPARTMENT_ID] || 'Manager',
-        duplicate_send: true
+        duplicate_send: true,
+        // FORWARD DATA
+        original_sender: doc.sent_from_department || null,
+        original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+        is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+        forward_count: (doc.forward_count || 0) + 1
     };
     
     apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
         if (res && res.success) {
-            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
-            addToActionHistory('Uploaded report sent: "' + doc.title + '" to ' + deptName, CURRENT_USER);
+            var forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+            addToActionHistory('Uploaded report sent: "' + doc.title + '" to ' + deptName + forwardMsg, CURRENT_USER);
             
+            // Update local data - KEEP COPY FOR SENDER
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
@@ -2586,6 +2677,7 @@ function sendUploadedReportToDept(reportId, deptId) {
             doc.is_sent = 1;
             doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
+            doc.forward_count = (doc.forward_count || 0) + 1;
             
             apiCall('add_notification.php', 'POST', {
                 department_id: parseInt(deptId),
@@ -2593,11 +2685,12 @@ function sendUploadedReportToDept(reportId, deptId) {
                 item_type: 'uploaded_report',
                 item_id: doc.id,
                 item_title: doc.title,
-                message: 'Uploaded report "' + doc.title + '" sent from Manager Department'
+                message: 'Uploaded report "' + doc.title + '" sent from Manager Department' + forwardMsg
             }).catch(function(e) {});
             
             fetchUploadedReports();
             loadReports();
+            loadDashboard();
         } else {
             showToast(res?.message || 'Failed to send uploaded report', true);
         }
@@ -2613,7 +2706,6 @@ function sendUploadedReportToDept(reportId, deptId) {
         closeModal('viewReportModal');
     });
 }
-
 // ============================================================
 // ==================== DASHBOARD ====================
 // ============================================================
