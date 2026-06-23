@@ -1054,12 +1054,17 @@ function emptyRecycleBin() {
     }
 }
 
-// ==================== FETCH FUNCTIONS ====================
 function fetchProjects() {
     return apiCall('get_projects.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
+            // ============================================================
+            // CHUKUA PROJECTS ZOTE - ZILIZO ADDED NA ZILIZOTUMWA
+            // ============================================================
             projects = res.data.filter(function(p) {
-                return (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
+                return (p.department_id === DEPARTMENT_ID ||      // Zilizoundwa na Hatimiliki
+                        p.sent_to_dept === DEPARTMENT_ID ||       // Zilizotumwa kwa Hatimiliki
+                        p.sent_from_dept === DEPARTMENT_ID ||     // Zilizotumwa kutoka Hatimiliki
+                        p.to_department_id === DEPARTMENT_ID) &&  // Zilizotumwa kwa Hatimiliki (alternative)
                     (!p.deleted_by_department || p.deleted_by_department != 1) && 
                     (!p.deleted_by_admin || p.deleted_by_admin != 1);
             }).sort(function(a,b) {
@@ -1074,7 +1079,10 @@ function fetchProjects() {
                 return b.id - a.id;
             });
             
-            // Update unviewed count from projects
+            console.log('📊 Total Projects:', projects.length);
+            console.log('📊 Projects data:', projects);
+            
+            // Update unviewed count
             unviewedProjectsCount = projects.filter(function(p) {
                 return p.sent_from_dept && 
                     p.sent_from_dept != DEPARTMENT_ID && 
@@ -1082,6 +1090,7 @@ function fetchProjects() {
                     (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
                     viewedProjectIds.indexOf(p.id) === -1;
             }).length;
+            
         } else { 
             projects = []; 
             unviewedProjectsCount = 0; 
@@ -1090,7 +1099,6 @@ function fetchProjects() {
         return projects;
     });
 }
-
 function fetchTitleDeedDocuments() {
     return apiCall('get_project_documents.php?department_id=' + DEPARTMENT_ID).then(function(res) {
         if (res.success && res.data) {
@@ -1169,9 +1177,16 @@ function fetchUploadedReports() {
 
 function fetchDailyWork() {
     return apiCall('get_dailywork.php?department_id=' + DEPARTMENT_ID).then(function(res) {
-        dailyworkData = (res.success && res.data) ? res.data.filter(function(w) {
-            return (!w.is_deleted || w.is_deleted != 1);
-        }) : [];
+        if (res.success && res.data) {
+            dailyworkData = res.data.filter(function(w) {
+                return (!w.is_deleted || w.is_deleted != 1);
+            });
+            console.log('📋 Total Daily Work Records:', dailyworkData.length);
+            console.log('📋 Daily work data sample:', dailyworkData.slice(0, 3));
+        } else {
+            dailyworkData = [];
+            console.log('📋 No daily work records found');
+        }
         return dailyworkData;
     });
 }
@@ -1270,7 +1285,7 @@ function loadDashboard() {
     return new Promise(function(resolve, reject) {
         document.getElementById("dashboardSection").innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading...</span></div>';
         
-        Promise.all([fetchProjects(), fetchRequests(), fetchReports(), getUnviewedNotificationsCount()])
+        Promise.all([fetchProjects(), fetchRequests(), fetchReports(), fetchDailyWork(), getUnviewedNotificationsCount()])
             .then(function() {
                 var totalProjects = projects.length;
                 var pending = projects.filter(function(p) { return p.status === 'pending'; }).length;
@@ -1287,13 +1302,58 @@ function loadDashboard() {
                 var totalRequests = requestsData.length;
                 var totalRequestAmount = requestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
                 
+                // ============================================================
+                // DAILY WORK SUMMARIES - MPYA
+                // ============================================================
+                var totalDailyBudget = 0, totalDailySpent = 0;
+                for (var i = 0; i < dailyworkData.length; i++) {
+                    var w = dailyworkData[i];
+                    totalDailyBudget += parseFloat(w.budget) || 0;
+                    totalDailySpent += parseFloat(w.amount) || 0;
+                }
+                var remainingDailyBudget = totalDailyBudget - totalDailySpent;
+                var totalDailyRecords = dailyworkData.length;
+                var remainingColor = remainingDailyBudget >= 0 ? '#10b981' : '#ef4444';
+                
+                // Count unviewed projects from sent data
+                var unviewedCount = projects.filter(function(p) {
+                    return p.sent_from_dept && 
+                        p.sent_from_dept != DEPARTMENT_ID && 
+                        p.sent_to_dept === DEPARTMENT_ID && 
+                        (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
+                        viewedProjectIds.indexOf(p.id) === -1;
+                }).length;
+                
                 var html = '<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Hatimiliki Dashboard</h2><p class="text-xs text-gray-500">Title Deeds & Land Registration Management</p></div>' +
+                    // ============================================================
+                    // CARD 1: Title Deeds
+                    // ============================================================
                     '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
-                        '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p>' + (unviewedProjectsCount > 0 ? '<p class="text-[9px] text-red-300 mt-1">' + unviewedProjectsCount + ' new</p>' : '') + '</div>' +
+                        '<div class="stat-card card-title-deeds" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-file-contract text-lg"></i></div><p class="stat-label">Title Deeds</p><p class="stat-number">' + formatNumberWithCommas(totalProjects) + '</p>' + (unviewedCount > 0 ? '<p class="text-[9px] text-red-300 mt-1">' + unviewedCount + ' new</p>' : '') + '</div>' +
                         '<div class="stat-card card-pending" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-clock text-lg"></i></div><p class="stat-label">Pending</p><p class="stat-number">' + formatNumberWithCommas(pending) + '</p></div>' +
                         '<div class="stat-card card-progress" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-spinner text-lg"></i></div><p class="stat-label">In Progress</p><p class="stat-number">' + formatNumberWithCommas(inProgress) + '</p></div>' +
                         '<div class="stat-card card-completed" onclick="showSection(\'titledeeds\')"><div class="stat-icon"><i class="fas fa-check-circle text-lg"></i></div><p class="stat-label">Completed</p><p class="stat-number">' + formatNumberWithCommas(completed) + '</p></div>' +
                     '</div>' +
+                    // ============================================================
+                    // CARD 2: Daily Work Summary - MPYA
+                    // ============================================================
+                    '<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm border border-emerald-200" onclick="showSection(\'titledeeds\')" style="cursor:pointer;">' +
+                            '<div class="flex items-center gap-3"><div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center"><i class="fas fa-calendar-day text-emerald-600"></i></div><div><p class="text-[10px] text-gray-400">Daily Work Records</p><p class="text-xl font-bold text-emerald-600">' + totalDailyRecords + '</p></div></div>' +
+                        '</div>' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200" onclick="showSection(\'titledeeds\')" style="cursor:pointer;">' +
+                            '<div class="flex items-center gap-3"><div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><i class="fas fa-coins text-blue-600"></i></div><div><p class="text-[10px] text-gray-400">Total Budget</p><p class="text-xl font-bold text-blue-600">' + formatCurrency(totalDailyBudget) + '</p></div></div>' +
+                        '</div>' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm border border-orange-200" onclick="showSection(\'titledeeds\')" style="cursor:pointer;">' +
+                            '<div class="flex items-center gap-3"><div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center"><i class="fas fa-receipt text-orange-600"></i></div><div><p class="text-[10px] text-gray-400">Total Expenses</p><p class="text-xl font-bold text-orange-600">' + formatCurrency(totalDailySpent) + '</p></div></div>' +
+                        '</div>' +
+                        '<div class="bg-white rounded-xl p-4 shadow-sm border border-green-200" onclick="showSection(\'titledeeds\')" style="cursor:pointer;">' +
+                            '<div class="flex items-center gap-3"><div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><i class="fas fa-chart-simple text-green-600"></i></div><div><p class="text-[10px] text-gray-400">Remaining Budget</p><p class="text-xl font-bold" style="color:' + remainingColor + ';">' + formatCurrency(remainingDailyBudget) + '</p></div></div>' +
+                        '</div>' +
+                    '</div>' +
+                    // ============================================================
+                    // CARD 3: Charts
+                    // ============================================================
                     '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">' +
                         '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-chart-pie text-emerald-600 mr-2"></i>Title Deeds Status</h3><canvas id="statusChart" height="180"></canvas></div>' +
                         '<div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold mb-3 text-sm"><i class="fas fa-list-check text-purple-600 mr-2"></i>Request Summaries</h3>' +
@@ -1305,11 +1365,17 @@ function loadDashboard() {
                             '</div>' +
                         '</div>' +
                     '</div>' +
+                    // ============================================================
+                    // CARD 4: Quick Actions
+                    // ============================================================
                     '<div class="grid grid-cols-3 gap-3 mb-6">' +
                         '<button onclick="openAddProjectModal()" class="bg-emerald-600 text-white py-2 rounded-lg text-sm hover:bg-emerald-700"><i class="fas fa-plus-circle mr-2"></i>Add Title Deed</button>' +
                         '<button onclick="openRequestModal()" class="btn-primary"><i class="fas fa-plus-circle mr-2"></i>Add Request</button>' +
                         '<button onclick="openModal(\'addReportModal\')" class="bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"><i class="fas fa-chart-line mr-2"></i>Add Report</button>' +
                     '</div>' +
+                    // ============================================================
+                    // CARD 5: Recent Activity
+                    // ============================================================
                     '<div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-emerald-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">' + 
                     activityLogs.slice(0,5).map(function(l) { 
                         return '<div class="py-1 border-b flex justify-between"><span>' + escapeHtml(l.action) + '</span><span class="text-gray-400">' + new Date(l.created_at).toLocaleString() + '</span></div>';
@@ -1353,7 +1419,25 @@ function getProjectStatusText(s) {
 }
 
 function loadTitleDeeds() {
-    Promise.all([fetchProjects(), fetchTitleDeedDocuments(), getUnviewedNotificationsCount()]).then(function() {
+    Promise.all([fetchProjects(), fetchTitleDeedDocuments(), fetchDailyWork(), getUnviewedNotificationsCount()]).then(function() {
+        console.log('📋 loadTitleDeeds - projects:', projects.length);
+        console.log('📋 loadTitleDeeds - dailyworkData:', dailyworkData.length);
+        
+        // ============================================================
+        // HESABU DAILY WORK SUMMARIES KWA PROJECT CARDS
+        // ============================================================
+        var projectDailyCounts = {};
+        for (var i = 0; i < dailyworkData.length; i++) {
+            var w = dailyworkData[i];
+            var key = w.project_id || w.project_name;
+            if (key) {
+                var keyStr = String(key);
+                if (!projectDailyCounts[keyStr]) projectDailyCounts[keyStr] = 0;
+                projectDailyCounts[keyStr]++;
+            }
+        }
+        console.log('📋 Daily counts by project:', projectDailyCounts);
+        
         var html = '<div class="tab-container">' +
             '<button class="tab-button ' + (currentProjectTab === 'added' ? 'active' : '') + '" onclick="switchProjectTab(\'added\')"><i class="fas fa-plus-circle mr-1"></i> Added Title Deeds <span class="tab-count">' + projects.length + '</span></button>' +
             '<button class="tab-button ' + (currentProjectTab === 'uploaded' ? 'active' : '') + '" onclick="switchProjectTab(\'uploaded\')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">' + titleDeedDocuments.length + '</span></button>' +
@@ -1390,16 +1474,36 @@ function loadTitleDeeds() {
             }
             
             var gridHtml = '';
-            for (var i = 0; i < projects.length; i++) {
-                var p = projects[i];
+            for (var j = 0; j < projects.length; j++) {
+                var p = projects[j];
                 var isNew = p.sent_from_dept && 
                            p.sent_from_dept != DEPARTMENT_ID && 
                            p.sent_to_dept === DEPARTMENT_ID && 
-                           (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null);
+                           (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
+                           viewedProjectIds.indexOf(p.id) === -1;
                 var imageUrl = getFullImageUrl(p.image);
                 
+                // ============================================================
+                // HESABU DAILY WORK COUNT KWA PROJECT HII
+                // ============================================================
+                var dailyCount = dailyworkData.filter(function(w) {
+                    if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
+                    if (w.project_name && w.project_name === p.name) return true;
+                    return false;
+                }).length;
+                
+                var dailyBadge = '';
+                if (dailyCount > 0) {
+                    dailyBadge = '<span class="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full ml-2"><i class="fas fa-calendar-day mr-1"></i>' + dailyCount + ' records</span>';
+                }
+                
+                var sentFrom = '';
+                if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+                    sentFrom = '<span class="text-[9px] text-purple-600 ml-2"><i class="fas fa-paper-plane mr-1"></i>From ' + escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown') + '</span>';
+                }
+                
                 gridHtml += '<div class="project-card" id="proj-card-' + p.id + '" onclick="viewTitleDeed(' + p.id + ')">' +
-                    '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + '</p></div>' +
+                    '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + ' ' + dailyBadge + sentFrom + '</p></div>' +
                     (isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : '') +
                     '<div class="project-image-wrapper">' +
                         (imageUrl ? '<img src="' + imageUrl + '?t=' + Date.now() + '" class="project-image" onclick="event.stopPropagation(); showFullImage(\'' + imageUrl + '\')" onerror="this.style.display=\'none\'; this.parentElement.querySelector(\'.no-image\').style.display=\'flex\';">' : '') +
@@ -1424,15 +1528,15 @@ function loadTitleDeeds() {
             document.getElementById("projectsGrid").innerHTML = gridHtml;
             
         } else {
-            // UPLOADED DOCUMENTS
+            // UPLOADED DOCUMENTS - code unchanged
             if (titleDeedDocuments.length === 0) {
                 document.getElementById("uploadedDocsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No uploaded documents. Click "Upload Document" to add one.</div>';
                 return;
             }
             
             var docsHtml = '';
-            for (var j = 0; j < titleDeedDocuments.length; j++) {
-                var doc = titleDeedDocuments[j];
+            for (var k = 0; k < titleDeedDocuments.length; k++) {
+                var doc = titleDeedDocuments[k];
                 var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
                 var fileIcon = 'fa-file-alt';
                 if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
@@ -1458,7 +1562,6 @@ function loadTitleDeeds() {
         updateProjectBadge();
     });
 }
-
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadTitleDeeds();
@@ -1753,74 +1856,159 @@ function sendTitleDeedToDept(projectId, toDeptId) {
 // ==================== VIEW TITLE DEED WITH NOTIFICATION ====================
 function viewTitleDeed(id) {
     var p = projects.find(function(proj) { return proj.id === id; });
-    if (!p) return;
+    if (!p) {
+        showToast('Title deed not found', true);
+        return;
+    }
+    
+    console.log('📋 Viewing title deed:', p.name, 'ID:', p.id);
+    console.log('📋 Project sent_from_dept:', p.sent_from_dept);
+    console.log('📋 Project is_viewed_by_department:', p.is_viewed_by_department);
     
     if (p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && 
         (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null)) {
         markProjectAsViewed(id);
+        p.is_viewed_by_department = 1;
+        p._is_unviewed = false;
+        // Remove NEW badge
+        var card = document.getElementById('proj-card-' + id);
+        if (card) {
+            var badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+        }
     }
     
     currentProjectId = id;
+    
+    // ============================================================
+    // LOAD DAILY WORK KWA PROJECT HII
+    // ============================================================
     fetchDailyWork().then(function() {
-        var imageUrl = getFullImageUrl(p.image);
-        var imageHtml = imageUrl ? '<img src="' + imageUrl + '?t=' + Date.now() + '" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage(\'' + imageUrl + '\')" onerror="this.parentElement.innerHTML=\'<div class=\'w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-sm ml-2\'>Image failed to load</p></div>\'">' : '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
-        
-        var deptOptions = '';
-        allDepartments.forEach(function(d) {
-            deptOptions += '<a onclick="sendTitleDeedToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        });
-        
-        var sentInfo = '';
-        if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
-            var fromDept = departmentNames[p.sent_from_dept] || 'Unknown';
-            sentInfo = '<p><strong>Received From:</strong> ' + escapeHtml(fromDept) + ' <span class="text-[9px] text-emerald-600">(Sent ' + formatDateTime(p.last_sent_at || p.created_at) + ')</span></p>';
-            if (p.sent_count && p.sent_count > 1) {
-                sentInfo += '<p><strong>Times Sent:</strong> ' + p.sent_count + ' times</p>';
-            }
-        }
-        
-        document.getElementById('viewProjectContent').innerHTML = imageHtml +
-            '<div class="space-y-2">' +
-                '<p><strong>Reference:</strong> ' + escapeHtml(p.name) + '</p>' +
-                '<p><strong>Owner:</strong> ' + escapeHtml(p.client_name || 'N/A') + '</p>' +
-                '<p><strong>Amount:</strong> <span class="text-green-600 font-bold">' + formatCurrency(p.amount) + '</span></p>' +
-                '<p><strong>Status:</strong> <span class="px-2 py-0.5 rounded-full text-xs ' + getProjectStatusClass(p.status) + '">' + getProjectStatusText(p.status) + '</span></p>' +
-                '<p><strong>Progress:</strong> ' + p.progress + '%</p>' +
-                '<p><strong>Location:</strong> ' + escapeHtml(p.location || 'N/A') + '</p>' +
-                '<p><strong>Start:</strong> ' + (p.start_date || 'N/A') + '</p>' +
-                '<p><strong>End:</strong> ' + (p.end_date || 'N/A') + '</p>' +
-                '<p><strong>Desc:</strong> ' + escapeHtml(p.description || '') + '</p>' +
-                sentInfo +
-            '</div>';
-        
+        console.log('📋 Daily work loaded, calling loadDailyWorkForProject...');
         loadDailyWorkForProject(id);
         
-        var forwardLabel = (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) ? ' ⤴️ Forward' : '';
+        // Show daily work table by default
+        var container = document.getElementById('dailyWorkListContainer');
+        var summary = document.getElementById('dailyWorkSummary');
+        var addBtn = document.getElementById('addDailyWorkBtn');
+        var excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+        var pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+        var toggleBtn = document.getElementById('toggleDailyWorkBtn');
         
-        document.getElementById('viewProjectButtons').innerHTML = 
-            '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success"><i class="fas fa-file-excel mr-1"></i>Excel</button>' +
-            '<button onclick="exportSingleProjectPDF(' + p.id + ')" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button>' +
-            (imageUrl ? '<button onclick="showFullImage(\'' + imageUrl + '\')" class="btn-primary"><i class="fas fa-image mr-1"></i>Image</button>' : '') +
-            '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projectSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane mr-1"></i>Send' + forwardLabel + '</button><div id="projectSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-        
-        openModal('viewProjectModal');
+        if (container) {
+            container.style.display = 'block';
+        }
+        if (summary) {
+            summary.style.display = 'grid';
+        }
+        if (addBtn) {
+            addBtn.style.display = 'inline-flex';
+        }
+        if (excelBtn) {
+            excelBtn.style.display = 'inline-flex';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'inline-flex';
+        }
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        }
     });
+    
+    var imageUrl = getFullImageUrl(p.image);
+    var imageHtml = imageUrl ? '<img src="' + imageUrl + '?t=' + Date.now() + '" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage(\'' + imageUrl + '\')" onerror="this.parentElement.innerHTML=\'<div class=\'w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-sm ml-2\'>Image failed to load</p></div>\'">' : '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
+    
+    var deptOptions = '';
+    allDepartments.forEach(function(d) {
+        deptOptions += '<a onclick="sendTitleDeedToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+    });
+    
+    var sentInfo = '';
+    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+        var fromDept = departmentNames[p.sent_from_dept] || 'Unknown';
+        sentInfo = '<p><strong>Received From:</strong> ' + escapeHtml(fromDept) + ' <span class="text-[9px] text-emerald-600">(Sent ' + formatDateTime(p.last_sent_at || p.created_at) + ')</span></p>';
+        if (p.sent_count && p.sent_count > 1) {
+            sentInfo += '<p><strong>Times Sent:</strong> ' + p.sent_count + ' times</p>';
+        }
+    }
+    
+    document.getElementById('viewProjectContent').innerHTML = imageHtml +
+        '<div class="space-y-2">' +
+            '<p><strong>Reference:</strong> ' + escapeHtml(p.name) + '</p>' +
+            '<p><strong>Owner:</strong> ' + escapeHtml(p.client_name || 'N/A') + '</p>' +
+            '<p><strong>Amount:</strong> <span class="text-green-600 font-bold">' + formatCurrency(p.amount) + '</span></p>' +
+            '<p><strong>Status:</strong> <span class="px-2 py-0.5 rounded-full text-xs ' + getProjectStatusClass(p.status) + '">' + getProjectStatusText(p.status) + '</span></p>' +
+            '<p><strong>Progress:</strong> ' + p.progress + '%</p>' +
+            '<p><strong>Location:</strong> ' + escapeHtml(p.location || 'N/A') + '</p>' +
+            '<p><strong>Start:</strong> ' + (p.start_date || 'N/A') + '</p>' +
+            '<p><strong>End:</strong> ' + (p.end_date || 'N/A') + '</p>' +
+            '<p><strong>Desc:</strong> ' + escapeHtml(p.description || '') + '</p>' +
+            sentInfo +
+        '</div>';
+    
+    var forwardLabel = (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) ? ' ⤴️ Forward' : '';
+    
+    document.getElementById('viewProjectButtons').innerHTML = 
+        '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success"><i class="fas fa-file-excel mr-1"></i>Excel</button>' +
+        '<button onclick="exportSingleProjectPDF(' + p.id + ')" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button>' +
+        (imageUrl ? '<button onclick="showFullImage(\'' + imageUrl + '\')" class="btn-primary"><i class="fas fa-image mr-1"></i>Image</button>' : '') +
+        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projectSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane mr-1"></i>Send' + forwardLabel + '</button><div id="projectSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    
+    openModal('viewProjectModal');
 }
-
-// ==================== DAILY WORK FUNCTIONS ====================
 function loadDailyWorkForProject(projectId) {
-    var projectDailyWork = dailyworkData.filter(function(w) { return w.project_id == projectId; });
+    var project = projects.find(function(p) { return p.id === projectId; });
+    if (!project) {
+        console.log('❌ Project not found:', projectId);
+        return;
+    }
+    
+    console.log('📋 Loading daily work for project:', project.name, 'ID:', projectId);
+    console.log('📋 All dailyworkData:', dailyworkData.length, 'records');
+    
+    // ============================================================
+    // TAFUTA DAILY WORK KWA PROJECT HII - KWA PROJECT_ID AU PROJECT_NAME
+    // ============================================================
+    var projectDailyWork = dailyworkData.filter(function(w) {
+        // Tafuta kwa project_id
+        if (w.project_id && parseInt(w.project_id) === parseInt(projectId)) {
+            return true;
+        }
+        // Tafuta kwa project_name
+        if (w.project_name && w.project_name === project.name) {
+            return true;
+        }
+        return false;
+    });
+    
+    console.log('📋 Found', projectDailyWork.length, 'daily work records for project:', project.name);
+    
+    // ============================================================
+    // HESABU TOTALS KWA AJILI YA SUMMARY
+    // ============================================================
+    var totalBudget = 0, totalExpenses = 0;
+    for (var i = 0; i < projectDailyWork.length; i++) {
+        var w = projectDailyWork[i];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+    }
+    console.log('📊 Total Budget:', totalBudget, 'Total Expenses:', totalExpenses);
+    
     var tbody = document.getElementById('dailyWorkTableBody');
-    if (!tbody) return;
+    if (!tbody) {
+        console.log('❌ dailyWorkTableBody not found in DOM');
+        return;
+    }
     
     if (projectDailyWork.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records for this project</td></tr>';
+        updateDailyWorkSummary();
         return;
     }
     
     var html = '';
-    for (var i = 0; i < projectDailyWork.length; i++) {
-        var w = projectDailyWork[i];
+    for (var j = 0; j < projectDailyWork.length; j++) {
+        var w = projectDailyWork[j];
         var budget = parseFloat(w.budget) || 0;
         var amountSpent = parseFloat(w.amount) || 0;
         
@@ -1861,39 +2049,73 @@ function loadDailyWorkForProject(projectId) {
         '</tr>';
     }
     tbody.innerHTML = html;
+    
+    // ============================================================
+    // UPDATE SUMMARY BAADA YA KUWEKA DATA
+    // ============================================================
     updateDailyWorkSummary();
 }
-
 function updateDailyWorkSummary() {
     var project = projects.find(function(p) { return p.id === currentProjectId; });
-    if (!project) return;
+    if (!project) {
+        console.log('⚠️ Project not found for summary:', currentProjectId);
+        return;
+    }
     
-    var projectWork = dailyworkData.filter(function(w) { return w.project_id == currentProjectId; });
-    var totalBudget = 0;
-    var totalAmountSpent = 0;
+    console.log('📊 Updating summary for project:', project.name, 'ID:', project.id);
     
+    // ============================================================
+    // HESABU DAILY WORK KWA PROJECT HII
+    // ============================================================
+    var projectWork = dailyworkData.filter(function(w) {
+        if (w.project_id && parseInt(w.project_id) === parseInt(currentProjectId)) {
+            return true;
+        }
+        if (w.project_name && w.project_name === project.name) {
+            return true;
+        }
+        return false;
+    });
+    
+    console.log('📊 Found', projectWork.length, 'records for summary');
+    
+    var totalBudget = 0, totalExpenses = 0;
     for (var i = 0; i < projectWork.length; i++) {
         var w = projectWork[i];
         totalBudget += parseFloat(w.budget) || 0;
-        totalAmountSpent += parseFloat(w.amount) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
     }
     
-    var remainingBudget = totalBudget - totalAmountSpent;
+    var remainingBudget = totalBudget - totalExpenses;
     
+    console.log('📊 Total Budget:', totalBudget, 'Total Expenses:', totalExpenses, 'Remaining:', remainingBudget);
+    
+    // ============================================================
+    // UPDATE DOM ELEMENTS
+    // ============================================================
     var totalBudgetSpan = document.getElementById('totalBudget');
     var totalAmountSpan = document.getElementById('totalAmount');
     var remainingSpan = document.getElementById('remainingAmount');
     
-    if (totalBudgetSpan) totalBudgetSpan.innerHTML = formatCurrency(totalBudget);
-    if (totalAmountSpan) totalAmountSpan.innerHTML = formatCurrency(totalAmountSpent);
+    if (totalBudgetSpan) {
+        totalBudgetSpan.innerHTML = formatCurrency(totalBudget);
+        totalBudgetSpan.style.color = '#059669';
+    }
+    if (totalAmountSpan) {
+        totalAmountSpan.innerHTML = formatCurrency(totalExpenses);
+        totalAmountSpan.style.color = '#ea580c';
+    }
     if (remainingSpan) {
         remainingSpan.innerHTML = formatCurrency(remainingBudget);
-        if (remainingBudget < 0) remainingSpan.style.color = '#ef4444';
-        else if (remainingBudget === 0) remainingSpan.style.color = '#f59e0b';
-        else remainingSpan.style.color = '#10b981';
+        if (remainingBudget < 0) {
+            remainingSpan.style.color = '#ef4444';
+        } else if (remainingBudget === 0) {
+            remainingSpan.style.color = '#f59e0b';
+        } else {
+            remainingSpan.style.color = '#10b981';
+        }
     }
 }
-
 function toggleDailyWorkTable() {
     var container = document.getElementById('dailyWorkListContainer');
     var summary = document.getElementById('dailyWorkSummary');
