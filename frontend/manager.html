@@ -967,18 +967,55 @@ function addToRecycleBin(itemId, itemType, itemName) {
     });
 }
 
+// ============================================================
+// RESTORE FROM RECYCLE BIN - WITH DEBUG
+// ============================================================
+
 function restoreFromRecycleBin(recycleId) {
-    return apiCall('restore_from_recycle_bin.php', 'POST', { recycle_id: recycleId }).then(function(res) {
-        if (res.success) {
-            showToast('Item restored successfully');
+    if (!recycleId) {
+        showToast('Recycle ID is required', true);
+        return;
+    }
+    
+    // Show loading
+    showToast('⏳ Restoring item...', false);
+    
+    apiCall('restore_from_recycle_bin.php', 'POST', { 
+        recycle_id: recycleId 
+    })
+    .then(function(res) {
+        console.log('Restore response:', res);
+        
+        if (res && res.success) {
+            showToast('✅ ' + (res.message || 'Item restored successfully'), false);
+            
+            // Reload all data
             loadRecycleBinFromDB();
             loadSettings();
             loadProjects();
             loadRequests();
             loadReports();
+            loadDashboard();
+            
+            // Close any modals
+            var modal = document.querySelector('.modal[style*="display: flex"]');
+            if (modal) {
+                closeModal(modal.id);
+            }
+            
         } else {
-            showToast(res.message || 'Failed to restore', true);
+            // Show detailed error
+            var errorMsg = res?.message || 'Failed to restore item';
+            if (res?.debug) {
+                errorMsg += '\nDebug: ' + JSON.stringify(res.debug);
+            }
+            showToast('❌ ' + errorMsg, true);
+            console.error('Restore error:', res);
         }
+    })
+    .catch(function(e) {
+        console.error('Restore API error:', e);
+        showToast('❌ Network error: ' + e.message, true);
     });
 }
 

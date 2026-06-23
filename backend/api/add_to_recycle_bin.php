@@ -1,19 +1,18 @@
 <?php
-error_reporting(0);
-ini_set('display_errors', 0);
+// add_to_recycle_bin.php - Add item to recycle bin
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Access-Control-Allow-Credentials: true');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -23,100 +22,105 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'DB Connection Error: ' . $e->getMessage()]);
     exit;
 }
 
-// Get input
-$input = file_get_contents('php://input');
-if (empty($input)) {
-    echo json_encode(['success' => false, 'message' => 'No input data received']);
+$data = json_decode(file_get_contents('php://input'), true);
+
+if (!$data || empty($data['item_id'])) {
+    echo json_encode(['success' => false, 'message' => 'Item ID required']);
     exit;
 }
 
-$data = json_decode($input, true);
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'Invalid JSON input']);
-    exit;
+$itemId = (int)$data['item_id'];
+$itemType = isset($data['item_type']) ? trim($data['item_type']) : '';
+$itemName = isset($data['item_name']) ? trim($data['item_name']) : 'Unknown';
+$deletedByDepartment = isset($data['deleted_by_department_id']) ? (int)$data['deleted_by_department_id'] : null;
+$deletedByAdmin = isset($data['deleted_by_admin']) ? (int)$data['deleted_by_admin'] : 0;
+
+// ============================================================
+// VALIDATE ITEM TYPE - IWE NA DEFAULT VALUE
+// ============================================================
+$validTypes = [
+    'project', 'sent_project',
+    'project_document', 'sent_project_document',
+    'budget_request',
+    'report', 'sent_report',
+    'uploaded_report', 'sent_uploaded_report',
+    'daily_work', 'employee',
+    'visitor', 'campaign', 'campaign_document',
+    'transaction'
+];
+
+// ============================================================
+// IF item_type IS EMPTY, TRY TO DETECT FROM CONTEXT
+// ============================================================
+if (empty($itemType)) {
+    // Try to detect from item_name or other clues
+    if (strpos($itemName, 'sent_report') !== false || strpos($itemName, 'Sent Report') !== false) {
+        $itemType = 'sent_report';
+    } elseif (strpos($itemName, 'sent_project') !== false || strpos($itemName, 'Sent Project') !== false) {
+        $itemType = 'sent_project';
+    } elseif (strpos($itemName, 'sent_uploaded_report') !== false) {
+        $itemType = 'sent_uploaded_report';
+    } else {
+        // Default to 'report'
+        $itemType = 'report';
+    }
 }
 
-// Get parameters
-$item_id = isset($data['item_id']) ? intval($data['item_id']) : 0;
-$item_type = isset($data['item_type']) ? trim($data['item_type']) : '';
-$item_name = isset($data['item_name']) ? trim($data['item_name']) : 'Item';
-$deleted_by_department_id = isset($data['deleted_by_department_id']) ? intval($data['deleted_by_department_id']) : 0;
-$deleted_by_admin = isset($data['deleted_by_admin']) ? intval($data['deleted_by_admin']) : 0;
-$deleted_by = isset($data['deleted_by']) ? trim($data['deleted_by']) : 'System';
-
-if ($item_id == 0 || empty($item_type)) {
-    echo json_encode(['success' => false, 'message' => 'Item ID and type required']);
+// Make sure item_type is valid
+if (!in_array($itemType, $validTypes)) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Invalid item type: ' . $itemType,
+        'valid_types' => $validTypes,
+        'received_data' => $data
+    ]);
     exit;
 }
 
 try {
-    // ============================================================
-    // CHECK IF ITEM ALREADY EXISTS IN RECYCLE BIN
-    // ============================================================
+    // Check if already in recycle bin
     $checkStmt = $pdo->prepare("
         SELECT id FROM recycle_bin 
-        WHERE item_id = ? AND item_type = ? AND is_restored = 0
-        LIMIT 1
+        WHERE item_id = ? AND item_type = ?
     ");
-    $checkStmt->execute([$item_id, $item_type]);
+    $checkStmt->execute([$itemId, $itemType]);
     
-    if ($checkStmt->rowCount() > 0) {
-        // Item already in recycle bin
+    if ($checkStmt->fetch()) {
         echo json_encode([
             'success' => true,
             'message' => 'Item already in recycle bin',
-            'duplicate' => true
+            'already_exists' => true,
+            'item_type' => $itemType
         ]);
         exit;
     }
-
-    // ============================================================
-    // INSERT INTO RECYCLE BIN
-    // ============================================================
+    
+    // Insert into recycle bin
     $stmt = $pdo->prepare("
-        INSERT INTO recycle_bin (
-            item_id,
-            item_type,
-            item_name,
-            deleted_by_department_id,
-            deleted_by_admin,
-            deleted_by,
-            deleted_at,
-            is_restored
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, NOW(), 0
-        )
+        INSERT INTO recycle_bin 
+        (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, created_at) 
+        VALUES (?, ?, ?, ?, ?, NOW())
     ");
+    $stmt->execute([$itemId, $itemType, $itemName, $deletedByDepartment, $deletedByAdmin]);
     
-    $stmt->execute([
-        $item_id,
-        $item_type,
-        $item_name,
-        $deleted_by_department_id,
-        $deleted_by_admin,
-        $deleted_by
-    ]);
-    
-    $recycle_id = $pdo->lastInsertId();
-
     echo json_encode([
         'success' => true,
         'message' => 'Item added to recycle bin',
-        'data' => [
-            'recycle_id' => $recycle_id,
-            'item_id' => $item_id,
-            'item_type' => $item_type,
-            'item_name' => $item_name
-        ]
+        'recycle_id' => $pdo->lastInsertId(),
+        'item_type' => $itemType,
+        'item_id' => $itemId,
+        'item_name' => $itemName
     ]);
-
+    
 } catch(PDOException $e) {
-    error_log("Add to recycle bin error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
-    exit;
+    error_log('Add to recycle bin error: ' . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database error: ' . $e->getMessage()
+    ]);
 }
 ?>

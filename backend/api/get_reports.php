@@ -1,5 +1,5 @@
 <?php
-// get_reports.php - Fetch ADDED REPORTS + SENT ADDED REPORTS + SENT REPORTS
+// get_reports.php - Fetch ALL reports (added + sent)
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -18,20 +18,10 @@ $dbname = 'geotraverse_erp';
 $username = 'root';
 $password = '';
 
-// Department names cache
 $departmentNames = [
-    1 => 'Super Admin',
-    2 => 'Finance',
-    3 => 'Sales & Marketing',
-    4 => 'Manager',
-    5 => 'Secretary',
-    6 => 'Bricks & Timber',
-    7 => 'Aluminium',
-    8 => 'Town Planning',
-    9 => 'Architectural',
-    10 => 'Survey',
-    11 => 'Construction',
-    12 => 'Hatimiliki'
+    1 => 'Super Admin', 2 => 'Finance', 3 => 'Sales & Marketing', 4 => 'Manager',
+    5 => 'Secretary', 6 => 'Bricks & Timber', 7 => 'Aluminium', 8 => 'Town Planning',
+    9 => 'Architectural', 10 => 'Survey', 11 => 'Construction', 12 => 'Hatimiliki'
 ];
 
 try {
@@ -51,10 +41,10 @@ if (!$departmentId) {
 
 try {
     $reports = [];
-    $addedReportIds = [];
+    $addedIds = [];
     
     // ============================================================
-    // 1. GET ADDED REPORTS (department_id = ?)
+    // 1. GET ADDED REPORTS (reports table)
     // ============================================================
     $stmt = $pdo->prepare("
         SELECT 
@@ -73,7 +63,7 @@ try {
     $addedReports = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     foreach ($addedReports as $r) {
-        $addedReportIds[] = $r['id'];
+        $addedIds[] = $r['id'];
         
         $sentFromDept = $r['sent_from_department'] ?? null;
         $isSentReport = ($sentFromDept && $sentFromDept > 0 && $sentFromDept != $departmentId);
@@ -101,7 +91,6 @@ try {
         $r['sent_from_name'] = $senderName;
         $r['source_type'] = 'added';
         $r['report_type'] = 'added';
-        $r['is_sent_record'] = false;
         
         $reports[] = $r;
     }
@@ -126,10 +115,8 @@ try {
     $sentToReports = $stmt2->fetchAll(PDO::FETCH_ASSOC);
     
     foreach ($sentToReports as $r) {
-        if (in_array($r['id'], $addedReportIds)) {
-            continue;
-        }
-        $addedReportIds[] = $r['id'];
+        if (in_array($r['id'], $addedIds)) continue;
+        $addedIds[] = $r['id'];
         
         $sentFromDept = $r['sent_from_department'] ?? null;
         $isSentReport = ($sentFromDept && $sentFromDept > 0 && $sentFromDept != $departmentId);
@@ -157,14 +144,12 @@ try {
         $r['sent_from_name'] = $senderName;
         $r['source_type'] = 'added';
         $r['report_type'] = 'added';
-        $r['is_sent_record'] = false;
         
         $reports[] = $r;
     }
     
     // ============================================================
-    // 3. GET SENT REPORTS (FROM sent_reports TABLE)
-    //    ✅ SASA INAANGAZIA deleted_by_department na deleted_by_admin
+    // 3. GET SENT REPORTS (sent_reports table) - ✅ ADDED
     // ============================================================
     $sentStmt = $pdo->prepare("
         SELECT 
@@ -186,7 +171,13 @@ try {
         $reportData = json_decode($r['report_data'] ?? '{}', true);
         if (!is_array($reportData)) $reportData = [];
         
-        // Check if this sent report already exists
+        $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null || $r['is_viewed'] === '0');
+        
+        $senderName = $r['from_department_name'] ?? '';
+        if (!$senderName && isset($r['from_department_id']) && isset($departmentNames[$r['from_department_id']])) {
+            $senderName = $departmentNames[$r['from_department_id']];
+        }
+        
         $exists = false;
         foreach ($reports as $existing) {
             if (isset($existing['id']) && $existing['id'] == $r['id']) {
@@ -200,13 +191,6 @@ try {
         }
         
         if (!$exists) {
-            $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null || $r['is_viewed'] === '0');
-            
-            $senderName = $r['from_department_name'] ?? '';
-            if (!$senderName && isset($r['from_department_id']) && isset($departmentNames[$r['from_department_id']])) {
-                $senderName = $departmentNames[$r['from_department_id']];
-            }
-            
             $sentReport = [
                 'id' => $r['id'],
                 'original_report_id' => $r['original_report_id'] ?? $r['report_id'] ?? null,
@@ -241,9 +225,7 @@ try {
                 'viewed_at' => $r['viewed_at'] ?? null,
                 'created_by' => $r['sent_by'] ?? $reportData['created_by'] ?? 'System',
                 'original_from_department_id' => $r['original_from_department_id'] ?? null,
-                'original_from_department_name' => $r['original_from_department_name'] ?? null,
-                'is_sent_record' => true,
-                'report_data' => $reportData
+                'original_from_department_name' => $r['original_from_department_name'] ?? null
             ];
             
             $reports[] = $sentReport;
@@ -266,47 +248,23 @@ try {
     });
     
     // ============================================================
-    // 5. COUNTS
-    // ============================================================
-    $unviewedCount = 0;
-    $totalCount = count($reports);
-    $addedCount = 0;
-    $sentCount = 0;
-    
-    foreach ($reports as $r) {
-        if (isset($r['is_unviewed']) && $r['is_unviewed']) {
-            $unviewedCount++;
-        }
-        
-        $type = $r['source_type'] ?? '';
-        if ($type === 'added') {
-            $addedCount++;
-        } elseif ($type === 'sent') {
-            $sentCount++;
-        }
-    }
-    
-    // ============================================================
-    // 6. RETURN RESPONSE
+    // 5. RETURN RESPONSE
     // ============================================================
     echo json_encode([
         'success' => true,
         'data' => $reports,
-        'total' => $totalCount,
-        'added_count' => $addedCount,
-        'sent_count' => $sentCount,
-        'unviewed_count' => $unviewedCount,
-        'department_id' => $departmentId,
-        'debug' => [
-            'added_reports_count' => count($addedReports),
-            'sent_to_reports_count' => count($sentToReports),
-            'sent_reports_count' => count($sentReports)
-        ]
+        'total' => count($reports),
+        'added_count' => count($addedReports) + count($sentToReports),
+        'sent_count' => count($sentReports),
+        'unviewed_count' => array_reduce($reports, function($carry, $r) {
+            return $carry + (isset($r['is_unviewed']) && $r['is_unviewed'] ? 1 : 0);
+        }, 0),
+        'department_id' => $departmentId
     ]);
     
 } catch(PDOException $e) {
     echo json_encode([
-        'success' => false, 
+        'success' => false,
         'message' => 'Query error: ' . $e->getMessage()
     ]);
 }

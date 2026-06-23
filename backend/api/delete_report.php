@@ -1,8 +1,6 @@
 <?php
-// delete_report.php - Delete both Added Reports and Sent Added Reports
-// Works for: 
-//   1. Added reports (reports table)
-//   2. Sent added reports (reports table where sent_to_department = ?)
+// delete_report.php - Delete Added Reports, Sent Added Reports, and Sent Reports
+// Supports: reports table + sent_reports table
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -44,33 +42,30 @@ $deletedByAdmin = isset($data['deleted_by_admin']) ? (int)$data['deleted_by_admi
 
 try {
     // ============================================================
-    // CHECK IF REPORT EXISTS IN reports TABLE
+    // 1. CHECK IF REPORT EXISTS IN reports TABLE (Added / Sent Added)
     // ============================================================
     $checkStmt = $pdo->prepare("
         SELECT id, title, department_id, sent_from_department, sent_to_department 
         FROM reports 
         WHERE id = ?
+        AND (is_deleted = 0 OR is_deleted IS NULL)
+        AND (deleted_by_department = 0 OR deleted_by_department IS NULL)
+        AND (deleted_by_admin = 0 OR deleted_by_admin IS NULL)
     ");
     $checkStmt->execute([$reportId]);
     $report = $checkStmt->fetch(PDO::FETCH_ASSOC);
     
-    // ============================================================
-    // CASE 1: Report exists in reports table (Added Report or Sent Added Report)
-    // ============================================================
     if ($report) {
-        // Check if this report belongs to this department OR was sent to this department
+        // Check permission
         $isOwner = ($report['department_id'] == $departmentId);
         $isRecipient = ($report['sent_to_department'] == $departmentId);
         
         if (!$isOwner && !$isRecipient && $deletedByAdmin == 0) {
-            echo json_encode([
-                'success' => false, 
-                'message' => 'You do not have permission to delete this report'
-            ]);
+            echo json_encode(['success' => false, 'message' => 'Permission denied']);
             exit;
         }
         
-        // Update report as deleted
+        // Soft delete in reports table
         $stmt = $pdo->prepare("
             UPDATE reports 
             SET 
@@ -80,7 +75,6 @@ try {
                 deleted_at = NOW()
             WHERE id = :id
         ");
-        
         $stmt->execute([
             'dept_deleted' => $deletedByDepartment,
             'admin_deleted' => $deletedByAdmin,
@@ -88,39 +82,22 @@ try {
         ]);
         
         // Add to recycle bin
-        $checkBinStmt = $pdo->prepare("
-            SELECT id FROM recycle_bin 
-            WHERE item_id = ? AND item_type = 'report'
-        ");
-        $checkBinStmt->execute([$reportId]);
+        $itemType = 'report';
+        $itemName = $report['title'];
         
-        if (!$checkBinStmt->fetch()) {
-            $stmt2 = $pdo->prepare("
-                INSERT INTO recycle_bin 
-                (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin) 
-                VALUES (?, 'report', ?, ?, ?)
-            ");
-            $stmt2->execute([
-                $reportId,
-                $report['title'],
-                $deletedByDepartment > 0 ? $deletedByDepartment : null,
-                $deletedByAdmin
-            ]);
-        }
+        addToRecycleBin($pdo, $reportId, $itemType, $itemName, $deletedByDepartment, $deletedByAdmin);
         
         echo json_encode([
             'success' => true,
             'message' => 'Report moved to recycle bin',
-            'report_id' => $reportId,
             'source' => 'reports_table',
-            'is_owner' => $isOwner,
-            'is_recipient' => $isRecipient
+            'item_type' => $itemType
         ]);
         exit;
     }
     
     // ============================================================
-    // CASE 2: Report not in reports table - Check sent_reports table
+    // 2. CHECK IF REPORT EXISTS IN sent_reports TABLE
     // ============================================================
     $checkSentStmt = $pdo->prepare("
         SELECT 
@@ -132,25 +109,24 @@ try {
         FROM sent_reports 
         WHERE id = ?
         AND (is_deleted = 0 OR is_deleted IS NULL)
+        AND (deleted_by_department = 0 OR deleted_by_department IS NULL)
+        AND (deleted_by_admin = 0 OR deleted_by_admin IS NULL)
     ");
     $checkSentStmt->execute([$reportId]);
     $sentReport = $checkSentStmt->fetch(PDO::FETCH_ASSOC);
     
     if ($sentReport) {
-        // Check if this sent report was sent to this department
+        // Check permission - recipient or sender can delete
         $isRecipient = ($sentReport['to_department_id'] == $departmentId);
         $isSender = ($sentReport['from_department_id'] == $departmentId);
         
         if (!$isRecipient && !$isSender && $deletedByAdmin == 0) {
-            echo json_encode([
-                'success' => false, 
-                'message' => 'You do not have permission to delete this sent report'
-            ]);
+            echo json_encode(['success' => false, 'message' => 'Permission denied']);
             exit;
         }
         
         // ============================================================
-        // UPDATE sent_reports - Soft delete
+        // SOFT DELETE IN sent_reports TABLE
         // ============================================================
         $stmt = $pdo->prepare("
             UPDATE sent_reports 
@@ -161,58 +137,101 @@ try {
                 deleted_at = NOW()
             WHERE id = :id
         ");
-        
         $stmt->execute([
             'dept_deleted' => $deletedByDepartment,
             'admin_deleted' => $deletedByAdmin,
             'id' => $reportId
         ]);
         
-        // Add to recycle bin
-        $checkBinStmt = $pdo->prepare("
-            SELECT id FROM recycle_bin 
-            WHERE item_id = ? AND item_type = 'sent_report'
-        ");
-        $checkBinStmt->execute([$reportId]);
+        // ============================================================
+        // ADD TO RECYCLE BIN - USE CORRECT ITEM_TYPE!
+        // ============================================================
+        $itemType = 'sent_report';  // <-- HII NI MUHIMU!
+        $itemName = $sentReport['report_title'] ?? 'Sent Report';
         
-        if (!$checkBinStmt->fetch()) {
-            $stmt2 = $pdo->prepare("
-                INSERT INTO recycle_bin 
-                (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin) 
-                VALUES (?, 'sent_report', ?, ?, ?)
-            ");
-            $stmt2->execute([
-                $reportId,
-                $sentReport['report_title'] ?? 'Sent Report',
-                $deletedByDepartment > 0 ? $deletedByDepartment : null,
-                $deletedByAdmin
-            ]);
-        }
+        addToRecycleBin($pdo, $reportId, $itemType, $itemName, $deletedByDepartment, $deletedByAdmin);
         
         echo json_encode([
             'success' => true,
             'message' => 'Sent report moved to recycle bin',
-            'report_id' => $reportId,
             'source' => 'sent_reports_table',
-            'is_recipient' => $isRecipient,
-            'is_sender' => $isSender
+            'item_type' => $itemType,
+            'item_id' => $reportId,
+            'item_name' => $itemName
         ]);
         exit;
     }
     
     // ============================================================
-    // CASE 3: Report not found anywhere
+    // 3. REPORT NOT FOUND ANYWHERE
     // ============================================================
-    echo json_encode([
-        'success' => false,
-        'message' => 'Report not found'
-    ]);
+    echo json_encode(['success' => false, 'message' => 'Report not found']);
     
 } catch(PDOException $e) {
     error_log('Delete report error: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Database error: ' . $e->getMessage()
-    ]);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+}
+
+// ============================================================
+// HELPER FUNCTION: Add to recycle bin
+// ============================================================
+function addToRecycleBin($pdo, $itemId, $itemType, $itemName, $deletedByDepartment, $deletedByAdmin) {
+    try {
+        // ============================================================
+        // VALIDATE item_type - HAKIKISHA IKO KWENYE ENUM
+        // ============================================================
+        $validTypes = [
+            'project', 'sent_project',
+            'project_document', 'sent_project_document',
+            'budget_request',
+            'report', 'sent_report',
+            'uploaded_report', 'sent_uploaded_report',
+            'daily_work', 'employee',
+            'visitor', 'campaign', 'campaign_document',
+            'transaction'
+        ];
+        
+        // If item_type is empty or invalid, default to 'report'
+        if (empty($itemType) || !in_array($itemType, $validTypes)) {
+            // Try to detect from name
+            if (strpos(strtolower($itemName), 'sent') !== false) {
+                $itemType = 'sent_report';
+            } else {
+                $itemType = 'report';
+            }
+        }
+        
+        // Check if already in recycle bin
+        $checkBinStmt = $pdo->prepare("
+            SELECT id FROM recycle_bin 
+            WHERE item_id = ? AND item_type = ?
+        ");
+        $checkBinStmt->execute([$itemId, $itemType]);
+        
+        if ($checkBinStmt->fetch()) {
+            // Already in recycle bin, skip
+            return true;
+        }
+        
+        // Insert into recycle bin
+        $stmt2 = $pdo->prepare("
+            INSERT INTO recycle_bin 
+            (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, created_at) 
+            VALUES (?, ?, ?, ?, ?, NOW())
+        ");
+        $stmt2->execute([
+            $itemId,
+            $itemType,
+            $itemName,
+            $deletedByDepartment > 0 ? $deletedByDepartment : null,
+            $deletedByAdmin
+        ]);
+        
+        return true;
+        
+    } catch(PDOException $e) {
+        error_log('Recycle bin error: ' . $e->getMessage());
+        return false;
+    }
 }
 ?>
