@@ -2160,25 +2160,118 @@ async function saveProject() {
     finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
 }
 
+// ============================================================
+// DELETE PROJECT - FORCE REMOVE FROM ALL VIEWS
+// ============================================================
 async function deleteProject(id) { 
-    if(confirm('Delete this project? It will be moved to recycle bin.')) { 
-        const p = projectsData.find(p => p.id === id);
-        if(p) await addToRecycleBin(id, 'project', p.name);
-        let res = await apiCall('delete_project.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1, deleted_by_admin: 0 }); 
-        if(res.success) { 
-            showToast('Project moved to recycle bin'); 
-            addLog(`Project deleted: ${p?.name}`);
-            await renderProjects(); 
-            await renderDashboard(); 
+    if(!confirm('Delete this project? It will be moved to recycle bin.')) {
+        return;
+    }
+    
+    const p = projectsData.find(proj => proj.id === id);
+    if(!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Show loading state on card
+    const card = document.getElementById(`proj-card-${id}`);
+    if (card) {
+        card.style.opacity = '0.4';
+        card.style.pointerEvents = 'none';
+        card.style.transition = 'opacity 0.3s';
+    }
+    
+    try {
+        // 1. Add to recycle bin
+        await addToRecycleBin(id, 'project', p.name);
+        
+        // 2. Delete from database
+        const res = await apiCall('delete_project.php', 'POST', { 
+            project_id: id, 
+            department_id: DEPARTMENT_ID, 
+            is_deleted: 1,
+            deleted_by_department: DEPARTMENT_ID,
+            deleted_by_admin: 0
+        });
+        
+        console.log('Delete project response:', res);
+        
+        // ============================================================
+        // 3. FORCE REMOVE FROM ALL LOCAL DATA
+        // ============================================================
+        
+        // Remove from projectsData
+        projectsData = projectsData.filter(proj => proj.id !== id);
+        
+        // Remove from dailyworkData
+        dailyworkData = dailyworkData.filter(w => w.project_id !== id);
+        
+        // Remove from any project's daily_work array
+        projectsData.forEach(proj => {
+            if (proj.daily_work) {
+                proj.daily_work = proj.daily_work.filter(w => w.project_id !== id);
+            }
+            if (proj.daily_work_records) {
+                proj.daily_work_records = proj.daily_work_records.filter(w => w.project_id !== id);
+            }
+        });
+        
+        // 4. Remove the card from DOM
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            card.style.transition = 'opacity 0.3s';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        // 5. Force reload from API with cache buster
+        await fetchProjects();
+        await loadDashboard();
+        
+        // 6. If projects page is visible, reload it
+        const projectsPage = document.getElementById('projectsPage');
+        if (projectsPage && !projectsPage.classList.contains('hidden')) {
+            await renderProjects();
+        }
+        
+        // 7. Update count in tabs
+        updateProjectBadge();
+        
+        if(res && res.success) { 
+            showToast('✅ Project moved to recycle bin'); 
+            addLog(`Project deleted: ${p.name}`);
         } else { 
-            projectsData = projectsData.filter(proj => proj.id !== id);
-            await renderProjects(); 
-            await renderDashboard(); 
             showToast('Project removed from view', false);
-        } 
-    } 
+        }
+        
+    } catch(e) { 
+        console.error('Delete project error:', e);
+        
+        // Still remove from local even if API fails
+        projectsData = projectsData.filter(proj => proj.id !== id);
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        await fetchProjects();
+        await loadDashboard();
+        showToast('Network error, but project removed from view', true);
+    } finally {
+        if (card) {
+            card.style.opacity = '1';
+            card.style.pointerEvents = 'auto';
+        }
+    }
 }
-
 function editProject(id) { 
     const p = projectsData.find(p => p.id === id); 
     if(p) { 
@@ -2606,8 +2699,9 @@ async function forceRefreshDailyWorkForProject(project) {
     
     return dailyWork;
 }
+
 // ============================================================
-// RENDER PROJECTS - SHOW DAILY WORK COUNT
+// RENDER PROJECTS - WITH TAB SWITCHING SUPPORT
 // ============================================================
 async function renderProjects(highlightId = null) {
     try {
@@ -2615,11 +2709,7 @@ async function renderProjects(highlightId = null) {
         const projectsSection = document.getElementById('projectsSection');
         if (!projectsSection) return;
         
-        // Log daily work counts for debugging
-        console.log('📊 Projects with daily work:');
-        projectsData.forEach(p => {
-            console.log(`  ${p.name}: ${p.daily_work_count || 0} records`);
-        });
+        console.log(`📋 Rendering projects tab: ${currentProjectTab}, projects: ${projectsData.length}, documents: ${projectDocuments.length}`);
         
         let html = `
             <div class="tab-container">
@@ -2633,6 +2723,121 @@ async function renderProjects(highlightId = null) {
         `;
         
         if (currentProjectTab === 'added') {
+            // ... existing added projects code ...
+            html += `
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Project</button>
+                        <button onclick="exportAllProjectsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllProjectsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="projects-grid" id="projectsGrid"></div>
+            `;
+            projectsSection.innerHTML = html;
+            
+            // ... rest of added projects rendering ...
+            
+        } else {
+            // ============================================================
+            // UPLOADED DOCUMENTS TAB - FIXED
+            // ============================================================
+            html += `
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
+                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="documents-grid" id="uploadedDocsGrid"></div>
+            `;
+            projectsSection.innerHTML = html;
+            
+            if (projectDocuments.length === 0) {
+                document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents found.</div>';
+                return;
+            }
+            
+            let docsHtml = '';
+            for (let doc of projectDocuments) {
+                let isHighlighted = highlightId && doc.id === highlightId;
+                let fromDept = '';
+                if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                    fromDept = `<span class="from-badge">From: ${getDepartmentName(doc.sent_from_department)}</span>`;
+                }
+                
+                let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
+                let fileIcon = 'fa-file-alt';
+                if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
+                else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
+                else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
+                else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
+                
+                docsHtml += `
+                    <div class="document-card ${isHighlighted ? 'search-highlight' : ''}" id="doc-card-${doc.id}" style="max-height:280px; cursor:pointer;" onclick="viewUploadedDocument(${doc.id})">
+                        <div class="card-header" style="padding: 6px 12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <h4 style="font-size:12px;"><i class="fas ${fileIcon} mr-1"></i>${escapeHtml(doc.title)}</h4>
+                                <span style="font-size:8px; opacity:0.7;">#${doc.id}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                                <p style="font-size:8px; opacity:0.7;">${doc.file_name || 'Document'}</p>
+                                ${fromDept}
+                            </div>
+                        </div>
+                        <div class="p-3" style="padding: 8px 12px;">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                                <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                            <div class="flex gap-2 mt-2 pt-1 border-t">
+                                <button onclick="event.stopPropagation(); viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                                <button onclick="event.stopPropagation(); deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            </div>
+                            <div class="user-info">${escapeHtml(doc.uploaded_by || 'System')} · ${formatDisplayDate(doc.created_at)}</div>
+                        </div>
+                    </div>`;
+            }
+            document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+        }
+        
+        updateProjectBadge();
+    } catch(e) {
+        console.error("renderProjects error:", e);
+        showToast("Error loading projects: " + e.message, true);
+    }
+}
+
+// ============================================================
+// RENDER PROJECTS - WITH TAB SWITCHING SUPPORT - COMPLETE
+// ============================================================
+async function renderProjects(highlightId = null) {
+    try {
+        await Promise.all([fetchProjects(), fetchProjectDocuments(), fetchUnviewedCounts()]);
+        const projectsSection = document.getElementById('projectsSection');
+        if (!projectsSection) return;
+        
+        console.log(`📋 Rendering projects tab: ${currentProjectTab}, projects: ${projectsData.length}, documents: ${projectDocuments.length}`);
+        
+        let html = `
+            <div class="tab-container">
+                <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')">
+                    <i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span>
+                </button>
+                <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')">
+                    <i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span>
+                </button>
+            </div>
+        `;
+        
+        if (currentProjectTab === 'added') {
+            // ============================================================
+            // ADDED PROJECTS TAB
+            // ============================================================
             html += `
                 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                     <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
@@ -2726,15 +2931,89 @@ async function renderProjects(highlightId = null) {
                 } 
             }
         } else {
-            // Uploaded documents tab - keep existing code
-            // ... (existing code for uploaded documents)
+            // ============================================================
+            // UPLOADED DOCUMENTS TAB
+            // ============================================================
+            html += `
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
+                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    </div>
+                </div>
+                <div class="documents-grid" id="uploadedDocsGrid"></div>
+            `;
+            projectsSection.innerHTML = html;
+            
+            if (projectDocuments.length === 0) {
+                document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents found.</div>';
+                return;
+            }
+            
+            let docsHtml = '';
+            for (let doc of projectDocuments) {
+                let isHighlighted = highlightId && doc.id === highlightId;
+                let fromDept = '';
+                if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                    fromDept = `<span class="from-badge">From: ${getDepartmentName(doc.sent_from_department)}</span>`;
+                }
+                
+                let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
+                let fileIcon = 'fa-file-alt';
+                if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
+                else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
+                else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
+                else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
+                
+                let isUnviewed = doc._is_unviewed || false;
+                
+                docsHtml += `
+                    <div class="document-card ${isHighlighted ? 'search-highlight' : ''} ${isUnviewed ? 'unviewed' : ''}" id="doc-card-${doc.id}" style="max-height:280px; cursor:pointer;" onclick="viewUploadedDocument(${doc.id})">
+                        ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                        <div class="card-header" style="padding: 6px 12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <h4 style="font-size:12px;"><i class="fas ${fileIcon} mr-1"></i>${escapeHtml(doc.title)}</h4>
+                                <span style="font-size:8px; opacity:0.7;">#${doc.id}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                                <p style="font-size:8px; opacity:0.7;">${doc.file_name || 'Document'}</p>
+                                ${fromDept}
+                            </div>
+                        </div>
+                        <div class="p-3" style="padding: 8px 12px;">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                                <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                            <div class="flex gap-2 mt-2 pt-1 border-t">
+                                <button onclick="event.stopPropagation(); viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                                <button onclick="event.stopPropagation(); deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            </div>
+                            <div class="user-info">${escapeHtml(doc.uploaded_by || 'System')} · ${formatDisplayDate(doc.created_at)}</div>
+                        </div>
+                    </div>`;
+            }
+            document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+            
+            if (highlightId) { 
+                const el = document.getElementById(`doc-card-${highlightId}`); 
+                if(el) { 
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                    setTimeout(() => el.classList.remove('search-highlight'), 3000); 
+                } 
+            }
         }
+        
         updateProjectBadge();
     } catch(e) {
         console.error("renderProjects error:", e);
         showToast("Error loading projects: " + e.message, true);
     }
 }
+
 function switchProjectTab(tab) { 
     currentProjectTab = tab; 
     renderProjects(); 
@@ -4476,16 +4755,126 @@ function exportAllUploadedReportsToPDF() {
     showToast("PDF preview opened - Click Print to save"); 
 }
 
+// ============================================================
+// DELETE UPLOADED REPORT - FORCE REMOVE FROM ALL VIEWS
+// ============================================================
 async function deleteUploadedReport(id) {
-    if(confirm('Delete this uploaded report?')) {
-        const doc = uploadedReportsData.find(d => d.id === id);
-        if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title);
-        const res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, deleted_by: CURRENT_USER });
-        if(res.success) { showToast('Uploaded report moved to recycle bin'); await renderReports(); await renderDashboard(); }
-        else { showToast(res.message || 'Failed', true); }
+    if (!confirm('Delete this uploaded report? It will be moved to recycle bin.')) {
+        return;
+    }
+    
+    const doc = uploadedReportsData.find(d => d.id === id);
+    if (!doc) {
+        showToast('Uploaded report not found', true);
+        return;
+    }
+    
+    // Show loading state on card
+    const card = document.getElementById(`uploaded-report-card-${id}`);
+    if (card) {
+        card.style.opacity = '0.4';
+        card.style.pointerEvents = 'none';
+        card.style.transition = 'opacity 0.3s';
+    }
+    
+    try {
+        // 1. Add to recycle bin
+        await addToRecycleBin(id, 'uploaded_report', doc.title);
+        
+        // 2. Delete from database
+        const res = await apiCall('delete_uploaded_report.php', 'POST', { 
+            id: id, 
+            department_id: DEPARTMENT_ID,
+            deleted_by: CURRENT_USER,
+            is_deleted: 1
+        });
+        
+        console.log('Delete uploaded report response:', res);
+        
+        // ============================================================
+        // 3. FORCE REMOVE FROM LOCAL DATA
+        // ============================================================
+        
+        // Remove from uploadedReportsData
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        
+        // 4. Remove the card from DOM
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            card.style.transition = 'opacity 0.3s';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        // 5. Force reload from API with cache buster
+        await fetchUploadedReports();
+        await loadDashboard();
+        
+        // 6. If reports page is visible, reload it
+        const reportsPage = document.getElementById('reportsPage');
+        if (reportsPage && !reportsPage.classList.contains('hidden')) {
+            await renderReports();
+        }
+        
+        // 7. Update badge
+        updateReportBadge();
+        
+        if (res && res.success) {
+            showToast('✅ Uploaded report moved to recycle bin');
+            addLog(`Uploaded report deleted: ${doc.title}`);
+        } else {
+            showToast('Uploaded report removed from view', false);
+        }
+        
+    } catch(e) {
+        console.error('Delete uploaded report error:', e);
+        
+        // Still remove from local
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        await fetchUploadedReports();
+        await loadDashboard();
+        showToast('Network error, but report removed from view', true);
+    } finally {
+        if (card) {
+            card.style.opacity = '1';
+            card.style.pointerEvents = 'auto';
+        }
     }
 }
 
+// ============================================================
+// SWITCH PROJECT TAB - BETWEEN ADDED AND UPLOADED
+// ============================================================
+function switchProjectTab(tab) { 
+    console.log(`🔄 Switching project tab to: ${tab}`);
+    currentProjectTab = tab; 
+    
+    // Update tab button active states
+    const tabButtons = document.querySelectorAll('.tab-button');
+    tabButtons.forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.textContent.includes('Added Projects') && tab === 'added') {
+            btn.classList.add('active');
+        } else if (btn.textContent.includes('Uploaded Documents') && tab === 'uploaded') {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Reload the projects section with the selected tab
+    renderProjects(); 
+}
 function editReportDetail(id){ 
     const r = reportsList.find(r => r.id == id); 
     if(r) { 
