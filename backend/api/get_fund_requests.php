@@ -1,66 +1,48 @@
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Access-Control-Allow-Credentials: true');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
-    exit;
+    exit();
 }
 
-// Database connection
 $host = 'localhost';
+$user = 'root';
+$pass = '';
 $dbname = 'geotraverse_erp';
-$username = 'root';
-$password = '';
 
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
-    exit;
+$conn = new mysqli($host, $user, $pass, $dbname);
+
+if ($conn->connect_error) {
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit();
 }
 
-// Get parameters
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
-$all = isset($_GET['all']) ? intval($_GET['all']) : 0;
+$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : null;
+$all = isset($_GET['all']) ? $_GET['all'] : false;
+$limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
 
-if ($department_id == 0 && $all == 0) {
-    echo json_encode(['success' => false, 'message' => 'Department ID required']);
-    exit;
+if ($all || !$department_id) {
+    $stmt = $conn->prepare("SELECT fr.*, d.name as department_name FROM fund_requests fr LEFT JOIN departments d ON fr.department_id = d.id WHERE fr.is_deleted = 0 ORDER BY fr.created_at DESC LIMIT ?");
+    $stmt->bind_param("i", $limit);
+} else {
+    $stmt = $conn->prepare("SELECT fr.*, d.name as department_name FROM fund_requests fr LEFT JOIN departments d ON fr.department_id = d.id WHERE fr.department_id = ? AND fr.is_deleted = 0 ORDER BY fr.created_at DESC LIMIT ?");
+    $stmt->bind_param("ii", $department_id, $limit);
 }
 
-try {
-    // ============================================================
-    // SIMPLE QUERY - ONLY USE is_deleted COLUMN
-    // ============================================================
-    $sql = "SELECT * FROM fund_requests WHERE (is_deleted = 0 OR is_deleted IS NULL)";
-    $params = [];
-    
-    if ($all == 0) {
-        $sql .= " AND department_id = ?";
-        $params[] = $department_id;
-    }
-    
-    $sql .= " ORDER BY created_at DESC";
-    
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$stmt->execute();
+$result = $stmt->get_result();
 
-    echo json_encode([
-        'success' => true,
-        'data' => $requests,
-        'total' => count($requests),
-        'department_id' => $department_id
-    ]);
-
-} catch(PDOException $e) {
-    error_log("Get fund requests error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
-    exit;
+$requests = [];
+while ($row = $result->fetch_assoc()) {
+    $requests[] = $row;
 }
+
+echo json_encode(['success' => true, 'data' => $requests, 'count' => count($requests)]);
+
+$stmt->close();
+$conn->close();
 ?>

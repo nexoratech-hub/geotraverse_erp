@@ -1,16 +1,18 @@
 <?php
+// send_document_advanced.php - FIXED
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Access-Control-Allow-Credentials: true');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection
+error_reporting(0);
+ini_set('display_errors', 0);
+
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -20,124 +22,174 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
     exit;
 }
 
-// Get input
-$input = file_get_contents('php://input');
-$data = json_decode($input, true);
+$input = json_decode(file_get_contents('php://input'), true);
 
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'Invalid JSON input']);
+if (!$input) {
+    echo json_encode(['success' => false, 'message' => 'Invalid input']);
     exit;
 }
 
-$document_id = isset($data['document_id']) ? intval($data['document_id']) : 0;
-$to_department_id = isset($data['to_department_id']) ? intval($data['to_department_id']) : 0;
-$from_department_id = isset($data['from_department_id']) ? intval($data['from_department_id']) : 0;
-$sent_by = isset($data['sent_by']) ? trim($data['sent_by']) : 'System';
-$doc_type = isset($data['doc_type']) ? trim($data['doc_type']) : 'project';
-$doc_data = isset($data['doc_data']) ? $data['doc_data'] : null;
-
-if ($document_id == 0 || $to_department_id == 0 || $from_department_id == 0) {
-    echo json_encode(['success' => false, 'message' => 'Missing required parameters']);
-    exit;
+// Required fields
+$required = ['document_id', 'to_department_id', 'from_department_id', 'doc_type'];
+foreach ($required as $field) {
+    if (!isset($input[$field])) {
+        echo json_encode(['success' => false, 'message' => "Missing required field: $field"]);
+        exit;
+    }
 }
 
-if ($to_department_id == $from_department_id) {
-    echo json_encode(['success' => false, 'message' => 'Cannot send to your own department']);
-    exit;
+$docId = (int)$input['document_id'];
+$toDeptId = (int)$input['to_department_id'];
+$fromDeptId = (int)$input['from_department_id'];
+$docType = $input['doc_type'];
+$sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
+
+// ============================================================
+// FIX: Check for document_data (primary) or uploaded_report_data (fallback)
+// ============================================================
+$docData = [];
+if (isset($input['document_data']) && !empty($input['document_data'])) {
+    $docData = $input['document_data'];
+} elseif (isset($input['uploaded_report_data']) && !empty($input['uploaded_report_data'])) {
+    $docData = $input['uploaded_report_data'];
+} elseif (isset($input['doc_data']) && !empty($input['doc_data'])) {
+    $docData = $input['doc_data'];
 }
+
+// If document_data is empty, try to fetch from database
+if (empty($docData)) {
+    try {
+        if ($docType === 'uploaded_report') {
+            $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ?");
+            $stmt->execute([$docId]);
+            $docData = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ?");
+            $stmt->execute([$docId]);
+            $docData = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+        if ($docData) {
+            $docData['sent_count'] = ($docData['sent_count'] ?? 0) + 1;
+            $docData['is_sent'] = 1;
+        }
+    } catch(PDOException $e) {
+        // Ignore
+    }
+}
+
+// ============================================================
+// FIX: Allow document_data to be minimal - just check for title or id
+// ============================================================
+if (empty($docData)) {
+    // Try to use direct fields from input
+    if (isset($input['document_title']) || isset($input['title'])) {
+        $docData = [
+            'id' => $docId,
+            'title' => $input['document_title'] ?? $input['title'] ?? 'Document',
+            'file_name' => $input['document_file'] ?? $input['file_name'] ?? '',
+            'description' => $input['description'] ?? '',
+            'uploaded_by' => $sentBy,
+            'department_id' => $fromDeptId,
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Document data is required or incomplete']);
+        exit;
+    }
+}
+
+// Get department names
+try {
+    $deptStmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
+    $deptStmt->execute([$fromDeptId]);
+    $fromDeptName = $deptStmt->fetchColumn();
+    $deptStmt->execute([$toDeptId]);
+    $toDeptName = $deptStmt->fetchColumn();
+} catch(PDOException $e) {
+    $fromDeptName = isset($input['from_department_name']) ? $input['from_department_name'] : 'Department ' . $fromDeptId;
+    $toDeptName = isset($input['to_department_name']) ? $input['to_department_name'] : 'Department ' . $toDeptId;
+}
+
+$docTitle = $docData['title'] ?? 'Untitled Document';
+$docFile = $docData['file_name'] ?? '';
+
+// ============================================================
+// Create sent_documents table if not exists
+// ============================================================
+$tableCheck = $pdo->query("SHOW TABLES LIKE 'sent_documents'");
+if ($tableCheck->rowCount() == 0) {
+    $createTable = "
+    CREATE TABLE IF NOT EXISTS `sent_documents` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `original_document_id` int(11) NOT NULL,
+        `document_data` longtext DEFAULT NULL,
+        `from_department_id` int(11) NOT NULL,
+        `to_department_id` int(11) NOT NULL,
+        `sent_by` varchar(100) DEFAULT NULL,
+        `sent_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `is_viewed` tinyint(4) DEFAULT 0,
+        `viewed_at` timestamp NULL DEFAULT NULL,
+        `is_deleted` tinyint(4) DEFAULT 0,
+        `deleted_at` timestamp NULL DEFAULT NULL,
+        `sent_count` int(11) DEFAULT 0,
+        `is_sent` tinyint(4) DEFAULT 0,
+        `last_sent_at` timestamp NULL DEFAULT NULL,
+        `from_department_name` varchar(100) DEFAULT NULL,
+        `to_department_name` varchar(100) DEFAULT NULL,
+        `document_title` varchar(255) DEFAULT NULL,
+        `document_type` varchar(50) DEFAULT NULL,
+        `document_file` varchar(255) DEFAULT NULL,
+        PRIMARY KEY (`id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    $pdo->exec($createTable);
+}
+
+// Prepare document data JSON
+$docDataJson = json_encode($docData);
 
 try {
-    // ============================================================
-    // 1. CHECK IF DOCUMENT EXISTS IN project_documents TABLE
-    // ============================================================
-    $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE id = ? AND is_deleted = 0");
-    $stmt->execute([$document_id]);
-    $document = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    // ============================================================
-    // 2. IF NOT FOUND, CHECK IN sent_documents TABLE
-    // ============================================================
-    if (!$document) {
-        $sentStmt = $pdo->prepare("
-            SELECT * FROM sent_documents 
-            WHERE original_document_id = ? OR id = ?
-            ORDER BY sent_at DESC LIMIT 1
-        ");
-        $sentStmt->execute([$document_id, $document_id]);
-        $sent_doc = $sentStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($sent_doc) {
-            // Use the sent document data
-            $doc_data_from_sent = json_decode($sent_doc['document_data'], true);
-            $document = [
-                'id' => $sent_doc['original_document_id'],
-                'title' => $sent_doc['document_title'] ?? $doc_data_from_sent['title'] ?? 'Document',
-                'description' => $doc_data_from_sent['description'] ?? '',
-                'file_name' => $sent_doc['document_file'] ?? $doc_data_from_sent['file_name'] ?? '',
-                'file_path' => $doc_data_from_sent['file_path'] ?? '',
-                'file_size' => $doc_data_from_sent['file_size'] ?? 0,
-                'file_type' => $doc_data_from_sent['file_type'] ?? '',
-                'uploaded_by' => $doc_data_from_sent['uploaded_by'] ?? $sent_by,
-                'department_id' => $doc_data_from_sent['department_id'] ?? $from_department_id,
-                'created_at' => $doc_data_from_sent['created_at'] ?? date('Y-m-d H:i:s'),
-                'sent_count' => ($sent_doc['sent_count'] ?? 0) + 1
-            ];
-        }
-    }
-
-    if (!$document) {
-        echo json_encode(['success' => false, 'message' => 'Document not found']);
-        exit;
-    }
-
-    // ============================================================
-    // 3. CHECK IF DEPARTMENT CAN SEND (OWNER OR RECEIVER)
-    // ============================================================
-    $is_owner = ($document['department_id'] == $from_department_id);
-    $is_receiver = ($document['sent_to_department'] == $from_department_id);
+    // Check if already exists
+    $checkStmt = $pdo->prepare("SELECT id FROM sent_documents WHERE original_document_id = ? AND to_department_id = ? AND is_deleted = 0");
+    $checkStmt->execute([$docId, $toDeptId]);
+    $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
     
-    // FORWARDING ALLOWED - can send if owner or receiver
-    if (!$is_owner && !$is_receiver && $from_department_id != 0) {
-        echo json_encode(['success' => false, 'message' => 'You do not have permission to send this document']);
-        exit;
-    }
-
-    // ============================================================
-    // 4. BUILD DOCUMENT DATA FOR SENDING
-    // ============================================================
-    $full_doc_data = [
-        'id' => $document['id'],
-        'title' => $document['title'],
-        'description' => $document['description'] ?? '',
-        'file_name' => $document['file_name'] ?? '',
-        'file_path' => $document['file_path'] ?? '',
-        'file_size' => intval($document['file_size'] ?? 0),
-        'file_type' => $document['file_type'] ?? '',
-        'doc_type' => $doc_type,
-        'uploaded_by' => $document['uploaded_by'] ?? $sent_by,
-        'department_id' => intval($document['department_id']),
-        'created_at' => $document['created_at'] ?? date('Y-m-d H:i:s'),
-        'sent_from_department' => $from_department_id,
-        'sent_to_department' => $to_department_id,
-        'sent_count' => intval($document['sent_count'] ?? 0) + 1,
-        'is_sent' => 1,
-        'last_sent_at' => date('Y-m-d H:i:s')
-    ];
-
-    // Merge with provided doc_data if available
-    if ($doc_data && is_array($doc_data)) {
-        $full_doc_data = array_merge($full_doc_data, $doc_data);
-    }
-
-    // ============================================================
-    // 5. SAVE TO sent_documents TABLE
-    // ============================================================
-    $sentStmt = $pdo->prepare("
-        INSERT INTO sent_documents (
+    if ($existing) {
+        // Update existing
+        $stmt = $pdo->prepare("UPDATE sent_documents SET 
+            document_data = ?,
+            from_department_id = ?,
+            sent_by = ?,
+            sent_at = NOW(),
+            is_viewed = 0,
+            sent_count = sent_count + 1,
+            is_sent = 1,
+            last_sent_at = NOW(),
+            from_department_name = ?,
+            to_department_name = ?,
+            document_title = ?,
+            document_type = ?,
+            document_file = ?
+            WHERE id = ?");
+        
+        $stmt->execute([
+            $docDataJson,
+            $fromDeptId,
+            $sentBy,
+            $fromDeptName,
+            $toDeptName,
+            $docTitle,
+            $docType,
+            $docFile,
+            $existing['id']
+        ]);
+        $sentId = $existing['id'];
+    } else {
+        // Insert new
+        $stmt = $pdo->prepare("INSERT INTO sent_documents (
             original_document_id,
             document_data,
             from_department_id,
@@ -145,117 +197,72 @@ try {
             sent_by,
             sent_at,
             is_viewed,
-            is_viewed_by_department,
+            is_deleted,
             sent_count,
             is_sent,
+            last_sent_at,
             from_department_name,
             to_department_name,
             document_title,
             document_type,
             document_file
-        ) VALUES (
-            ?, ?, ?, ?, ?, NOW(), 0, 0, ?, 1, ?, ?, ?, ?, ?
-        )
-    ");
-
-    $from_dept_name = getDepartmentName($pdo, $from_department_id);
-    $to_dept_name = getDepartmentName($pdo, $to_department_id);
-
-    $sentStmt->execute([
-        $document['id'],
-        json_encode($full_doc_data),
-        $from_department_id,
-        $to_department_id,
-        $sent_by,
-        intval($full_doc_data['sent_count']),
-        $from_dept_name,
-        $to_dept_name,
-        $document['title'],
-        $doc_type,
-        $document['file_name'] ?? ''
-    ]);
-
-    $sent_id = $pdo->lastInsertId();
-
-    // ============================================================
-    // 6. UPDATE ORIGINAL DOCUMENT - MARK AS SENT (if exists in project_documents)
-    // ============================================================
+        ) VALUES (?, ?, ?, ?, ?, NOW(), 0, 0, 1, 1, NOW(), ?, ?, ?, ?, ?)");
+        
+        $stmt->execute([
+            $docId,
+            $docDataJson,
+            $fromDeptId,
+            $toDeptId,
+            $sentBy,
+            $fromDeptName,
+            $toDeptName,
+            $docTitle,
+            $docType,
+            $docFile
+        ]);
+        $sentId = $pdo->lastInsertId();
+    }
+    
+    // Update original document
     try {
-        $updateStmt = $pdo->prepare("
-            UPDATE project_documents 
-            SET 
-                sent_from_department = ?,
+        if ($docType === 'uploaded_report') {
+            $updateStmt = $pdo->prepare("UPDATE uploaded_reports SET 
                 sent_to_department = ?,
+                sent_from_department = ?,
+                is_viewed_by_department = 0,
                 sent_count = sent_count + 1,
                 is_sent = 1,
-                last_sent_at = NOW(),
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        $updateStmt->execute([$from_department_id, $to_department_id, $document['id']]);
+                last_sent_at = NOW()
+                WHERE id = ?");
+            $updateStmt->execute([$toDeptId, $fromDeptId, $docId]);
+        } else {
+            $updateStmt = $pdo->prepare("UPDATE project_documents SET 
+                sent_to_department = ?,
+                sent_from_department = ?,
+                is_viewed_by_department = 0,
+                sent_count = sent_count + 1,
+                is_sent = 1,
+                last_sent_at = NOW()
+                WHERE id = ?");
+            $updateStmt->execute([$toDeptId, $fromDeptId, $docId]);
+        }
     } catch(PDOException $e) {
-        // Document might be from sent_documents only, ignore
+        // Columns might not exist
     }
-
-    // ============================================================
-    // 7. ADD NOTIFICATION TO RECIPIENT
-    // ============================================================
-    $notifStmt = $pdo->prepare("
-        INSERT INTO notifications (
-            department_id,
-            from_department_id,
-            item_type,
-            item_id,
-            item_title,
-            message,
-            is_viewed,
-            created_at
-        ) VALUES (
-            ?, ?, 'document', ?, ?, ?, 0, NOW()
-        )
-    ");
     
-    $message = "Document \"{$document['title']}\" sent from {$from_dept_name}";
-    $notifStmt->execute([
-        $to_department_id,
-        $from_department_id,
-        $document['id'],
-        $document['title'],
-        $message
-    ]);
-
-    // ============================================================
-    // 8. RESPONSE
-    // ============================================================
     echo json_encode([
         'success' => true,
         'message' => 'Document sent successfully',
-        'data' => [
-            'sent_id' => $sent_id,
-            'document_id' => $document['id'],
-            'sent_to' => $to_department_id,
-            'sent_from' => $from_department_id,
-            'sent_at' => date('Y-m-d H:i:s')
-        ]
+        'sent_id' => $sentId,
+        'to_department' => $toDeptId,
+        'to_department_name' => $toDeptName,
+        'from_department' => $fromDeptId,
+        'from_department_name' => $fromDeptName,
+        'document_title' => $docTitle,
+        'document_type' => $docType
     ]);
-
+    
 } catch(PDOException $e) {
-    error_log("Send document error: " . $e->getMessage());
     echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
-    exit;
-}
-
-// ============================================================
-// HELPER FUNCTION: Get department name
-// ============================================================
-function getDepartmentName($pdo, $dept_id) {
-    try {
-        $stmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
-        $stmt->execute([$dept_id]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result ? $result['name'] : 'Department ' . $dept_id;
-    } catch(Exception $e) {
-        return 'Department ' . $dept_id;
-    }
 }
 ?>

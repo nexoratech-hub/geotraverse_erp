@@ -665,7 +665,6 @@ let viewedRequestIds = JSON.parse(localStorage.getItem('finance_viewedRequestIds
 let viewedReportIds = JSON.parse(localStorage.getItem('finance_viewedReportIds') || '[]');
 let viewedNotificationIds = JSON.parse(localStorage.getItem('finance_viewedNotificationIds') || '[]');
 let activityLogs = [{ action: "Finance Dashboard initialized", created_at: new Date().toISOString() }];
-const REPORTS_STORAGE_KEY = 'finance_reports_data';
 
 const departmentNames = { 1: "Super Admin", 2: "Finance", 3: "Sales & Marketing", 4: "Manager", 5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium", 8: "Town Planning", 9: "Architectural", 10: "Survey", 11: "Construction", 12: "Hatimiliki" };
 const allDepartmentsForSend = [
@@ -681,15 +680,35 @@ const sidebarColorOptions = ["#059669", "#047857", "#065f46", "#10b981", "#0f74b
 function addLog(action) { activityLogs.unshift({ action: action, created_at: new Date().toISOString() }); if (activityLogs.length > 100) activityLogs.pop(); }
 
 async function apiCall(endpoint, method = 'GET', data = null) {
-    try { 
+    try {
         const url = API_BASE + endpoint;
-        const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' }; 
-        if (data && method !== 'GET') opts.body = JSON.stringify(data); 
-        const res = await fetch(url, opts); 
-        if (!res.ok) return { success: false, message: `HTTP ${res.status}`, data: [] };
+        const opts = {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        };
+        if (data && method !== 'GET') opts.body = JSON.stringify(data);
+
+        console.log(`📡 API Call: ${method} ${url}`);
+
+        const res = await fetch(url, opts);
+
+        // Try to parse JSON response
         const text = await res.text();
-        try { return JSON.parse(text); } catch(e) { return { success: false, message: 'Invalid server response', data: [] }; }
-    } catch(e) { console.error('API Error:', e); return { success: false, message: e.message, data: [] }; }
+        try {
+            const json = JSON.parse(text);
+            return json;
+        } catch(e) {
+            // If response is not JSON but OK, return success
+            if (res.ok) {
+                return { success: true, data: text };
+            }
+            return { success: false, message: `HTTP ${res.status}`, data: [] };
+        }
+    } catch(e) {
+        console.error('❌ API Error:', endpoint, e);
+        return { success: false, message: e.message, data: [] };
+    }
 }
 
 // ============================================================
@@ -1761,33 +1780,79 @@ function exportAllRequestsToPDF() {
     showToast("📄 Budget Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
 // ============================================================
-// ==================== REPORTS SECTION ====================
+// FETCH REPORTS - TUMIA API TU, USITUMIE LOCAL STORAGE
 // ============================================================
-function loadReportsFromStorage() { try { const stored = localStorage.getItem(REPORTS_STORAGE_KEY); if (stored) reportsData = JSON.parse(stored); else reportsData = []; } catch(e) { reportsData = []; } }
-function saveReportsToStorage() { localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reportsData)); }
 
-async function fetchReports() { 
-    loadReportsFromStorage(); 
-    try { 
-        const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
-        if (res.success && res.data) { 
-            for (let r of res.data) { 
-                if (!reportsData.find(ex => ex.id === r.id)) { 
-                    reportsData.push(r); 
-                } 
-            } 
-            saveReportsToStorage(); 
-        } 
-    } catch(e) { console.log('API fetch error, using localStorage'); } 
-    unviewedReportsCount = reportsData.filter(r => r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(r.id)).length; 
-    updateReportBadge(); 
+async function fetchReports() {
+    try {
+        // ============================================================
+        // FETCH REPORTS FROM API - HII NDIO CHANZO CHA UKWELI
+        // ============================================================
+        const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`);
+        
+        if (res.success && res.data) {
+            // ============================================================
+            // OVERWRITE reportsData NA DATA KUTOKA API
+            // SI KUONGEZA TU, BALI KUBADILISHA KABISA
+            // ============================================================
+            reportsData = res.data.filter(r => 
+                (!r.deleted_by_department || r.deleted_by_department != 1) && 
+                (!r.deleted_by_admin || r.deleted_by_admin != 1)
+            ).sort((a, b) => b.id - a.id);
+            
+            console.log('📊 Reports fetched from API:', reportsData.length);
+            
+            // ============================================================
+            // HATUWEZI KUHIFADHI KWENYE LOCAL STORAGE
+            // KWA SABABU INASABABISHA DATA KUPOTOSHWA
+            // ============================================================
+            // saveReportsToStorage();  // REMOVE - USITUMIE LOCAL STORAGE
+            
+        } else {
+            console.log('⚠️ API returned no data, using empty array');
+            reportsData = [];
+        }
+        
+    } catch(e) {
+        console.error('❌ API fetch error:', e);
+        reportsData = [];
+    }
+    
+    // ============================================================
+    // HESABU YA UNVIEWED REPORTS
+    // ============================================================
+    unviewedReportsCount = reportsData.filter(r => 
+        r.sent_from_department && 
+        r.sent_from_department != DEPARTMENT_ID && 
+        (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+        !viewedReportIds.includes(r.id)
+    ).length;
+    
+    updateReportBadge();
+    
+    return reportsData;
 }
+// ============================================================
+// FETCH UPLOADED REPORTS - HAKIKISHA IPO
+// ============================================================
 
-async function fetchUploadedReports() { 
-    const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`); 
-    uploadedReportsData = (res.success && res.data) ? res.data : []; 
+async function fetchUploadedReports() {
+    try {
+        const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`);
+        if (res.success && res.data) {
+            uploadedReportsData = res.data
+                .filter(d => d.is_deleted != 1)
+                .sort((a, b) => b.id - a.id);
+            console.log('📁 Uploaded reports fetched from API:', uploadedReportsData.length);
+        } else {
+            uploadedReportsData = [];
+        }
+    } catch(e) {
+        console.error('❌ API fetch uploaded reports error:', e);
+        uploadedReportsData = [];
+    }
+    return uploadedReportsData;
 }
-
 function markReportViewed(id) { 
     if(!viewedReportIds.includes(id)) { 
         viewedReportIds.push(id); 
@@ -2031,66 +2096,196 @@ async function deleteUploadedReport(id) {
     } 
 }
 
-async function sendUploadedReportToDept(reportId, deptId) { 
-    const doc = uploadedReportsData.find(d => d.id === reportId); 
-    if (!doc) { showToast('Report not found', true); return; } 
-    const deptName = departmentNames[deptId] || 'Department';
-    try {
-        const payload = { 
-            uploaded_report_id: parseInt(reportId), 
-            to_department_id: parseInt(deptId), 
-            from_department_id: DEPARTMENT_ID,
-            message: `📁 UPLOADED REPORT:\n\nTitle: ${doc.title}\nFile: ${doc.file_name}\nFrom: Finance Department`
-        };
-        const res = await apiCall('send_uploaded_report.php', 'POST', payload);
-        if (res && res.success) {
-            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`);
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            await apiCall('add_notification.php', 'POST', {
-                department_id: deptId,
-                item_type: 'uploaded_report',
-                item_id: doc.id,
-                item_title: doc.title,
-                message: `Uploaded report "${doc.title}" sent from Finance Department`,
-                from_department_id: DEPARTMENT_ID
-            });
-            await fetchNotifications();
-        } else {
-            showToast(res?.message || 'Failed to send uploaded report', true);
-        }
-    } catch(e) {
-        showToast('Network error: ' + e.message, true);
-    }
-    toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
-    closeModal('viewReportModal'); 
-}
+// ============================================================
+// LOAD REPORTS - HAKIKISHA INAPANDA DATA KUTOKA API
+// ============================================================
 
 async function loadReports(highlightId = null) {
+    // ============================================================
+    // FETCH REPORTS FROM API - SI LOCAL STORAGE
+    // ============================================================
     await Promise.all([fetchReports(), fetchUploadedReports(), fetchUnviewedCounts()]);
-    let html = `<div class="tab-container"><button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span></button><button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')"><i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span></button></div>`;
+
+    // ============================================================
+    // BUILD HTML - TAB CONTAINER
+    // ============================================================
+    let html = `
+        <div class="tab-container">
+            <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')">
+                <i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span>
+            </button>
+            <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')">
+                <i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span>
+            </button>
+        </div>
+    `;
+
+    // ============================================================
+    // ADDED REPORTS TAB
+    // ============================================================
     if (currentReportTab === 'added') {
-        html += `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-chart-line text-purple-600 mr-2"></i>Added Reports (${reportsData.length})</h2><div class="flex gap-2"><button onclick="openModal('addReportModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Report</button><button onclick="openGenerateReportModal()" class="btn-cyan"><i class="fas fa-chart-line mr-1"></i> Generate</button><button onclick="exportAllReportsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportAllReportsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF</button></div></div><div class="reports-grid" id="reportsGrid"></div>`;
+        html += `
+            <div class="flex justify-between flex-wrap gap-3 mb-4">
+                <h2 class="text-xl font-bold">
+                    <i class="fas fa-chart-line text-purple-600 mr-2"></i>
+                    Added Reports (${reportsData.length})
+                </h2>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="openModal('addReportModal')" class="btn-primary">
+                        <i class="fas fa-plus mr-1"></i> Add Report
+                    </button>
+                    <button onclick="openGenerateReportModal()" class="btn-cyan">
+                        <i class="fas fa-chart-line mr-1"></i> Generate
+                    </button>
+                    <button onclick="exportAllReportsToExcel()" class="btn-success">
+                        <i class="fas fa-file-excel mr-1"></i> Excel All
+                    </button>
+                    <button onclick="exportAllReportsToPDF()" class="btn-danger">
+                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    </button>
+                </div>
+            </div>
+            <div class="reports-grid" id="reportsGrid"></div>
+        `;
+
         document.getElementById('reportsPage').innerHTML = html;
-        if (reportsData.length === 0) { document.getElementById('reportsGrid').innerHTML = '<div class="col-span-2 text-center py-12 text-gray-400">No reports found. Click "Add Report" to create one.</div>'; return; }
+
+        if (reportsData.length === 0) {
+            document.getElementById('reportsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p>No reports found. Click "Add Report" to create one.</p>
+                </div>
+            `;
+            return;
+        }
+
         let reportsHtml = '';
         for (let r of reportsData) {
-            const isUnviewed = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(r.id);
+            // Check if report is unviewed
+            const isUnviewed = r.sent_from_department && 
+                r.sent_from_department != DEPARTMENT_ID && 
+                (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+                !viewedReportIds.includes(r.id);
+
             const isHighlighted = highlightId && r.id === highlightId;
-            const statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+            const statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400';
+            
             let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
-            reportsHtml += `<div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" id="report-card-${r.id}" onclick="viewReportDetails(${r.id})"><div class="report-header-custom"><h4 class="font-semibold text-sm">${escapeHtml(r.title)}</h4><p class="text-[9px] opacity-90">${r.period} report</p></div>${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}<div class="p-3"><div class="flex justify-between items-center mb-2"><span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${r.status === 'sent' ? 'Sent' : 'Draft'}</span></div><div class="text-[10px] text-gray-600 mb-2 line-clamp-3">${escapeHtml(shortContent)}</div><div class="flex gap-2 mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="event.stopPropagation(); deleteReportItem(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div></div></div>`;
+            
+            // Source department badge
+            let sourceBadge = '';
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[r.sent_from_department] || 'Unknown';
+                sourceBadge = `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                        <i class="fas fa-paper-plane text-[8px]"></i>
+                        ${escapeHtml(deptName)}
+                    </span>
+                `;
+            }
+
+            reportsHtml += `
+                <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
+                     id="report-card-${r.id}" 
+                     onclick="viewReportDetails(${r.id})"
+                     style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
+                    
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    
+                    <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
+                        <h4 class="font-semibold text-sm">${escapeHtml(r.title)}</h4>
+                        <div class="flex justify-between items-center mt-1">
+                            <p class="text-[9px] opacity-90">${r.period} report</p>
+                            ${sourceBadge}
+                        </div>
+                    </div>
+                    
+                    <div class="p-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span>
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">
+                                ${r.status === 'sent' ? 'Sent' : 'Draft'}
+                            </span>
+                        </div>
+                        
+                        <div class="text-[10px] text-gray-600 dark:text-gray-400 mb-2 line-clamp-3">
+                            ${escapeHtml(shortContent)}
+                        </div>
+                        
+                        <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
+                            <button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteReportItem(${r.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
-        if (highlightId) { const el = document.getElementById(`report-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
-    } else {
-        html += `<div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-file-upload text-orange-600 mr-2"></i>Uploaded Reports (${uploadedReportsData.length})</h2><div class="flex gap-2"><button onclick="openUploadReportModal()" class="btn-warning"><i class="fas fa-upload mr-1"></i> Upload Report</button><button onclick="exportAllUploadedReportsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllUploadedReportsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div><div class="reports-grid" id="uploadedReportsGrid"></div>`;
+
+        // Highlight if needed
+        if (highlightId) {
+            const el = document.getElementById(`report-card-${highlightId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => el.classList.remove('search-highlight'), 3000);
+            }
+        }
+    }
+
+    // ============================================================
+    // UPLOADED REPORTS TAB
+    // ============================================================
+    else {
+        html += `
+            <div class="flex justify-between flex-wrap gap-3 mb-4">
+                <h2 class="text-xl font-bold">
+                    <i class="fas fa-file-upload text-orange-600 mr-2"></i>
+                    Uploaded Reports (${uploadedReportsData.length})
+                </h2>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="openUploadReportModal()" class="btn-warning">
+                        <i class="fas fa-upload mr-1"></i> Upload Report
+                    </button>
+                    <button onclick="exportAllUploadedReportsToExcel()" class="btn-success">
+                        <i class="fas fa-file-excel mr-1"></i> Excel All
+                    </button>
+                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger">
+                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    </button>
+                </div>
+            </div>
+            <div class="reports-grid" id="uploadedReportsGrid"></div>
+        `;
+
         document.getElementById('reportsPage').innerHTML = html;
-        if (uploadedReportsData.length === 0) { document.getElementById('uploadedReportsGrid').innerHTML = '<div class="col-span-2 text-center py-12 text-gray-400">No uploaded reports. Click "Upload Report" to add one.</div>'; return; }
+
+        if (uploadedReportsData.length === 0) {
+            document.getElementById('uploadedReportsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p>No uploaded reports. Click "Upload Report" to add one.</p>
+                </div>
+            `;
+            return;
+        }
+
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
-            const isUnviewed = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && !viewedReportIds.includes(doc.id);
+            // Check if uploaded report is unviewed
+            const isUnviewed = doc.sent_from_department && 
+                doc.sent_from_department != DEPARTMENT_ID && 
+                !viewedReportIds.includes(doc.id);
+
+            const isHighlighted = highlightId && doc.id === highlightId;
+            
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
             let fileIcon = getFileIconClass(doc.file_name);
             let fileIconColor = '';
@@ -2099,10 +2294,75 @@ async function loadReports(highlightId = null) {
             else if (fileIcon === 'fa-file-word') fileIconColor = 'text-blue-500';
             else if (fileIcon === 'fa-file-excel') fileIconColor = 'text-green-500';
             else fileIconColor = 'text-gray-500';
-            reportsHtml += `<div class="report-card ${isUnviewed ? 'report-unviewed' : ''}" id="uploaded-report-card-${doc.id}" onclick="viewUploadedReportDetail(${doc.id})"><div class="report-header-custom"><h4 class="font-semibold text-sm"><i class="fas ${fileIcon} ${fileIconColor} mr-2"></i>${escapeHtml(doc.title)}</h4><p class="text-[9px] opacity-90">${doc.file_name || 'Document'}</p></div>${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}<div class="p-3"><div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span></div><p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p><div class="flex gap-2 mt-2 pt-1 border-t"><button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div></div></div>`;
+
+            // Source department badge
+            let sourceBadge = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                sourceBadge = `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                        <i class="fas fa-paper-plane text-[8px]"></i>
+                        ${escapeHtml(deptName)}
+                    </span>
+                `;
+            }
+
+            reportsHtml += `
+                <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
+                     id="uploaded-report-card-${doc.id}" 
+                     onclick="viewUploadedReportDetail(${doc.id})"
+                     style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
+                    
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    
+                    <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
+                        <div class="flex items-center gap-2">
+                            <i class="fas ${fileIcon} ${fileIconColor} text-sm"></i>
+                            <h4 class="font-semibold text-sm">${escapeHtml(doc.title)}</h4>
+                        </div>
+                        <div class="flex justify-between items-center mt-1">
+                            <p class="text-[9px] opacity-90">${doc.file_name || 'Document'}</p>
+                            ${sourceBadge}
+                        </div>
+                    </div>
+                    
+                    <div class="p-3">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="text-[9px] bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
+                        </div>
+                        
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2 line-clamp-2">
+                            ${escapeHtml(doc.description || 'No description')}
+                        </p>
+                        
+                        <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
+                            <button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
+
+        // Highlight if needed
+        if (highlightId) {
+            const el = document.getElementById(`uploaded-report-card-${highlightId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => el.classList.remove('search-highlight'), 3000);
+            }
+        }
     }
+
+    // ============================================================
+    // UPDATE REPORT BADGE
+    // ============================================================
     updateReportBadge();
 }
 
@@ -2126,42 +2386,522 @@ function viewReportDetails(id) {
     } 
 }
 
-async function sendReportToDept(reportId, deptId) { 
-    const r = reportsData.find(report => report.id === reportId); 
-    if (!r) { showToast('Report not found', true); return; } 
+// ============================================================
+// SEND REPORT - TUMIA FUNCTIONS ZILIZOPO
+// ============================================================
+
+async function sendReportToDept(reportId, deptId) {
+    const r = reportsData.find(report => report.id === reportId);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // KUZUIA FORWARDING - Ikiwa report ilitumwa kutoka department nyingine
+    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+        return;
+    }
+    
     const deptName = departmentNames[deptId] || 'Department';
+
+    const btn = document.querySelector(`#reportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+
     try {
-        const payload = { 
-            report_id: parseInt(reportId), 
-            to_department_id: parseInt(deptId), 
+        // ============================================================
+        // BUILD PAYLOAD - send_report_advanced.php
+        // ============================================================
+        const payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
-            message: `📊 REPORT:\n\nTitle: ${r.title}\nPeriod: ${r.period}\nFrom: Finance Department`
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
+            report_title: r.title,
+            report_period: r.period || 'monthly',
+            report_content: r.content || '',
+            report_status: r.status || 'draft',
+            sent_by: CURRENT_USER || 'Finance Manager',
+            duplicate_send: true,
+            report_data: {
+                id: r.id,
+                title: r.title,
+                period: r.period,
+                content: r.content,
+                status: r.status,
+                department_id: r.department_id || DEPARTMENT_ID,
+                created_by: r.created_by || CURRENT_USER,
+                created_at: r.created_at || new Date().toISOString(),
+                sent_count: (r.sent_count || 0) + 1,
+                is_sent: 1,
+                last_sent_at: new Date().toISOString()
+            },
+            message: `📊 REPORT:\n\nTitle: ${r.title}\nPeriod: ${r.period || 'N/A'}\nFrom: Finance Department\n\nContent Preview:\n${(r.content || '').substring(0, 200)}${(r.content || '').length > 200 ? '...' : ''}`
         };
-        const res = await apiCall('send_report.php', 'POST', payload);
+
+        console.log('📤 Sending report to send_report_advanced.php:', payload);
+
+        // ============================================================
+        // SEND TO send_report_advanced.php
+        // ============================================================
+        const res = await apiCall('send_report_advanced.php', 'POST', payload);
+
         if (res && res.success) {
-            showToast(`✅ Report "${r.title}" sent to ${deptName}`);
+            showToast(`✅ Report "${r.title}" sent to ${deptName}`, false);
+            addLog(`📤 Report "${r.title}" sent to ${deptName}`);
+
+            // ============================================================
+            // UPDATE LOCAL DATA - ONLY FOR THIS REPORT
+            // ============================================================
             r.sent_to_department = deptId;
             r.sent_from_department = DEPARTMENT_ID;
             r.is_viewed_by_department = 0;
+            r.is_sent = 1;
+            r._is_unviewed = true;
+            r.sent_count = (r.sent_count || 0) + 1;
+            r.last_sent_at = new Date().toISOString();
+
+            // ============================================================
+            // ADD NOTIFICATION FOR RECIPIENT
+            // ============================================================
             await apiCall('add_notification.php', 'POST', {
                 department_id: deptId,
+                from_department_id: DEPARTMENT_ID,
                 item_type: 'report',
                 item_id: r.id,
                 item_title: r.title,
-                message: `Report "${r.title}" sent from Finance Department`,
-                from_department_id: DEPARTMENT_ID
-            });
+                message: `📊 Report "${r.title}" sent from Finance Department`,
+                created_by: CURRENT_USER || 'Finance Manager'
+            }).catch(e => console.log('Notification error:', e));
+
+            // ============================================================
+            // REFRESH DATA - TUMIA fetchReports() SIO fetchReportsFromAPI()
+            // ============================================================
+            await fetchReports();    // ✅ TUMIA HII
+            await loadReports();
+            await loadDashboard();
             await fetchNotifications();
+            await fetchUnviewedCounts();
+
+            closeModal('viewReportModal');
+            toggleSendDropdown(`reportSendDropdown-${reportId}`);
+
         } else {
-            showToast(res?.message || 'Failed to send report', true);
+            showToast(res?.message || 'Failed to send report. Please try again.', true);
         }
+
     } catch(e) {
+        console.error('❌ Send report error:', e);
         showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
-    toggleSendDropdown(`reportSendDropdown-${reportId}`);
-    closeModal('viewReportModal'); 
+}
+// ============================================================
+// SEND UPLOADED REPORT - TUMIA FUNCTIONS ZILIZOPO
+// ============================================================
+
+async function sendUploadedReportToDept(reportId, deptId) {
+    console.log('🔵 sendUploadedReportToDept called with:', reportId, deptId);
+    
+    const targetId = parseInt(reportId);
+    let doc = uploadedReportsData.find(d => parseInt(d.id) === targetId);
+    
+    if (!doc) {
+        showToast('Uploaded report not found. Please refresh.', true);
+        return;
+    }
+    
+    // KUZUIA FORWARDING - Ikiwa uploaded report ilitumwa kutoka department nyingine
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
+        return;
+    }
+    
+    const deptName = departmentNames[deptId] || 'Department';
+
+    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
+    const originalText = btn ? btn.innerHTML : 'Sending...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+
+    try {
+        // ============================================================
+        // BUILD PAYLOAD - send_uploaded_report_advanced.php
+        // ============================================================
+        const payload = {
+            uploaded_report_id: parseInt(doc.id),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
+            title: doc.title || 'Uploaded Report',
+            file_name: doc.file_name || '',
+            description: doc.description || '',
+            period: doc.period || 'monthly',
+            uploaded_by: doc.uploaded_by || CURRENT_USER,
+            created_at: doc.created_at || new Date().toISOString(),
+            doc_type: 'uploaded_report',
+            sent_by: CURRENT_USER || 'Finance Manager',
+            duplicate_send: true,
+            uploaded_report_data: {
+                id: doc.id,
+                title: doc.title,
+                description: doc.description || '',
+                file_name: doc.file_name || '',
+                file_path: doc.file_path || '',
+                file_size: parseInt(doc.file_size) || 0,
+                file_type: doc.file_type || '',
+                period: doc.period || 'monthly',
+                uploaded_by: doc.uploaded_by || CURRENT_USER,
+                department_id: doc.department_id || DEPARTMENT_ID,
+                created_at: doc.created_at || new Date().toISOString(),
+                sent_count: (doc.sent_count || 0) + 1,
+                is_sent: 1,
+                last_sent_at: new Date().toISOString()
+            },
+            message: `📁 UPLOADED REPORT:\n\nTitle: ${doc.title || 'Uploaded Report'}\nFile: ${doc.file_name || 'document.pdf'}\nPeriod: ${doc.period || 'N/A'}\nFrom: Finance Department`
+        };
+
+        console.log('📤 Sending uploaded report to send_uploaded_report_advanced.php:', payload);
+
+        // ============================================================
+        // SEND TO send_uploaded_report_advanced.php
+        // ============================================================
+        let res = await apiCall('send_uploaded_report_advanced.php', 'POST', payload);
+
+        // Fallback to send_document_advanced.php if needed
+        if (!res || !res.success) {
+            console.log('⚠️ send_uploaded_report_advanced.php failed, trying send_document_advanced.php...');
+            const docPayload = {
+                document_id: parseInt(doc.id),
+                to_department_id: parseInt(deptId),
+                from_department_id: DEPARTMENT_ID,
+                doc_type: 'uploaded_report',
+                document_title: doc.title || 'Uploaded Report',
+                document_file: doc.file_name || '',
+                description: doc.description || '',
+                sent_by: CURRENT_USER || 'Finance Manager',
+                from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
+                duplicate_send: true,
+                document_data: {
+                    id: doc.id,
+                    title: doc.title,
+                    description: doc.description || '',
+                    file_name: doc.file_name || '',
+                    file_path: doc.file_path || '',
+                    file_size: parseInt(doc.file_size) || 0,
+                    file_type: doc.file_type || '',
+                    uploaded_by: doc.uploaded_by || CURRENT_USER,
+                    department_id: doc.department_id || DEPARTMENT_ID,
+                    created_at: doc.created_at || new Date().toISOString()
+                }
+            };
+            res = await apiCall('send_document_advanced.php', 'POST', docPayload);
+        }
+
+        if (res && res.success) {
+            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}`, false);
+            addLog(`📤 Uploaded report "${doc.title}" sent to ${deptName}`);
+
+            // ============================================================
+            // UPDATE LOCAL DATA - ONLY FOR THIS DOCUMENT
+            // ============================================================
+            doc.sent_to_department = deptId;
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc.is_sent = 1;
+            doc._is_unviewed = true;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.last_sent_at = new Date().toISOString();
+
+            // ============================================================
+            // ADD NOTIFICATION FOR RECIPIENT
+            // ============================================================
+            await apiCall('add_notification.php', 'POST', {
+                department_id: deptId,
+                from_department_id: DEPARTMENT_ID,
+                item_type: 'uploaded_report',
+                item_id: doc.id,
+                item_title: doc.title,
+                message: `📁 Uploaded report "${doc.title}" sent from Finance Department`,
+                created_by: CURRENT_USER || 'Finance Manager'
+            }).catch(e => console.log('Notification error:', e));
+
+            // ============================================================
+            // REFRESH DATA - TUMIA fetchUploadedReports() SIO fetchUploadedReportsFromAPI()
+            // ============================================================
+            await fetchUploadedReports();  // ✅ TUMIA HII
+            await fetchReports();          // ✅ TUMIA HII
+            await loadReports();
+            await loadDashboard();
+            await fetchNotifications();
+            await fetchUnviewedCounts();
+
+            closeModal('viewReportModal');
+            toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
+
+        } else {
+            showToast(res?.message || 'Failed to send uploaded report. Please try again.', true);
+        }
+
+    } catch(e) {
+        console.error('❌ Send uploaded report error:', e);
+        showToast('Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
 }
 
+// ============================================================
+// ==================== VIEW SENT REPORTS FUNCTIONS ====================
+// ============================================================
+
+/**
+ * Get sent reports for a department
+ */
+async function getSentReports(deptId = null) {
+    const params = deptId ? `?department_id=${deptId}` : '';
+    const res = await apiCall(`get_sent_reports.php${params}`);
+    if (res.success && res.data) {
+        return res.data;
+    }
+    return [];
+}
+
+/**
+ * Get sent uploaded reports for a department
+ */
+async function getSentUploadedReports(deptId = null) {
+    const params = deptId ? `?department_id=${deptId}` : '';
+    const res = await apiCall(`get_sent_uploaded_reports.php${params}`);
+    if (res.success && res.data) {
+        return res.data;
+    }
+    return [];
+}
+
+/**
+ * Mark a sent report as viewed
+ */
+async function markSentReportViewed(sentId) {
+    const res = await apiCall('mark_sent_report_viewed.php', 'POST', {
+        sent_id: sentId,
+        department_id: DEPARTMENT_ID
+    });
+    return res.success;
+}
+
+/**
+ * Mark a sent uploaded report as viewed
+ */
+async function markSentUploadedReportViewed(sentId) {
+    const res = await apiCall('mark_sent_uploaded_report_viewed.php', 'POST', {
+        sent_id: sentId,
+        department_id: DEPARTMENT_ID
+    });
+    return res.success;
+}
+
+// ============================================================
+// ==================== EXPORT FUNCTIONS ====================
+// ============================================================
+
+/**
+ * Export all reports to Excel
+ */
+function exportAllReportsToExcel() {
+    if (reportsData.length === 0) {
+        showToast('No reports to export', true);
+        return;
+    }
+    
+    let ws = [['ID', 'Title', 'Period', 'Content', 'Created', 'Status', 'Created By', 'Sent From']];
+    reportsData.forEach(r => {
+        ws.push([
+            r.id,
+            r.title,
+            r.period,
+            r.content || '',
+            r.created_at,
+            r.status,
+            r.created_by || 'System',
+            departmentNames[r.sent_from_department] || 'Finance'
+        ]);
+    });
+    
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports');
+    XLSX.writeFile(wb, `reports_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showToast('Exported to Excel');
+}
+
+/**
+ * Export all uploaded reports to Excel
+ */
+function exportAllUploadedReportsToExcel() {
+    if (uploadedReportsData.length === 0) {
+        showToast('No uploaded reports to export', true);
+        return;
+    }
+    
+    let ws = [['Title', 'File Name', 'Description', 'Period', 'Uploaded By', 'Uploaded At', 'File Size']];
+    uploadedReportsData.forEach(d => {
+        ws.push([
+            d.title,
+            d.file_name,
+            d.description || '',
+            d.period,
+            d.uploaded_by || 'System',
+            d.created_at,
+            d.file_size ? formatFileSize(d.file_size) : 'Unknown'
+        ]);
+    });
+    
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports');
+    XLSX.writeFile(wb, `uploaded_reports_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showToast('Exported to Excel');
+}
+
+/**
+ * Export all requests to Excel
+ */
+function exportAllRequestsToExcel() {
+    if (requestsData.length === 0) {
+        showToast('No requests to export', true);
+        return;
+    }
+    
+    let ws = [['ID', 'Date', 'Department', 'Title', 'Amount', 'Type', 'Status', 'Description', 'Created By', 'Created At', 'Reviewed By', 'Reviewed At']];
+    requestsData.forEach(r => {
+        ws.push([
+            r.id,
+            formatDate(r.request_date || r.created_at),
+            departmentNames[r.department_id] || r.department_name,
+            r.title,
+            r.amount,
+            r.type,
+            r.status,
+            r.description || '',
+            r.created_by || 'System',
+            r.created_at,
+            r.reviewed_by || '-',
+            r.reviewed_at || '-'
+        ]);
+    });
+    
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'BudgetRequests');
+    XLSX.writeFile(wb, `budget_requests_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showToast('Exported to Excel');
+}
+
+// ============================================================
+// ==================== EXPORT TO PDF FUNCTIONS ====================
+// ============================================================
+
+/**
+ * Export all reports to PDF
+ */
+function exportAllReportsToPDF() {
+    if (reportsData.length === 0) {
+        showToast('No reports to export', true);
+        return;
+    }
+    
+    let rows = reportsData.map(r => {
+        let content = r.content || 'No content available';
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let deptName = departmentNames[r.sent_from_department] || 'Finance Department';
+        
+        return `
+            <div style="margin-bottom: 25px; border: 2px solid #059669; border-radius: 12px; overflow: hidden; page-break-inside: avoid;">
+                <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 15px 20px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 700;">${escapeHtml(r.title)}</h3>
+                    <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">${escapeHtml(r.period)} · ${escapeHtml(deptName)} · Status: ${statusText}</p>
+                </div>
+                <div style="padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #475569;">
+                    <strong>Created:</strong> ${formatDateTime(r.created_at)} by ${escapeHtml(r.created_by || 'System')}
+                </div>
+                <div style="padding: 18px 20px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: #1e293b;">
+                    ${escapeHtml(content)}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    let printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to generate PDF', true);
+        return;
+    }
+    
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>All Reports - Finance Department</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #059669; }
+                .header { background: linear-gradient(135deg, #059669, #047857); color: white; padding: 25px; text-align: center; }
+                .header h1 { font-size: 24px; margin: 0; }
+                .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+                .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; font-size: 12px; flex-wrap: wrap; gap: 10px; }
+                .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+                .summary-card { background: white; border-radius: 12px; padding: 15px; text-align: center; border: 1px solid #e5e7eb; }
+                .summary-card .label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+                .summary-card .value { font-size: 18px; font-weight: 800; margin-top: 8px; }
+                .reports-section { padding: 20px 25px; }
+                .footer { text-align: center; font-size: 9px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+                .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+                .print-btn button { background: #059669; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+                @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #059669 !important; -webkit-print-color-adjust: exact; } }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 All Reports Report</h1>
+                    <p>Finance Department - Complete Reports Overview</p>
+                </div>
+                <div class="info-bar">
+                    <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
+                    <span><strong>Total Reports:</strong> ${reportsData.length}</span>
+                    <span><strong>Generated By:</strong> ${CURRENT_USER}</span>
+                    <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+                </div>
+                <div class="summary-cards">
+                    <div class="summary-card"><div class="label">📋 Total Reports</div><div class="value">${reportsData.length}</div></div>
+                    <div class="summary-card"><div class="label">✅ Sent</div><div class="value">${reportsData.filter(r => r.status === 'sent').length}</div></div>
+                    <div class="summary-card"><div class="label">✏️ Draft</div><div class="value">${reportsData.filter(r => r.status === 'draft').length}</div></div>
+                    <div class="summary-card"><div class="label">📝 Total Characters</div><div class="value">${reportsData.reduce((sum, r) => sum + (r.content ? r.content.length : 0), 0).toLocaleString()}</div></div>
+                </div>
+                <div class="reports-section">${rows}</div>
+                <div class="footer">GeoTraverse ERP System - Finance Department | Official All Reports Report</div>
+                <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1000);">🖨️ Save as PDF / Print</button></div>
+            </div>
+        </body>
+        </html>
+    `);
+    
+    printWindow.document.close();
+    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
+}
 function exportSingleReportExcel(id) { const r = reportsData.find(report=>report.id===id); if(r) { let ws=[['Title','Period','Content','Created','Status','Created By']]; ws.push([r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System']); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Report'); XLSX.writeFile(wb, `report_${r.id}.xlsx`); showToast('Exported'); } }
 
 function exportSingleReportPDF(id) {
@@ -2188,10 +2928,128 @@ function exportAllReportsToPDF() {
     showToast('PDF generation started');
 }
 
-async function saveReport() { let id = document.getElementById('reportId').value; let data = { title: document.getElementById('reportTitle').value.trim(), period: document.getElementById('reportPeriod').value, content: document.getElementById('reportContent').value.trim(), department_id: DEPARTMENT_ID, status: 'draft', created_by: CURRENT_USER, is_viewed_by_department: 1, sent_from_department: DEPARTMENT_ID, created_at: new Date().toISOString(), id: id ? parseInt(id) : Date.now() }; if(!data.title||!data.content) { showToast('Title and content required', true); return; } if (id) { const index = reportsData.findIndex(r => r.id === parseInt(id)); if (index !== -1) reportsData[index] = { ...reportsData[index], ...data }; } else { data.id = Date.now(); reportsData.unshift(data); } saveReportsToStorage(); showToast(id ? 'Report updated' : 'Report added'); closeModal('addReportModal'); await loadReports(); await loadDashboard(); }
+// ============================================================
+// SAVE REPORT - TUMIA API TU, SI LOCAL STORAGE
+// ============================================================
+
+async function saveReport() {
+    let id = document.getElementById('reportId').value;
+    let title = document.getElementById('reportTitle').value.trim();
+    let period = document.getElementById('reportPeriod').value;
+    let content = document.getElementById('reportContent').value.trim();
+    
+    if (!title || !content) {
+        showToast('Title and content required', true);
+        return;
+    }
+    
+    let data = {
+        title: title,
+        period: period,
+        content: content,
+        department_id: DEPARTMENT_ID,
+        status: 'draft',
+        created_by: CURRENT_USER,
+        is_viewed_by_department: 1,
+        sent_from_department: DEPARTMENT_ID
+    };
+    
+    const btn = document.querySelector('#addReportModal .btn-primary');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+    btn.disabled = true;
+    
+    try {
+        let res;
+        if (id) {
+            // UPDATE EXISTING REPORT
+            data.id = parseInt(id);
+            data.updated_by = CURRENT_USER;
+            res = await apiCall('update_report.php', 'POST', data);
+        } else {
+            // ADD NEW REPORT
+            res = await apiCall('add_report.php', 'POST', data);
+        }
+        
+        if (res && res.success) {
+            showToast(id ? '✅ Report updated' : '✅ Report added');
+            addLog(id ? `Report updated: ${title}` : `Report added: ${title}`);
+            closeModal('addReportModal');
+            
+            // ============================================================
+            // REFRESH REPORTS FROM API - SI LOCAL STORAGE
+            // ============================================================
+            await fetchReports();
+            await loadReports();
+            await loadDashboard();
+            
+        } else {
+            showToast(res?.message || '❌ Failed to save report', true);
+        }
+        
+    } catch(e) {
+        console.error('Save report error:', e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
 function editReport(id) { const r = reportsData.find(report => report.id === id); if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('addReportModal'); } }
-async function deleteReportItem(id) { if(confirm('Delete this report permanently?')) { const r = reportsData.find(report => report.id === id); if(r) await addToRecycleBin(id, 'report', r.title); reportsData = reportsData.filter(report => report.id !== id); saveReportsToStorage(); const res = await apiCall('delete_report.php', 'POST', { report_id: id, department_id: DEPARTMENT_ID, deleted_by_department: 1 }); if(!res.success) console.log('API delete failed but removed locally'); await loadReports(); await loadDashboard(); showToast('Report deleted'); } }
 function openGenerateReportModal() { document.getElementById('genReportTitle').value = ''; document.getElementById('genPeriodType').value = 'daily'; openModal('generateReportModal'); }
+// ============================================================
+// DELETE REPORT - TUMIA API TU
+// ============================================================
+
+async function deleteReportItem(id) {
+    if (!confirm('Delete this report permanently?')) return;
+    
+    const r = reportsData.find(report => report.id === id);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    try {
+        // ============================================================
+        // DELETE FROM API
+        // ============================================================
+        const res = await apiCall('delete_report.php', 'POST', {
+            report_id: id,
+            department_id: DEPARTMENT_ID,
+            deleted_by_department: 1,
+            deleted_by_admin: 0
+        });
+        
+        if (res && res.success) {
+            // Add to recycle bin
+            await addToRecycleBin(id, 'report', r.title);
+            
+            showToast('✅ Report moved to recycle bin');
+            addLog(`Report deleted: ${r.title}`);
+            
+            // ============================================================
+            // REFRESH REPORTS FROM API - SI LOCAL STORAGE
+            // ============================================================
+            await fetchReports();
+            await loadReports();
+            await loadDashboard();
+            
+        } else {
+            // Even if API fails, remove from local view
+            reportsData = reportsData.filter(report => report.id !== id);
+            await loadReports();
+            showToast('Report removed from view', false);
+        }
+        
+    } catch(e) {
+        console.error('Delete report error:', e);
+        reportsData = reportsData.filter(report => report.id !== id);
+        await loadReports();
+        showToast('Report removed from view', false);
+    }
+}
 
 async function generateAndSaveReport() { 
     const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`; 
@@ -2211,7 +3069,7 @@ async function generateAndSaveReport() {
     let cancelledRequests = requestsData.filter(r => r.status === 'cancelled' || r.status === 'Cancelled').length;
     let content = `${period.toUpperCase()} REPORT - FINANCE DEPARTMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGenerated by: ${CURRENT_USER}\nGenerated on: ${new Date().toLocaleString()}\nPeriod: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\nDepartment: Finance (ID: ${DEPARTMENT_ID})\n\n📈 FINANCIAL SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Income (Period): ${formatMoney(totalIncome)}\nTotal Expenses (Period): ${formatMoney(totalExpense)}\nNet Profit (Period): ${formatMoney(totalIncome - totalExpense)}\n\n📋 TRANSACTIONS SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Transactions (All Time): ${myTransactions.length}\nIncome Transactions: ${myTransactions.filter(t => t.type === 'income').length}\nExpense Transactions: ${myTransactions.filter(t => t.type === 'expense').length}\n\n📋 BUDGET REQUESTS SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Requests: ${requestsData.length}\nPending Requests: ${pendingRequests}\nApproved Requests: ${approvedRequests}\nCancelled Requests: ${cancelledRequests}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nReport generated automatically by GeoTraverse ERP System\nFinance Department - Official Report\n`; 
     const newReport = { id: Date.now(), title: title, period: period, content: content, department_id: DEPARTMENT_ID, status: 'draft', created_by: CURRENT_USER, is_viewed_by_department: 1, sent_from_department: DEPARTMENT_ID, created_at: new Date().toISOString() }; 
-    reportsData.unshift(newReport); saveReportsToStorage(); 
+    reportsData.unshift(newReport); 
     showToast(`✅ ${period} report generated and saved successfully!`); 
     closeModal('generateReportModal'); 
     await loadReports(); 
@@ -2530,48 +3388,7 @@ function showRecycleBin() {
     html += `</div><div class="flex justify-end mt-4"><button onclick="this.closest('.fixed').remove()" class="btn-primary">Close</button></div></div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
 }
-async function getCurrentUser() {
-    try {
-        const res = await apiCall('get_current_user.php');
-        if (res && res.success && res.data) {
-            CURRENT_USER = res.data.name || "User";
-            // Weka kwenye sessionStorage kwa matumizi ya baadaye
-            sessionStorage.setItem('user_name', CURRENT_USER);
-            sessionStorage.setItem('user_id', res.data.id);
-            sessionStorage.setItem('department_id', res.data.department_id);
-            sessionStorage.setItem('is_admin', res.data.is_admin);
-        }
-    } catch(e) {
-        console.log('Could not fetch current user:', e);
-        // Tumia sessionStorage kama backup
-        const sessionUser = sessionStorage.getItem('user_name');
-        if (sessionUser) {
-            CURRENT_USER = sessionUser;
-        }
-    }
-}
 
-// Hii function inaweza kuwa kwenye kila dashboard
-async function loadUserInfo() {
-    try {
-        const res = await apiCall('get_current_user.php');
-        if (res.success && res.data) {
-            // Onyesha jina kwenye sidebar
-            document.getElementById('userNameDisplay').textContent = res.data.name;
-            
-            // Onyesha department
-            const deptNames = {
-                2: "Finance", 3: "Sales & Marketing", 4: "Manager",
-                5: "Secretary", 6: "Bricks & Timber", 7: "Aluminium",
-                8: "Town Planning", 9: "Architectural", 10: "Survey",
-                11: "Construction", 12: "Hatimiliki"
-            };
-            document.getElementById('userDeptDisplay').textContent = deptNames[res.data.department_id] || 'Unknown';
-        }
-    } catch(e) {
-        console.log('Error loading user info:', e);
-    }
-}
 // ============================================================
 // ==================== GLOBAL SEARCH ====================
 // ============================================================
