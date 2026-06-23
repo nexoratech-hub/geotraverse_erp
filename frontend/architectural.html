@@ -1382,7 +1382,7 @@ function updateDailyWorkSummaryFromData(summary) {
 }
 
 // ============================================================
-// ==================== RENDER DAILY WORK TABLE ====================
+// ==================== RENDER DAILY WORK TABLE - WITH EDIT & DELETE ====================
 // ============================================================
 function renderDailyWorkTable(records) {
     console.log('📋 renderDailyWorkTable called with', records ? records.length : 0, 'records');
@@ -1427,6 +1427,9 @@ function renderDailyWorkTable(records) {
                 sentFromBadge = '<span class="sent-from-badge" style="font-size:8px;padding:2px 8px;background:#fef3c7;color:#d97706;border-radius:12px;margin-left:4px;"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(fromName) + '</span>';
             }
             
+            // ============================================================
+            // ACTIONS - WITH EDIT & DELETE BUTTONS (for non-sent records only)
+            // ============================================================
             var actionsHtml = '';
             if (isSent) {
                 actionsHtml = '<span class="text-[8px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">Received</span>';
@@ -1453,6 +1456,8 @@ function renderDailyWorkTable(records) {
         console.error('❌ Error in renderDailyWorkTable:', error);
     }
 }
+
+
 // ============================================================
 // ==================== FETCH SENT PROJECTS ====================
 // ============================================================
@@ -2101,7 +2106,7 @@ function deleteProject(id) {
 
 
 // ============================================================
-// ==================== FIX: sendProjectToDept ====================
+// ==================== SEND PROJECT (WITH FORWARD SUPPORT) ====================
 // ============================================================
 function sendProjectToDept(projectId, deptId) {
     console.log('📋 sendProjectToDept called with:', projectId, deptId);
@@ -2126,6 +2131,7 @@ function sendProjectToDept(projectId, deptId) {
         }
         deptName = deptName || 'Department';
         
+        // Get button
         var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
         var originalText = btn ? btn.innerHTML : 'Sending...';
         if (btn) {
@@ -2133,21 +2139,51 @@ function sendProjectToDept(projectId, deptId) {
             btn.disabled = true;
         }
         
-        // Get daily work records for this project
+        // Get daily work records for this project (local + sent)
         var projectDailyWork = dailyworkData.filter(function(w) { 
             return parseInt(w.project_id) === parseInt(projectId); 
+        });
+        
+        // Also get sent daily work records if project was received
+        var sentDailyWork = [];
+        if (p._daily_work_records && p._daily_work_records.length > 0) {
+            sentDailyWork = p._daily_work_records;
+        }
+        
+        // Combine all daily work records
+        var allDailyWork = projectDailyWork.slice();
+        
+        // Add sent records that don't exist locally
+        sentDailyWork.forEach(function(sent) {
+            var exists = allDailyWork.some(function(w) { 
+                return w.id === sent.id || w.original_dailywork_id === sent.original_dailywork_id;
+            });
+            if (!exists) {
+                allDailyWork.push({
+                    id: sent.id || 'sent-' + Date.now() + Math.random(),
+                    date: sent.date || sent.created_at || new Date().toISOString(),
+                    project_id: parseInt(projectId),
+                    project_name: sent.project_name || p.name,
+                    work_description: sent.work_description || sent.description || 'Daily work record',
+                    budget: parseFloat(sent.budget) || 0,
+                    amount: parseFloat(sent.amount) || parseFloat(sent.expenses) || 0,
+                    status: sent.status || 'pending',
+                    created_by: sent.created_by || 'System',
+                    created_at: sent.created_at || new Date().toISOString()
+                });
+            }
         });
         
         // Calculate daily work summary
         var totalBudget = 0, totalExpenses = 0;
         var completedCount = 0, partialCount = 0, pendingCount = 0;
         var dailyRecords = [];
-        for (var m = 0; m < projectDailyWork.length; m++) {
-            var w = projectDailyWork[m];
+        for (var m = 0; m < allDailyWork.length; m++) {
+            var w = allDailyWork[m];
             totalBudget += parseFloat(w.budget) || 0;
             totalExpenses += parseFloat(w.amount) || 0;
-            if (w.status === 'completed') completedCount++;
-            else if (w.status === 'partial') partialCount++;
+            if (w.status === 'completed' || w.status === 'Completed') completedCount++;
+            else if (w.status === 'partial' || w.status === 'Partial') partialCount++;
             else pendingCount++;
             
             dailyRecords.push({
@@ -2173,6 +2209,11 @@ function sendProjectToDept(projectId, deptId) {
             imagePath = cleanImage;
         }
         
+        // Build payload - preserve original sender info if forwarding
+        var originalSender = p.sent_from_dept || DEPARTMENT_ID;
+        var originalSenderName = departmentNames[originalSender] || 'Architectural';
+        var isForwarding = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+        
         var payload = {
             project_id: parseInt(projectId),
             to_department_id: parseInt(deptId),
@@ -2188,29 +2229,37 @@ function sendProjectToDept(projectId, deptId) {
             image: imagePath,
             start_date: p.start_date || '',
             end_date: p.end_date || '',
-            sent_by: 'Architectural Manager', // Hardcoded instead of CURRENT_USER
+            sent_by: 'Architectural Manager',
             duplicate_send: true,
             daily_work_records: dailyRecords,
             daily_summary: {
                 total_budget: totalBudget,
                 total_expenses: totalExpenses,
                 remaining_budget: remainingBudget,
-                records_count: projectDailyWork.length,
+                records_count: allDailyWork.length,
                 completed_count: completedCount,
                 partial_count: partialCount,
                 pending_count: pendingCount
-            }
+            },
+            // Add forwarding info
+            is_forwarded: isForwarding,
+            original_sender_id: originalSender,
+            original_sender_name: originalSenderName,
+            forwarded_from: DEPARTMENT_ID,
+            forwarded_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
         };
         
-        console.log('📤 Sending payload:', payload);
+        console.log('📤 Sending project payload:', payload);
         
         apiCall('send_project_advanced.php', 'POST', payload)
         .then(function(res) {
             console.log('📥 Response:', res);
             if (res && res.success) {
-                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records', false);
-                addLog('Project sent: "' + p.name + '" to ' + deptName + ' with ' + projectDailyWork.length + ' daily records');
+                var forwardMsg = isForwarding ? ' (forwarded from ' + originalSenderName + ')' : '';
+                showToast('✅ Project "' + p.name + '" sent to ' + deptName + forwardMsg + ' with ' + allDailyWork.length + ' daily work records', false);
+                addLog('Project sent: "' + p.name + '" to ' + deptName + forwardMsg);
                 
+                // Update local project
                 p.sent_to_dept = deptId;
                 p.sent_from_dept = DEPARTMENT_ID;
                 p.is_viewed_by_department = 0;
@@ -2250,66 +2299,359 @@ function sendProjectToDept(projectId, deptId) {
     }
 }
 
-function sendDocumentToDept(docId, deptId) {
-    var doc = projectDocuments.find(function(d) { return d.id === docId; });
-    if (!doc) { showToast('Document not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+// ============================================================
+// ==================== SEND REPORT (WITH FORWARD SUPPORT) ====================
+// ============================================================
+function sendReportToDeptModal(reportId, deptId) {
+    console.log('📋 sendReportToDeptModal called with:', reportId, deptId);
     
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    var btn = document.querySelector('#docSendDropdown-' + docId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    
-    var payload = {
-        document_id: parseInt(docId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        doc_type: 'project',
-        duplicate_send: true,
-        doc_data: {
-            id: doc.id,
-            title: doc.title,
-            description: doc.description || '',
-            file_name: doc.file_name || '',
-            file_path: doc.file_path || '',
-            file_size: doc.file_size || 0,
-            file_type: doc.file_type || '',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
-            department_id: doc.department_id || DEPARTMENT_ID,
-            created_at: doc.created_at,
-            sent_count: (doc.sent_count || 0) + 1
+    try {
+        var r = reportsData.find(function(r) { return parseInt(r.id) === parseInt(reportId); });
+        if (!r) {
+            showToast('Report not found', true);
+            return;
         }
-    };
-    
-    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Document "' + doc.title + '" sent to ' + deptName, false);
-            addLog('Document sent: "' + doc.title + '" to ' + deptName);
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.is_sent = 1;
-            doc.last_sent_at = new Date().toISOString();
-            updateProjectBadge();
-            closeModal('documentInfoModal');
-            loadProjects();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send document', true);
+        if (parseInt(deptId) === parseInt(DEPARTMENT_ID)) {
+            showToast('Cannot send to your own department', true);
+            return;
         }
-    }).catch(function(e) {
-        console.error('Send document error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
-        toggleSendDropdown('docSendDropdown-' + docId);
-    });
+        
+        var deptName = null;
+        for (var d = 0; d < allDepartmentsForSend.length; d++) {
+            if (allDepartmentsForSend[d].id == deptId) {
+                deptName = allDepartmentsForSend[d].name;
+                break;
+            }
+        }
+        deptName = deptName || 'Department';
+        
+        var btn = document.querySelector('#reportSendDropdown-' + reportId + ' .dropdown-trigger');
+        var originalText = btn ? btn.innerHTML : 'Sending...';
+        if (btn) {
+            btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+            btn.disabled = true;
+        }
+        
+        // Check if forwarding
+        var isForwarding = r.sent_from_department && parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        var originalSender = r.sent_from_department || DEPARTMENT_ID;
+        var originalSenderName = departmentNames[originalSender] || 'Architectural';
+        
+        var payload = {
+            report_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+            report_title: r.title,
+            report_period: r.period,
+            report_content: r.content,
+            sent_by: 'Architectural Manager',
+            duplicate_send: true,
+            report_data: {
+                id: r.id,
+                title: r.title,
+                period: r.period,
+                content: r.content,
+                file_path: r.file_path || '',
+                file_name: r.file_name || '',
+                status: r.status || 'draft',
+                department_id: r.department_id || DEPARTMENT_ID,
+                created_by: r.created_by || 'System',
+                created_at: r.created_at,
+                updated_by: r.updated_by || null,
+                updated_at: r.updated_at || null,
+                sent_count: (r.sent_count || 0) + 1,
+                is_sent: 1
+            },
+            // Add forwarding info
+            is_forwarded: isForwarding,
+            original_sender_id: originalSender,
+            original_sender_name: originalSenderName,
+            forwarded_from: DEPARTMENT_ID,
+            forwarded_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
+        };
+        
+        console.log('📤 Sending report payload:', payload);
+        
+        apiCall('send_report_advanced.php', 'POST', payload)
+        .then(function(res) {
+            if (res && res.success) {
+                var forwardMsg = isForwarding ? ' (forwarded from ' + originalSenderName + ')' : '';
+                showToast('✅ Report "' + r.title + '" sent to ' + deptName + forwardMsg, false);
+                addLog('Report sent: "' + r.title + '" to ' + deptName + forwardMsg);
+                
+                r.sent_to_department = deptId;
+                r.sent_from_department = DEPARTMENT_ID;
+                r.is_viewed_by_department = 0;
+                r.sent_count = (r.sent_count || 0) + 1;
+                r.is_sent = 1;
+                
+                unviewedReportsCount = reportsData.filter(function(report) {
+                    return report.sent_from_department && report.sent_from_department != DEPARTMENT_ID && 
+                        report.sent_to_department === DEPARTMENT_ID && 
+                        (report.is_viewed_by_department == 0 || report.is_viewed_by_department === null);
+                }).length;
+                updateReportBadge();
+                
+                loadReports();
+                loadDashboard();
+            } else {
+                showToast(res?.message || 'Failed to send report', true);
+            }
+        })
+        .catch(function(e) {
+            console.error('Send report error:', e);
+            showToast('Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+            toggleSendDropdown('reportSendDropdown-' + reportId);
+            closeModal('viewReportModal');
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in sendReportToDeptModal:', error);
+        showToast('Error: ' + error.message, true);
+    }
 }
 
+// ============================================================
+// ==================== SEND UPLOADED REPORT (WITH FORWARD SUPPORT) ====================
+// ============================================================
+function sendUploadedReportToDept(reportId, deptId) {
+    console.log('📋 sendUploadedReportToDept called with:', reportId, deptId);
+    
+    try {
+        var doc = uploadedReportsData.find(function(d) { return parseInt(d.id) === parseInt(reportId); });
+        if (!doc) {
+            showToast('Uploaded report not found', true);
+            return;
+        }
+        if (parseInt(deptId) === parseInt(DEPARTMENT_ID)) {
+            showToast('Cannot send to your own department', true);
+            return;
+        }
+        
+        var deptName = null;
+        for (var d = 0; d < allDepartmentsForSend.length; d++) {
+            if (allDepartmentsForSend[d].id == deptId) {
+                deptName = allDepartmentsForSend[d].name;
+                break;
+            }
+        }
+        deptName = deptName || 'Department';
+        
+        var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
+        var originalText = btn ? btn.innerHTML : 'Sending...';
+        if (btn) {
+            btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+            btn.disabled = true;
+        }
+        
+        // Check if forwarding
+        var isForwarding = doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        var originalSender = doc.sent_from_department || DEPARTMENT_ID;
+        var originalSenderName = departmentNames[originalSender] || 'Architectural';
+        
+        var payload = {
+            document_id: parseInt(reportId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+            doc_type: 'uploaded_report',
+            document_title: doc.title,
+            document_file: doc.file_name || '',
+            description: doc.description || '',
+            sent_by: 'Architectural Manager',
+            duplicate_send: true,
+            doc_data: {
+                id: doc.id,
+                title: doc.title,
+                description: doc.description || '',
+                file_name: doc.file_name || '',
+                file_path: doc.file_path || '',
+                file_size: doc.file_size || 0,
+                file_type: doc.file_type || '',
+                period: doc.period || 'monthly',
+                uploaded_by: doc.uploaded_by || 'System',
+                department_id: doc.department_id || DEPARTMENT_ID,
+                created_at: doc.created_at,
+                sent_count: (doc.sent_count || 0) + 1
+            },
+            // Add forwarding info
+            is_forwarded: isForwarding,
+            original_sender_id: originalSender,
+            original_sender_name: originalSenderName,
+            forwarded_from: DEPARTMENT_ID,
+            forwarded_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
+        };
+        
+        console.log('📤 Sending uploaded report payload:', payload);
+        
+        apiCall('send_document_advanced.php', 'POST', payload)
+        .then(function(res) {
+            if (res && res.success) {
+                var forwardMsg = isForwarding ? ' (forwarded from ' + originalSenderName + ')' : '';
+                showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+                addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName + forwardMsg);
+                
+                doc.sent_to_department = deptId;
+                doc.sent_from_department = DEPARTMENT_ID;
+                doc.is_viewed_by_department = 0;
+                doc.sent_count = (doc.sent_count || 0) + 1;
+                doc.is_sent = 1;
+                
+                unviewedReportsCount = uploadedReportsData.filter(function(report) {
+                    return report.sent_from_department && report.sent_from_department != DEPARTMENT_ID && 
+                        report.sent_to_department === DEPARTMENT_ID && 
+                        (report.is_viewed_by_department == 0 || report.is_viewed_by_department === null);
+                }).length;
+                updateReportBadge();
+                
+                closeModal('documentInfoModal');
+                loadReports();
+                loadDashboard();
+            } else {
+                showToast(res?.message || 'Failed to send uploaded report', true);
+            }
+        })
+        .catch(function(e) {
+            console.error('Send uploaded report error:', e);
+            showToast('Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+            toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in sendUploadedReportToDept:', error);
+        showToast('Error: ' + error.message, true);
+    }
+}
 
+// ============================================================
+// ==================== SEND DOCUMENT (WITH FORWARD SUPPORT) ====================
+// ============================================================
+function sendDocumentToDept(docId, deptId) {
+    console.log('📋 sendDocumentToDept called with:', docId, deptId);
+    
+    try {
+        var doc = projectDocuments.find(function(d) { return parseInt(d.id) === parseInt(docId); });
+        if (!doc) {
+            showToast('Document not found', true);
+            return;
+        }
+        if (parseInt(deptId) === parseInt(DEPARTMENT_ID)) {
+            showToast('Cannot send to your own department', true);
+            return;
+        }
+        
+        var deptName = null;
+        for (var d = 0; d < allDepartmentsForSend.length; d++) {
+            if (allDepartmentsForSend[d].id == deptId) {
+                deptName = allDepartmentsForSend[d].name;
+                break;
+            }
+        }
+        deptName = deptName || 'Department';
+        
+        var btn = document.querySelector('#docSendDropdown-' + docId + ' .dropdown-trigger');
+        var originalText = btn ? btn.innerHTML : 'Sending...';
+        if (btn) {
+            btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+            btn.disabled = true;
+        }
+        
+        // Check if forwarding
+        var isForwarding = doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        var originalSender = doc.sent_from_department || DEPARTMENT_ID;
+        var originalSenderName = departmentNames[originalSender] || 'Architectural';
+        
+        var payload = {
+            document_id: parseInt(docId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+            doc_type: 'project_document',
+            document_title: doc.title,
+            document_file: doc.file_name || '',
+            description: doc.description || '',
+            sent_by: 'Architectural Manager',
+            duplicate_send: true,
+            doc_data: {
+                id: doc.id,
+                title: doc.title,
+                description: doc.description || '',
+                file_name: doc.file_name || '',
+                file_path: doc.file_path || '',
+                file_size: doc.file_size || 0,
+                file_type: doc.file_type || '',
+                uploaded_by: doc.uploaded_by || 'System',
+                department_id: doc.department_id || DEPARTMENT_ID,
+                created_at: doc.created_at,
+                sent_count: (doc.sent_count || 0) + 1
+            },
+            // Add forwarding info
+            is_forwarded: isForwarding,
+            original_sender_id: originalSender,
+            original_sender_name: originalSenderName,
+            forwarded_from: DEPARTMENT_ID,
+            forwarded_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
+        };
+        
+        console.log('📤 Sending document payload:', payload);
+        
+        apiCall('send_document_advanced.php', 'POST', payload)
+        .then(function(res) {
+            if (res && res.success) {
+                var forwardMsg = isForwarding ? ' (forwarded from ' + originalSenderName + ')' : '';
+                showToast('✅ Document "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+                addLog('Document sent: "' + doc.title + '" to ' + deptName + forwardMsg);
+                
+                doc.sent_to_department = deptId;
+                doc.sent_from_department = DEPARTMENT_ID;
+                doc.is_viewed_by_department = 0;
+                doc.sent_count = (doc.sent_count || 0) + 1;
+                doc.is_sent = 1;
+                
+                unviewedProjectsCount = projectDocuments.filter(function(document) {
+                    return document.sent_from_department && document.sent_from_department != DEPARTMENT_ID && 
+                        document.sent_to_department === DEPARTMENT_ID && 
+                        (document.is_viewed_by_department == 0 || document.is_viewed_by_department === null);
+                }).length;
+                updateProjectBadge();
+                
+                closeModal('documentInfoModal');
+                loadProjects();
+                loadDashboard();
+            } else {
+                showToast(res?.message || 'Failed to send document', true);
+            }
+        })
+        .catch(function(e) {
+            console.error('Send document error:', e);
+            showToast('Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+            toggleSendDropdown('docSendDropdown-' + docId);
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in sendDocumentToDept:', error);
+        showToast('Error: ' + error.message, true);
+    }
+}
 
 // ============================================================
 // ==================== FETCH SENT DAILY WORK BY PROJECT ====================
@@ -2327,9 +2669,8 @@ function fetchSentDailyWork(projectId) {
 
 
 
-
 // ============================================================
-// ==================== FIX: VIEW PROJECT DETAILS ====================
+// ==================== VIEW PROJECT DETAILS - REMOVE EDIT & DELETE ====================
 // ============================================================
 function viewProjectDetails(id) {
     console.log('🔍 viewProjectDetails called with ID:', id);
@@ -2401,31 +2742,30 @@ function viewProjectDetails(id) {
             console.error('❌ viewProjContent element not found');
         }
         
-        // Load daily work records - DIRECTLY without fetchSentDailyWorkByProject
+        // Load daily work records
         loadDailyWorkForProject(id);
         
-        // Build action buttons
+        // ============================================================
+        // BUILD ACTION BUTTONS - NO EDIT & DELETE BUTTONS
+        // ============================================================
         var deptOptions = '';
-        var canSend = !isSent; // Only allow sending if project is NOT received
-        console.log('📋 canSend:', canSend);
         
-        if (canSend) {
-            allDepartmentsForSend.forEach(function(d) {
-                if (d.id !== DEPARTMENT_ID) {
-                    deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-                }
-            });
-        }
+        // Show send button for ALL projects (including received ones)
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendProjectToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
         
+        // ONLY: Excel, PDF, View File, Send/Forward - NO EDIT, NO DELETE
         var buttonsHtml = 
             '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
             '<button onclick="exportProjectToPDF(' + p.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF (Full Report)</button>' +
             (fileUrl ? '<button onclick="window.open(\'' + fileUrl + '\', \'_blank\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View File</button>' : '');
         
-        if (canSend && deptOptions) {
-            buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-        } else if (isSent) {
-            buttonsHtml += '<span class="text-xs text-gray-400 px-3 py-1.5"><i class="fas fa-info-circle mr-1"></i> Received from ' + escapeHtml(sentFromDept) + ' - Cannot forward</span>';
+        // ALWAYS SHOW SEND BUTTON
+        if (deptOptions) {
+            buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane"></i> ' + (isSent ? 'Forward Project' : 'Send Project') + '</button><div id="projSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
         }
         
         var buttonsDiv = document.getElementById('viewProjButtons');
@@ -2445,6 +2785,193 @@ function viewProjectDetails(id) {
     }
 }
 
+
+// ============================================================
+// ==================== VIEW REPORT DETAILS - WITH SEND BUTTONS ====================
+// ============================================================
+function viewReportDetailsModal(id) {
+    var r = reportsData.find(function(r) { return r.id === id; });
+    if (!r) { showToast('Report not found', true); return; }
+    
+    if (r.is_viewed_by_department == 0 && r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
+        markReportViewed(id);
+        apiCall('mark_notification_viewed.php', 'POST', {
+            notification_id: id,
+            department_id: DEPARTMENT_ID,
+            item_type: 'report'
+        }).catch(function(e) {});
+    }
+    
+    var detailsHtml = 
+        '<div class="space-y-4">' +
+            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
+                '<h3 class="text-xl font-bold">' + escapeHtml(r.title) + '</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Report ID: #' + r.id + ' | Period: ' + r.period + '</p>' +
+            '</div>' +
+            '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
+            '<div class="text-[10px] text-gray-500 mt-2 pt-2 border-t">' +
+                '<i class="fas fa-user-plus text-xs mr-1"></i> Created by: ' + escapeHtml(r.created_by || 'System') + 
+                ' on ' + formatDateTime(r.created_at) +
+                (r.updated_by && r.updated_by !== r.created_by ? '<br><i class="fas fa-edit text-xs mr-1"></i> Updated by: ' + escapeHtml(r.updated_by) + ' on ' + formatDateTime(r.updated_at) : '') +
+            '</div>' +
+        '</div>';
+    
+    document.getElementById('viewReportContent').innerHTML = detailsHtml;
+    
+    var isSent = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID;
+    var sentFromDept = isSent ? departmentNames[r.sent_from_department] || 'Unknown' : '';
+    
+    // BUILD BUTTONS - ALWAYS SHOW SEND
+    var deptOptions = '';
+    allDepartmentsForSend.forEach(function(d) {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += '<a onclick="sendReportToDeptModal(' + r.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+        }
+    });
+    
+    var buttonsHtml = 
+        '<button onclick="exportSingleReportExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
+        '<button onclick="exportSingleReportPDFNewWindow(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>';
+    
+    if (deptOptions) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> ' + (isSent ? 'Forward Report' : 'Send Report') + '</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    if (!isSent) {
+        buttonsHtml += '<button onclick="editReport(' + r.id + ')" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-edit"></i> Edit</button>';
+        buttonsHtml += '<button onclick="deleteReport(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-trash"></i> Delete</button>';
+    }
+    
+    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
+    openModal('viewReportModal');
+    loadReports();
+}
+
+// ============================================================
+// ==================== VIEW UPLOADED REPORT DETAILS - WITH SEND BUTTONS ====================
+// ============================================================
+function viewUploadedReportDetail(id) {
+    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
+    if (!doc) { showToast('Report not found', true); return; }
+    
+    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
+        markReportViewed(id);
+        apiCall('mark_notification_viewed.php', 'POST', {
+            notification_id: id,
+            department_id: DEPARTMENT_ID,
+            item_type: 'uploaded_report'
+        }).catch(function(e) {});
+    }
+    
+    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
+    var isSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+    var sentFromDept = isSent ? departmentNames[doc.sent_from_department] || 'Unknown' : '';
+    
+    var detailsHtml = 
+        '<div class="space-y-4">' +
+            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
+                '<h3 class="text-xl font-bold">Document Information</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p>' +
+            '</div>' +
+            '<div class="doc-info-container">' +
+                '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
+                '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
+                (isSent ? '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(sentFromDept) + '</span></div></div>' : '') +
+            '</div>' +
+        '</div>';
+    
+    document.getElementById('viewReportContent').innerHTML = detailsHtml;
+    
+    // BUILD BUTTONS - ALWAYS SHOW SEND
+    var deptOptions = '';
+    allDepartmentsForSend.forEach(function(d) {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+        }
+    });
+    
+    var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
+    
+    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download mr-1"></i> Download</a>';
+    
+    if (deptOptions) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> ' + (isSent ? 'Forward Report' : 'Send Report') + '</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    if (!isSent) {
+        buttonsHtml += '<button onclick="deleteUploadedReport(' + doc.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-trash"></i> Delete</button>';
+    }
+    
+    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
+    openModal('viewReportModal');
+}
+
+// ============================================================
+// ==================== VIEW UPLOADED DOCUMENT - WITH SEND BUTTONS ====================
+// ============================================================
+function viewUploadedDocumentInfo(docId) {
+    var doc = projectDocuments.find(function(d) { return d.id === docId; });
+    if (!doc) { showToast('Document not found', true); return; }
+    
+    // Mark as viewed via notifications
+    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+        markProjectViewed(docId);
+        apiCall('mark_notification_viewed.php', 'POST', {
+            notification_id: docId,
+            department_id: DEPARTMENT_ID,
+            item_type: 'document'
+        }).catch(function(e) {});
+    }
+    
+    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
+    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    
+    var isSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+    var sentFromDept = isSent ? departmentNames[doc.sent_from_department] || 'Unknown' : '';
+    
+    var infoHtml = 
+        '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">' + escapeHtml(doc.title) + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name) + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
+        '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
+        (isSent ? '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(sentFromDept) + '</span></div></div>' : '');
+    
+    document.getElementById('documentInfoContent').innerHTML = infoHtml;
+    
+    // BUILD BUTTONS - ALWAYS SHOW SEND
+    var deptOptions = '';
+    allDepartmentsForSend.forEach(function(d) {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += '<a onclick="sendDocumentToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+        }
+    });
+    
+    var downloadUrl = '../backend/api/download_document.php?id=' + doc.id + '&type=project';
+    
+    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download"></i> Download</a>';
+    
+    if (deptOptions) {
+        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'docSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> ' + (isSent ? 'Forward Document' : 'Send Document') + '</button><div id="docSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    }
+    
+    if (!isSent) {
+        buttonsHtml += '<button onclick="deleteProjectDocument(' + doc.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-trash"></i> Delete</button>';
+    }
+    
+    document.getElementById('documentInfoButtons').innerHTML = buttonsHtml;
+    openModal('documentInfoModal');
+}
 
 
 function updateDailyWorkSummary(records) {
@@ -3358,54 +3885,6 @@ function saveProjectDocument() {
     });
 }
 
-function viewUploadedDocumentInfo(docId) {
-    var doc = projectDocuments.find(function(d) { return d.id === docId; });
-    if (!doc) { showToast('Document not found', true); return; }
-    
-    // Mark as viewed via notifications
-    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-        markProjectViewed(docId);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: docId,
-            department_id: DEPARTMENT_ID,
-            item_type: 'document'
-        }).catch(function(e) {});
-    }
-    
-    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    
-    var infoHtml = 
-        '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">' + escapeHtml(doc.title) + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name) + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
-        '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>';
-    
-    document.getElementById('documentInfoContent').innerHTML = infoHtml;
-    
-    var deptOptions = '';
-    // Only show send if document is NOT received
-    if (!doc.sent_from_department || doc.sent_from_department == DEPARTMENT_ID) {
-        allDepartmentsForSend.forEach(function(d) {
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += '<a onclick="sendDocumentToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-            }
-        });
-    }
-    
-    var downloadUrl = '../backend/api/download_document.php?id=' + doc.id + '&type=project';
-    
-    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download"></i> Download</a>';
-    if (deptOptions) {
-        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'docSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="docSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    }
-    
-    document.getElementById('documentInfoButtons').innerHTML = buttonsHtml;
-    openModal('documentInfoModal');
-}
 
 function deleteProjectDocument(docId) {
     if (confirm('Delete this document? It will be moved to recycle bin.')) {
@@ -3854,258 +4333,9 @@ function switchReportTab(tab) {
     loadReports();
 }
 
-function viewReportDetailsModal(id) {
-    var r = reportsData.find(function(r) { return r.id === id; });
-    if (!r) { showToast('Report not found', true); return; }
-    
-    if (r.is_viewed_by_department == 0 && r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
-        markReportViewed(id);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: id,
-            department_id: DEPARTMENT_ID,
-            item_type: 'report'
-        }).catch(function(e) {});
-    }
-    
-    var detailsHtml = 
-        '<div class="space-y-4">' +
-            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
-                '<h3 class="text-xl font-bold">' + escapeHtml(r.title) + '</h3>' +
-                '<p class="text-xs opacity-90 mt-1">Report ID: #' + r.id + ' | Period: ' + r.period + '</p>' +
-            '</div>' +
-            '<div class="report-content-full">' + escapeHtml(r.content || 'No content available') + '</div>' +
-            '<div class="text-[10px] text-gray-500 mt-2 pt-2 border-t">' +
-                '<i class="fas fa-user-plus text-xs mr-1"></i> Created by: ' + escapeHtml(r.created_by || 'System') + 
-                ' on ' + formatDateTime(r.created_at) +
-                (r.updated_by && r.updated_by !== r.created_by ? '<br><i class="fas fa-edit text-xs mr-1"></i> Updated by: ' + escapeHtml(r.updated_by) + ' on ' + formatDateTime(r.updated_at) : '') +
-            '</div>' +
-        '</div>';
-    
-    document.getElementById('viewReportContent').innerHTML = detailsHtml;
-    
-    var deptOptions = '';
-    // Only show send if report is NOT received
-    var canSend = !r.sent_from_department || r.sent_from_department == DEPARTMENT_ID;
-    if (canSend) {
-        allDepartmentsForSend.forEach(function(d) {
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += '<a onclick="sendReportToDeptModal(' + r.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-            }
-        });
-    }
-    
-    var buttonsHtml = 
-        '<button onclick="exportSingleReportExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
-        '<button onclick="exportSingleReportPDFNewWindow(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>';
-    
-    if (canSend) {
-        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'reportSendDropdown-' + r.id + '\')"><i class="fas fa-paper-plane"></i> Send Report</button><div id="reportSendDropdown-' + r.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    }
-    
-    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
-    openModal('viewReportModal');
-    loadReports();
-}
 
-function sendReportToDeptModal(reportId, deptId) {
-    var r = reportsData.find(function(r) { return r.id === reportId; });
-    if (!r) { showToast('Report not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
-    
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    var btn = document.querySelector('#reportSendDropdown-' + reportId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    
-    var payload = {
-        report_id: parseInt(reportId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        duplicate_send: true,
-        report_data: {
-            id: r.id,
-            title: r.title,
-            period: r.period,
-            content: r.content,
-            file_path: r.file_path || '',
-            file_name: r.file_name || '',
-            status: r.status || 'draft',
-            department_id: r.department_id || DEPARTMENT_ID,
-            created_by: r.created_by || CURRENT_USER,
-            created_at: r.created_at,
-            updated_by: r.updated_by || null,
-            updated_at: r.updated_at || null,
-            sent_count: (r.sent_count || 0) + 1,
-            is_sent: 1
-        }
-    };
-    
-    apiCall('send_report_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Report "' + r.title + '" sent to ' + deptName, false);
-            addLog('Report sent: "' + r.title + '" to ' + deptName);
-            r.sent_to_department = deptId;
-            r.sent_from_department = DEPARTMENT_ID;
-            r.is_viewed_by_department = 0;
-            r.sent_count = (r.sent_count || 0) + 1;
-            r.is_sent = 1;
-            r.last_sent_at = new Date().toISOString();
-            
-            unviewedReportsCount = reportsData.filter(function(report) {
-                return report.sent_from_department && report.sent_from_department != DEPARTMENT_ID && 
-                    report.sent_to_department === DEPARTMENT_ID && 
-                    (report.is_viewed_by_department == 0 || report.is_viewed_by_department === null);
-            }).length;
-            updateReportBadge();
-            
-            loadReports();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send report', true);
-        }
-    }).catch(function(e) {
-        console.error('Send report error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
-        toggleSendDropdown('reportSendDropdown-' + reportId);
-        closeModal('viewReportModal');
-    });
-}
 
-function viewUploadedReportDetail(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (!doc) { showToast('Report not found', true); return; }
-    
-    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
-        markReportViewed(id);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: id,
-            department_id: DEPARTMENT_ID,
-            item_type: 'uploaded_report'
-        }).catch(function(e) {});
-    }
-    
-    var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
-    
-    var sentFromInfo = '';
-    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-        var deptName = departmentNames[doc.sent_from_department] || 'Unknown';
-        sentFromInfo = '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + deptName + '</span></div></div>';
-    }
-    
-    var detailsHtml = 
-        '<div class="space-y-4">' +
-            '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg">' +
-                '<h3 class="text-xl font-bold">Document Information</h3>' +
-                '<p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p>' +
-            '</div>' +
-            '<div class="doc-info-container">' +
-                '<div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
-                '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
-                sentFromInfo +
-            '</div>' +
-        '</div>';
-    
-    document.getElementById('viewReportContent').innerHTML = detailsHtml;
-    
-    var deptOptions = '';
-    // Only show send if report is NOT received
-    var canSend = !doc.sent_from_department || doc.sent_from_department == DEPARTMENT_ID;
-    if (canSend) {
-        allDepartmentsForSend.forEach(function(d) {
-            if (d.id !== DEPARTMENT_ID) {
-                deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-            }
-        });
-    }
-    
-    var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
-    
-    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download mr-1"></i> Download</a>';
-    if (canSend) {
-        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> Send</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
-    }
-    
-    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
-    openModal('viewReportModal');
-}
 
-function sendUploadedReportToDept(reportId, deptId) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === reportId; });
-    if (!doc) { showToast('Uploaded report not found', true); return; }
-    if (deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
-    
-    var deptName = allDepartmentsForSend.find(function(d) { return d.id == deptId; })?.name || 'Department';
-    var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
-    var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    
-    var payload = {
-        document_id: parseInt(reportId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        sent_by: CURRENT_USER,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        doc_type: 'uploaded_report',
-        duplicate_send: true,
-        doc_data: {
-            id: doc.id,
-            title: doc.title,
-            description: doc.description || '',
-            file_name: doc.file_name || '',
-            file_path: doc.file_path || '',
-            file_size: doc.file_size || 0,
-            file_type: doc.file_type || '',
-            period: doc.period || 'monthly',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
-            department_id: doc.department_id || DEPARTMENT_ID,
-            created_at: doc.created_at,
-            sent_count: (doc.sent_count || 0) + 1
-        }
-    };
-    
-    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
-            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName);
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.is_sent = 1;
-            doc.last_sent_at = new Date().toISOString();
-            
-            unviewedReportsCount = uploadedReportsData.filter(function(report) {
-                return report.sent_from_department && report.sent_from_department != DEPARTMENT_ID && 
-                    report.sent_to_department === DEPARTMENT_ID && 
-                    (report.is_viewed_by_department == 0 || report.is_viewed_by_department === null);
-            }).length;
-            updateReportBadge();
-            
-            closeModal('viewReportModal');
-            loadReports();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to send uploaded report', true);
-        }
-    }).catch(function(e) {
-        console.error('Send uploaded report error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
-        toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
-    });
-}
 
 function exportSingleReportExcel(id) {
     var r = reportsData.find(function(r) { return r.id === id; });
