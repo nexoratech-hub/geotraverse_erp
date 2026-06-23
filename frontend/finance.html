@@ -1779,34 +1779,27 @@ function exportAllRequestsToPDF() {
     printWindow.document.close();
     showToast("📄 Budget Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
+
 // ============================================================
 // FETCH REPORTS - TUMIA API TU, USITUMIE LOCAL STORAGE
 // ============================================================
 
 async function fetchReports() {
     try {
-        // ============================================================
-        // FETCH REPORTS FROM API - HII NDIO CHANZO CHA UKWELI
-        // ============================================================
-        const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`);
+        const url = `get_reports.php?department_id=${DEPARTMENT_ID}`;
+        console.log('📡 Fetching reports from:', url);
+        
+        const res = await apiCall(url, 'GET');
+        console.log('📥 fetchReports response:', res);
         
         if (res.success && res.data) {
-            // ============================================================
-            // OVERWRITE reportsData NA DATA KUTOKA API
-            // SI KUONGEZA TU, BALI KUBADILISHA KABISA
-            // ============================================================
             reportsData = res.data.filter(r => 
                 (!r.deleted_by_department || r.deleted_by_department != 1) && 
                 (!r.deleted_by_admin || r.deleted_by_admin != 1)
             ).sort((a, b) => b.id - a.id);
             
             console.log('📊 Reports fetched from API:', reportsData.length);
-            
-            // ============================================================
-            // HATUWEZI KUHIFADHI KWENYE LOCAL STORAGE
-            // KWA SABABU INASABABISHA DATA KUPOTOSHWA
-            // ============================================================
-            // saveReportsToStorage();  // REMOVE - USITUMIE LOCAL STORAGE
+            console.log('📋 Report data sample:', reportsData.slice(0, 2));
             
         } else {
             console.log('⚠️ API returned no data, using empty array');
@@ -1828,10 +1821,12 @@ async function fetchReports() {
         !viewedReportIds.includes(r.id)
     ).length;
     
+    console.log('📊 Unviewed reports count:', unviewedReportsCount);
     updateReportBadge();
     
     return reportsData;
 }
+
 // ============================================================
 // FETCH UPLOADED REPORTS - HAKIKISHA IPO
 // ============================================================
@@ -2929,7 +2924,7 @@ function exportAllReportsToPDF() {
 }
 
 // ============================================================
-// SAVE REPORT - TUMIA API TU, SI LOCAL STORAGE
+// SAVE REPORT - TUMIA DIRECT FETCH, SI apiCall
 // ============================================================
 
 async function saveReport() {
@@ -2938,11 +2933,17 @@ async function saveReport() {
     let period = document.getElementById('reportPeriod').value;
     let content = document.getElementById('reportContent').value.trim();
     
+    // ============================================================
+    // VALIDATION
+    // ============================================================
     if (!title || !content) {
-        showToast('Title and content required', true);
+        showToast('⚠️ Title and content are required', true);
         return;
     }
     
+    // ============================================================
+    // BUILD DATA
+    // ============================================================
     let data = {
         title: title,
         period: period,
@@ -2954,45 +2955,160 @@ async function saveReport() {
         sent_from_department: DEPARTMENT_ID
     };
     
+    if (id) {
+        data.id = parseInt(id);
+        data.updated_by = CURRENT_USER;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
     const btn = document.querySelector('#addReportModal .btn-primary');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="loading-spinner"></span> Saving...';
-    btn.disabled = true;
+    const originalText = btn ? btn.innerHTML : 'Saving...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+        btn.disabled = true;
+    }
     
     try {
-        let res;
-        if (id) {
-            // UPDATE EXISTING REPORT
-            data.id = parseInt(id);
-            data.updated_by = CURRENT_USER;
-            res = await apiCall('update_report.php', 'POST', data);
-        } else {
-            // ADD NEW REPORT
-            res = await apiCall('add_report.php', 'POST', data);
+        // ============================================================
+        // TRY JSON FIRST
+        // ============================================================
+        let endpoint = id ? 'update_report.php' : 'add_report.php';
+        let url = API_BASE + endpoint;
+        
+        console.log('📤 Sending report to:', url);
+        console.log('📤 Data:', data);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(data)
+        });
+        
+        const responseText = await response.text();
+        console.log('📥 Raw response:', responseText);
+        
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch(e) {
+            console.error('Failed to parse JSON:', e);
+            // Try to extract success from text
+            if (responseText.includes('success') || responseText.includes('added') || response.ok) {
+                result = { success: true, message: 'Report saved successfully' };
+            } else {
+                result = { success: false, message: responseText || 'Unknown error' };
+            }
         }
         
-        if (res && res.success) {
-            showToast(id ? '✅ Report updated' : '✅ Report added');
+        // ============================================================
+        // IF JSON FAILS, TRY FORM DATA
+        // ============================================================
+        if (!result || !result.success) {
+            console.log('⚠️ JSON failed, trying FormData...');
+            
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('period', period);
+            formData.append('content', content);
+            formData.append('department_id', DEPARTMENT_ID);
+            formData.append('status', 'draft');
+            formData.append('created_by', CURRENT_USER);
+            formData.append('is_viewed_by_department', 1);
+            formData.append('sent_from_department', DEPARTMENT_ID);
+            if (id) {
+                formData.append('id', id);
+                formData.append('updated_by', CURRENT_USER);
+            }
+            
+            const formResponse = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const formText = await formResponse.text();
+            console.log('📥 FormData response:', formText);
+            
+            try {
+                result = JSON.parse(formText);
+            } catch(e) {
+                if (formResponse.ok || formText.includes('success') || formText.includes('added')) {
+                    result = { success: true, message: 'Report saved successfully (FormData)' };
+                } else {
+                    result = { success: false, message: formText || 'FormData failed' };
+                }
+            }
+        }
+        
+        // ============================================================
+        // HANDLE RESPONSE
+        // ============================================================
+        if (result && result.success) {
+            showToast(id ? '✅ Report updated successfully' : '✅ Report added successfully', false);
             addLog(id ? `Report updated: ${title}` : `Report added: ${title}`);
             closeModal('addReportModal');
             
+            // Reset form
+            document.getElementById('reportId').value = '';
+            document.getElementById('reportTitle').value = '';
+            document.getElementById('reportContent').value = '';
+            
             // ============================================================
-            // REFRESH REPORTS FROM API - SI LOCAL STORAGE
+            // RELOAD REPORTS - DIRECT FETCH
             // ============================================================
-            await fetchReports();
-            await loadReports();
-            await loadDashboard();
+            await loadReportsFromAPI();
             
         } else {
-            showToast(res?.message || '❌ Failed to save report', true);
+            showToast(result?.message || '❌ Failed to save report. Please try again.', true);
         }
         
     } catch(e) {
-        console.error('Save report error:', e);
+        console.error('❌ Save report error:', e);
         showToast('❌ Network error: ' + e.message, true);
     } finally {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+}
+
+// ============================================================
+// LOAD REPORTS DIRECTLY FROM API - FORCE RELOAD
+// ============================================================
+
+async function loadReportsFromAPI() {
+    try {
+        const url = API_BASE + 'get_reports.php?department_id=' + DEPARTMENT_ID;
+        console.log('📡 Loading reports from:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        console.log('📥 Reports data:', data);
+        
+        if (data.success && data.data) {
+            reportsData = data.data.filter(r => 
+                (!r.deleted_by_department || r.deleted_by_department != 1) && 
+                (!r.deleted_by_admin || r.deleted_by_admin != 1)
+            ).sort((a, b) => b.id - a.id);
+            
+            console.log('📊 Reports loaded:', reportsData.length);
+        }
+        
+        // Reload the UI
+        await loadReports();
+        await loadDashboard();
+        
+    } catch(e) {
+        console.error('❌ Error loading reports:', e);
     }
 }
 
@@ -3051,29 +3167,350 @@ async function deleteReportItem(id) {
     }
 }
 
+// ============================================================
+// FETCH DAILY WORK - ONGEZA HII FUNCTION
+// ============================================================
+
+async function fetchDailyWork() {
+    try {
+        const res = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}`);
+        if (res.success && res.data) {
+            dailyworkData = res.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+            console.log('📅 Daily work fetched:', dailyworkData.length);
+        } else {
+            dailyworkData = [];
+        }
+    } catch(e) {
+        console.error('❌ Fetch daily work error:', e);
+        dailyworkData = [];
+    }
+    return dailyworkData;
+}
+
+// ============================================================
+// GENERATE AND SAVE REPORT - WITH REQUESTED AMOUNTS SUMMARIES
+// ============================================================
+
 async function generateAndSaveReport() { 
     const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`; 
     const period = document.getElementById('genPeriodType').value; 
+    
+    // ============================================================
+    // CALCULATE PERIOD
+    // ============================================================
     let startDate, endDate, now = new Date(); 
-    if (period === 'daily') { startDate = new Date(now); startDate.setHours(0,0,0,0); endDate = new Date(now); endDate.setHours(23,59,59,999); } 
-    else if (period === 'weekly') { startDate = new Date(now); startDate.setDate(now.getDate()-7); startDate.setHours(0,0,0,0); endDate = new Date(now); } 
-    else if (period === 'monthly') { startDate = new Date(now); startDate.setMonth(now.getMonth()-1); startDate.setHours(0,0,0,0); endDate = new Date(now); } 
-    else if (period === 'quarterly') { startDate = new Date(now); startDate.setMonth(now.getMonth()-3); startDate.setHours(0,0,0,0); endDate = new Date(now); } 
-    else { startDate = new Date(now); startDate.setFullYear(now.getFullYear()-1); startDate.setHours(0,0,0,0); endDate = new Date(now); } 
-    await Promise.all([loadAllTransactions(), fetchBudgetRequests()]); 
-    let filtered = myTransactions.filter(t=>{ let td=new Date(t.transaction_date); return td>=startDate && td<=endDate;});
-    let totalIncome=0,totalExpense=0; 
-    filtered.forEach(t=>{if(t.type==='income' && t.status==='paid') totalIncome+=parseFloat(t.amount)||0; if(t.type==='expense' && t.status==='paid') totalExpense+=parseFloat(t.amount)||0;});
-    let pendingRequests = requestsData.filter(r => r.status === 'pending' || r.status === 'Pending').length;
-    let approvedRequests = requestsData.filter(r => r.status === 'approved' || r.status === 'Approved').length;
-    let cancelledRequests = requestsData.filter(r => r.status === 'cancelled' || r.status === 'Cancelled').length;
-    let content = `${period.toUpperCase()} REPORT - FINANCE DEPARTMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGenerated by: ${CURRENT_USER}\nGenerated on: ${new Date().toLocaleString()}\nPeriod: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\nDepartment: Finance (ID: ${DEPARTMENT_ID})\n\n📈 FINANCIAL SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Income (Period): ${formatMoney(totalIncome)}\nTotal Expenses (Period): ${formatMoney(totalExpense)}\nNet Profit (Period): ${formatMoney(totalIncome - totalExpense)}\n\n📋 TRANSACTIONS SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Transactions (All Time): ${myTransactions.length}\nIncome Transactions: ${myTransactions.filter(t => t.type === 'income').length}\nExpense Transactions: ${myTransactions.filter(t => t.type === 'expense').length}\n\n📋 BUDGET REQUESTS SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTotal Requests: ${requestsData.length}\nPending Requests: ${pendingRequests}\nApproved Requests: ${approvedRequests}\nCancelled Requests: ${cancelledRequests}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nReport generated automatically by GeoTraverse ERP System\nFinance Department - Official Report\n`; 
-    const newReport = { id: Date.now(), title: title, period: period, content: content, department_id: DEPARTMENT_ID, status: 'draft', created_by: CURRENT_USER, is_viewed_by_department: 1, sent_from_department: DEPARTMENT_ID, created_at: new Date().toISOString() }; 
-    reportsData.unshift(newReport); 
-    showToast(`✅ ${period} report generated and saved successfully!`); 
-    closeModal('generateReportModal'); 
-    await loadReports(); 
-    await loadDashboard(); 
+    if (period === 'daily') { 
+        startDate = new Date(now); 
+        startDate.setHours(0,0,0,0); 
+        endDate = new Date(now); 
+        endDate.setHours(23,59,59,999); 
+    } else if (period === 'weekly') { 
+        startDate = new Date(now); 
+        startDate.setDate(now.getDate()-7); 
+        startDate.setHours(0,0,0,0); 
+        endDate = new Date(now); 
+    } else if (period === 'monthly') { 
+        startDate = new Date(now); 
+        startDate.setMonth(now.getMonth()-1); 
+        startDate.setHours(0,0,0,0); 
+        endDate = new Date(now); 
+    } else if (period === 'quarterly') { 
+        startDate = new Date(now); 
+        startDate.setMonth(now.getMonth()-3); 
+        startDate.setHours(0,0,0,0); 
+        endDate = new Date(now); 
+    } else { 
+        startDate = new Date(now); 
+        startDate.setFullYear(now.getFullYear()-1); 
+        startDate.setHours(0,0,0,0); 
+        endDate = new Date(now); 
+    } 
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const btn = document.querySelector('#generateReportModal .btn-primary');
+    const originalText = btn ? btn.innerHTML : 'Generating...';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Generating...';
+        btn.disabled = true;
+    }
+    
+    try {
+        // ============================================================
+        // FETCH DATA
+        // ============================================================
+        await Promise.all([
+            loadAllTransactions(), 
+            fetchBudgetRequests(), 
+            fetchReports(),
+            fetchDailyWork()
+        ]); 
+        
+        // ============================================================
+        // CALCULATE TRANSACTIONS TOTALS
+        // ============================================================
+        let filtered = myTransactions.filter(t => { 
+            let td = new Date(t.transaction_date); 
+            return td >= startDate && td <= endDate;
+        });
+        
+        let totalIncome = 0, totalExpense = 0; 
+        filtered.forEach(t => {
+            if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; 
+            if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0;
+        });
+        
+        // ============================================================
+        // CALCULATE BUDGET REQUESTS - REQUESTED AMOUNTS SUMMARIES
+        // ============================================================
+        // All requests
+        let allRequests = requestsData.filter(r => r.is_deleted !== 1);
+        let totalRequests = allRequests.length;
+        let totalRequestedAmount = 0;
+        
+        // Requests by status
+        let pendingRequests = 0;
+        let pendingAmount = 0;
+        let approvedRequests = 0;
+        let approvedAmount = 0;
+        let cancelledRequests = 0;
+        let cancelledAmount = 0;
+        
+        // Requests by type (Income vs Expense)
+        let incomeRequests = 0;
+        let incomeAmount = 0;
+        let expenseRequests = 0;
+        let expenseAmount = 0;
+        
+        // Filter requests by period
+        let periodRequests = requestsData.filter(r => {
+            let rd = new Date(r.request_date || r.created_at);
+            return rd >= startDate && rd <= endDate;
+        });
+        let periodTotalRequests = periodRequests.length;
+        let periodTotalAmount = 0;
+        
+        // Calculate all totals
+        allRequests.forEach(r => {
+            let amount = parseFloat(r.amount) || 0;
+            totalRequestedAmount += amount;
+            
+            // By status
+            if (r.status === 'pending' || r.status === 'Pending') {
+                pendingRequests++;
+                pendingAmount += amount;
+            } else if (r.status === 'approved' || r.status === 'Approved') {
+                approvedRequests++;
+                approvedAmount += amount;
+            } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+                cancelledRequests++;
+                cancelledAmount += amount;
+            }
+            
+            // By type
+            if (r.type === 'income') {
+                incomeRequests++;
+                incomeAmount += amount;
+            } else {
+                expenseRequests++;
+                expenseAmount += amount;
+            }
+        });
+        
+        // Calculate period totals
+        periodRequests.forEach(r => {
+            periodTotalAmount += parseFloat(r.amount) || 0;
+        });
+        
+        // Calculate percentages
+        let pendingPercent = totalRequests > 0 ? ((pendingRequests / totalRequests) * 100).toFixed(1) : 0;
+        let approvedPercent = totalRequests > 0 ? ((approvedRequests / totalRequests) * 100).toFixed(1) : 0;
+        let cancelledPercent = totalRequests > 0 ? ((cancelledRequests / totalRequests) * 100).toFixed(1) : 0;
+        
+        // Daily work totals
+        let totalDailyBudget = 0, totalDailyExpenses = 0;
+        let filteredDailyWork = dailyworkData.filter(w => {
+            let wd = new Date(w.date);
+            return wd >= startDate && wd <= endDate;
+        });
+        filteredDailyWork.forEach(w => {
+            totalDailyBudget += parseFloat(w.budget) || 0;
+            totalDailyExpenses += parseFloat(w.amount) || 0;
+        });
+        
+        // ============================================================
+        // BUILD REPORT CONTENT
+        // ============================================================
+        let content = `${period.toUpperCase()} REPORT - FINANCE DEPARTMENT\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Generated by: ${CURRENT_USER}\n`;
+        content += `Generated on: ${new Date().toLocaleString()}\n`;
+        content += `Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\n`;
+        content += `Department: Finance (ID: ${DEPARTMENT_ID})\n\n`;
+        
+        // ============================================================
+        // FINANCIAL SUMMARY
+        // ============================================================
+        content += `📈 FINANCIAL SUMMARY\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Total Income (Period): ${formatMoney(totalIncome)}\n`;
+        content += `Total Expenses (Period): ${formatMoney(totalExpense)}\n`;
+        content += `Net Profit (Period): ${formatMoney(totalIncome - totalExpense)}\n\n`;
+        
+        // ============================================================
+        // BUDGET REQUESTS SUMMARY - REQUESTED AMOUNTS
+        // ============================================================
+        content += `📋 BUDGET REQUESTS SUMMARY\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `📊 REQUESTED AMOUNTS (ALL REQUESTS)\n`;
+        content += `───────────────────────────────────────────────────────────────\n`;
+        content += `Total Requests: ${totalRequests}\n`;
+        content += `Total Requested Amount: ${formatMoney(totalRequestedAmount)}\n\n`;
+        
+        // By Status
+        content += `📌 BY STATUS:\n`;
+        content += `  ✅ Approved: ${approvedRequests} requests (${approvedPercent}%)\n`;
+        content += `     Approved Amount: ${formatMoney(approvedAmount)}\n`;
+        content += `  ⏳ Pending: ${pendingRequests} requests (${pendingPercent}%)\n`;
+        content += `     Pending Amount: ${formatMoney(pendingAmount)}\n`;
+        content += `  ❌ Cancelled: ${cancelledRequests} requests (${cancelledPercent}%)\n`;
+        content += `     Cancelled Amount: ${formatMoney(cancelledAmount)}\n\n`;
+        
+        // By Type
+        content += `📌 BY TYPE:\n`;
+        content += `  💰 Income Requests: ${incomeRequests} requests\n`;
+        content += `     Income Amount: ${formatMoney(incomeAmount)}\n`;
+        content += `  💸 Expense Requests: ${expenseRequests} requests\n`;
+        content += `     Expense Amount: ${formatMoney(expenseAmount)}\n\n`;
+        
+        // Period Requests
+        content += `📌 REQUESTS IN THIS PERIOD:\n`;
+        content += `  Total Requests (${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}): ${periodTotalRequests}\n`;
+        content += `  Total Amount in Period: ${formatMoney(periodTotalAmount)}\n\n`;
+        
+        // ============================================================
+        // TRANSACTIONS SUMMARY
+        // ============================================================
+        content += `📋 TRANSACTIONS SUMMARY\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Total Transactions (All Time): ${myTransactions.length}\n`;
+        content += `Income Transactions: ${myTransactions.filter(t => t.type === 'income').length}\n`;
+        content += `Expense Transactions: ${myTransactions.filter(t => t.type === 'expense').length}\n\n`;
+        
+        // ============================================================
+        // DAILY WORK SUMMARY
+        // ============================================================
+        content += `📅 DAILY WORK SUMMARY\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Records in period: ${filteredDailyWork.length}\n`;
+        content += `Total Budget: ${formatMoney(totalDailyBudget)}\n`;
+        content += `Total Expenses: ${formatMoney(totalDailyExpenses)}\n`;
+        content += `Variance: ${formatMoney(totalDailyExpenses - totalDailyBudget)}\n\n`;
+        
+        // ============================================================
+        // SUMMARY TABLE - REQUESTED AMOUNTS
+        // ============================================================
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `📊 REQUESTED AMOUNTS SUMMARY TABLE\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Status           | Count | Amount (TZS)     | Percentage\n`;
+        content += `───────────────────────────────────────────────────────────────\n`;
+        content += `Approved         | ${String(approvedRequests).padStart(4)} | ${String(formatMoney(approvedAmount)).padStart(14)} | ${String(approvedPercent).padStart(6)}%\n`;
+        content += `Pending          | ${String(pendingRequests).padStart(4)} | ${String(formatMoney(pendingAmount)).padStart(14)} | ${String(pendingPercent).padStart(6)}%\n`;
+        content += `Cancelled        | ${String(cancelledRequests).padStart(4)} | ${String(formatMoney(cancelledAmount)).padStart(14)} | ${String(cancelledPercent).padStart(6)}%\n`;
+        content += `───────────────────────────────────────────────────────────────\n`;
+        content += `TOTAL            | ${String(totalRequests).padStart(4)} | ${String(formatMoney(totalRequestedAmount)).padStart(14)} | 100.0%\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        
+        // ============================================================
+        // TYPE SUMMARY
+        // ============================================================
+        content += `📊 REQUESTED AMOUNTS BY TYPE\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Type             | Count | Amount (TZS)     | Percentage\n`;
+        content += `───────────────────────────────────────────────────────────────\n`;
+        let incomePercent = totalRequests > 0 ? ((incomeRequests / totalRequests) * 100).toFixed(1) : 0;
+        let expensePercent = totalRequests > 0 ? ((expenseRequests / totalRequests) * 100).toFixed(1) : 0;
+        content += `Income           | ${String(incomeRequests).padStart(4)} | ${String(formatMoney(incomeAmount)).padStart(14)} | ${String(incomePercent).padStart(6)}%\n`;
+        content += `Expense          | ${String(expenseRequests).padStart(4)} | ${String(formatMoney(expenseAmount)).padStart(14)} | ${String(expensePercent).padStart(6)}%\n`;
+        content += `───────────────────────────────────────────────────────────────\n`;
+        content += `TOTAL            | ${String(totalRequests).padStart(4)} | ${String(formatMoney(totalRequestedAmount)).padStart(14)} | 100.0%\n`;
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        
+        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        content += `Report generated automatically by GeoTraverse ERP System\n`;
+        content += `Finance Department - Official Report\n`;
+
+        // ============================================================
+        // SEND TO API
+        // ============================================================
+        const data = {
+            title: title,
+            period: period,
+            content: content,
+            department_id: DEPARTMENT_ID,
+            status: 'draft',
+            created_by: CURRENT_USER,
+            is_viewed_by_department: 1,
+            sent_from_department: DEPARTMENT_ID
+        };
+
+        console.log('📤 Sending generated report to API:', data);
+
+        const response = await fetch(API_BASE + 'add_report.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(data)
+        });
+
+        const responseText = await response.text();
+        console.log('📥 Raw response:', responseText);
+
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch(e) {
+            console.error('Failed to parse JSON:', e);
+            if (responseText.includes('success') || responseText.includes('added') || response.ok) {
+                result = { success: true, message: 'Report generated and saved' };
+            } else {
+                result = { success: false, message: responseText || 'Unknown error' };
+            }
+        }
+
+        // ============================================================
+        // HANDLE RESPONSE
+        // ============================================================
+        if (result && result.success) {
+            showToast(`✅ ${period} report generated and saved successfully!`, false);
+            addLog(`Report generated: ${title}`);
+            closeModal('generateReportModal');
+            
+            // Reset form
+            document.getElementById('genReportTitle').value = '';
+            
+            // Reload reports
+            await fetchReports();
+            await loadReports();
+            await loadDashboard();
+            
+        } else {
+            showToast(result?.message || '❌ Failed to generate report. Please try again.', true);
+        }
+        
+    } catch(e) {
+        console.error('❌ Generate report error:', e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
 }
 
 // ============================================================
