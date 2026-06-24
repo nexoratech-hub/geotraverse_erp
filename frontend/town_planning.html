@@ -1034,14 +1034,12 @@ async function loadUserInfo() {
     }
 }
 // ============================================================
-// API CALLS
+// API CALL - FIXED
 // ============================================================
 async function apiCall(endpoint, method = 'GET', data = null) {
     try {
-        // Handle GET with query parameters
         let url = API_BASE + endpoint;
         
-        // If data is provided for GET, append as query params
         if (method === 'GET' && data && typeof data === 'object') {
             const params = new URLSearchParams();
             for (let key in data) {
@@ -1055,94 +1053,318 @@ async function apiCall(endpoint, method = 'GET', data = null) {
             }
         }
         
-        const opts = { 
-            method, 
-            headers: { 'Content-Type': 'application/json' }, 
-            credentials: 'include' 
+        console.log(`📡 API Call: ${method} ${url}`);
+        
+        const opts = {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
         };
         
         if (data && method !== 'GET') {
             opts.body = JSON.stringify(data);
+            console.log('📤 Body:', opts.body);
         }
         
-        const res = await fetch(url, opts);
-        if (!res.ok) {
-            const text = await res.text();
-            if (text.includes('success') || text.includes('deleted')) {
-                return { success: true };
+        const response = await fetch(url, opts);
+        
+        console.log(`📡 Response status: ${response.status}`);
+        
+        if (!response.ok) {
+            // Try to get error message from response
+            try {
+                const text = await response.text();
+                console.error('❌ Response body:', text);
+                return { 
+                    success: false, 
+                    message: `HTTP ${response.status}: ${text.substring(0, 100)}` 
+                };
+            } catch (e) {
+                return { 
+                    success: false, 
+                    message: `HTTP ${response.status}` 
+                };
             }
-            throw new Error(`HTTP ${res.status}: ${text.substring(0, 100)}`);
         }
-        const contentType = res.headers.get('content-type');
+        
+        const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
-            return await res.json();
+            return await response.json();
         }
-        return { success: true };
-    } catch(e) { 
-        console.error('API Error:', endpoint, e); 
-        return { success: false, message: e.message, data: [] }; 
+        
+        // If not JSON, try to get text
+        const text = await response.text();
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            return { success: true, data: text };
+        }
+        
+    } catch (error) {
+        console.error('❌ API Error:', endpoint, error);
+        return { success: false, message: error.message };
     }
 }
 // ============================================================
-// NOTIFICATIONS - BADGE SYSTEM
+// NOTIFICATIONS SYSTEM - FIXED
+// ============================================================
+
+// ============================================================
+// FETCH UNVIEWED COUNTS - FIXED
 // ============================================================
 async function fetchUnviewedCounts() {
     try {
-        const res = await apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID);
-        if (res.success && res.data) {
-            unviewedProjectsCount = parseInt(res.data.projects) || 0;
-            unviewedReportsCount = parseInt(res.data.reports) || 0;
-            unviewedRequestsCount = parseInt(res.data.fund_requests) || 0;
-            updateProjectBadge();
-            updateReportBadge();
-            updateRequestBadge();
+        const url = API_BASE + 'get_unviewed_count.php?department_id=' + DEPARTMENT_ID;
+        console.log('📡 Fetching unviewed counts from:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+        
+        console.log('📡 Response status:', response.status);
+        
+        if (!response.ok) {
+            console.warn('⚠️ get_unviewed_count.php returned status:', response.status);
+            // Set default values
+            unviewedProjectsCount = 0;
+            unviewedReportsCount = 0;
+            unviewedRequestsCount = 0;
+            return;
         }
-    } catch(e) {
-        console.log('Error fetching unviewed counts:', e);
+        
+        const result = await response.json();
+        console.log('📥 Unviewed counts:', result);
+        
+        if (result.success && result.data) {
+            unviewedProjectsCount = parseInt(result.data.projects) || 0;
+            unviewedReportsCount = parseInt(result.data.reports) || 0;
+            unviewedRequestsCount = parseInt(result.data.fund_requests) || 0;
+        } else {
+            unviewedProjectsCount = 0;
+            unviewedReportsCount = 0;
+            unviewedRequestsCount = 0;
+        }
+        
+        // Update badges
+        updateBadgesDirectly();
+        
+    } catch (error) {
+        console.warn('⚠️ Error fetching unviewed counts:', error);
+        // Set default values on error
+        unviewedProjectsCount = 0;
+        unviewedReportsCount = 0;
+        unviewedRequestsCount = 0;
     }
 }
 
-function updateProjectBadge() { 
-    const badge = document.getElementById('projectBadge'); 
-    if (badge) { 
-        if (unviewedProjectsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount; 
-        } else { badge.classList.add('hidden'); } 
-    } 
+// ============================================================
+// UPDATE BADGES DIRECTLY - BILA DEPENDENCIES
+// ============================================================
+function updateBadgesDirectly() {
+    // Project badge
+    const projectBadge = document.getElementById('projectBadge');
+    if (projectBadge) {
+        if (unviewedProjectsCount > 0) {
+            projectBadge.classList.remove('hidden');
+            projectBadge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount;
+        } else {
+            projectBadge.classList.add('hidden');
+        }
+    }
+    
+    // Report badge
+    const reportBadge = document.getElementById('reportBadge');
+    if (reportBadge) {
+        if (unviewedReportsCount > 0) {
+            reportBadge.classList.remove('hidden');
+            reportBadge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
+        } else {
+            reportBadge.classList.add('hidden');
+        }
+    }
+    
+    // Request badge
+    const requestBadge = document.getElementById('requestBadge');
+    if (requestBadge) {
+        if (unviewedRequestsCount > 0) {
+            requestBadge.classList.remove('hidden');
+            requestBadge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount;
+        } else {
+            requestBadge.classList.add('hidden');
+        }
+    }
 }
-function updateReportBadge() { 
-    const badge = document.getElementById('reportBadge'); 
-    if (badge) { 
-        if (unviewedReportsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { badge.classList.add('hidden'); } 
-    } 
-}
-function updateRequestBadge() { 
-    const badge = document.getElementById('requestBadge'); 
-    if (badge) { 
-        if (unviewedRequestsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount; 
-        } else { badge.classList.add('hidden'); } 
-    } 
+// ============================================================
+// UPDATE DASHBOARD BADGES
+// ============================================================
+function updateDashboardBadges() {
+    const projectBadge = document.getElementById('projectNewBadge');
+    const reportBadge = document.getElementById('reportNewBadge');
+    const requestBadge = document.getElementById('requestNewBadge');
+
+    if (projectBadge) {
+        if (unviewedProjectsCount > 0) {
+            projectBadge.style.display = 'block';
+            projectBadge.textContent = unviewedProjectsCount + ' new';
+        } else {
+            projectBadge.style.display = 'none';
+        }
+    }
+
+    if (reportBadge) {
+        if (unviewedReportsCount > 0) {
+            reportBadge.style.display = 'block';
+            reportBadge.textContent = unviewedReportsCount + ' new';
+        } else {
+            reportBadge.style.display = 'none';
+        }
+    }
+
+    if (requestBadge) {
+        if (unviewedRequestsCount > 0) {
+            requestBadge.style.display = 'block';
+            requestBadge.textContent = unviewedRequestsCount + ' new';
+        } else {
+            requestBadge.style.display = 'none';
+        }
+    }
 }
 
+// ============================================================
+// MARK NOTIFICATION VIEWED - FIXED
+// ============================================================
 async function markNotificationViewed(itemType, itemId) {
     try {
-        const res = await apiCall('mark_notification_viewed.php', 'POST', {
+        console.log(`📡 Marking ${itemType} #${itemId} as viewed...`);
+        
+        const payload = {
             item_type: itemType,
-            item_id: itemId,
+            item_id: parseInt(itemId),
             department_id: DEPARTMENT_ID
+        };
+        
+        console.log('📤 Payload:', payload);
+        
+        // ============================================================
+        // DIRECT FETCH - KWA DEBUGGING
+        // ============================================================
+        const response = await fetch(API_BASE + 'mark_notification_viewed.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
         });
+        
+        console.log('📡 Response status:', response.status);
+        
+        const result = await response.json();
+        console.log('📥 Response:', result);
+
+        if (result && result.success) {
+            console.log(`✅ Notification marked as viewed: ${itemType} #${itemId}`);
+            
+            // Punguiza unviewed count
+            if (itemType === 'project') {
+                unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+                updateProjectBadge();
+                updateDashboardBadges();
+                
+                // Update local project
+                const project = projectsData.find(p => p.id === parseInt(itemId));
+                if (project) {
+                    project.is_viewed_by_department = 1;
+                    project._is_unviewed = 0;
+                    
+                    const card = document.getElementById(`proj-card-${itemId}`);
+                    if (card) {
+                        const badge = card.querySelector('.new-badge');
+                        if (badge) badge.remove();
+                    }
+                }
+            }
+            
+            return result;
+        } else {
+            console.warn('⚠️ Failed to mark notification as viewed:', result?.message);
+            
+            // Even if API fails, update locally
+            if (itemType === 'project') {
+                unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+                updateProjectBadge();
+                updateDashboardBadges();
+                
+                const project = projectsData.find(p => p.id === parseInt(itemId));
+                if (project) {
+                    project.is_viewed_by_department = 1;
+                    project._is_unviewed = 0;
+                    
+                    const card = document.getElementById(`proj-card-${itemId}`);
+                    if (card) {
+                        const badge = card.querySelector('.new-badge');
+                        if (badge) badge.remove();
+                    }
+                }
+            }
+            
+            return result;
+        }
+    } catch (error) {
+        console.error('❌ Error marking notification viewed:', error);
+        
+        // Even on network error, update locally
+        if (itemType === 'project') {
+            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+            updateProjectBadge();
+            updateDashboardBadges();
+            
+            const project = projectsData.find(p => p.id === parseInt(itemId));
+            if (project) {
+                project.is_viewed_by_department = 1;
+                project._is_unviewed = 0;
+                
+                const card = document.getElementById(`proj-card-${itemId}`);
+                if (card) {
+                    const badge = card.querySelector('.new-badge');
+                    if (badge) badge.remove();
+                }
+            }
+        }
+        
+        return { success: false, message: error.message };
+    }
+}
+
+// ============================================================
+// ADD NOTIFICATION - FIXED
+// ============================================================
+async function addNotification(departmentId, itemType, itemId, itemTitle, message) {
+    try {
+        const payload = {
+            department_id: parseInt(departmentId),
+            item_type: itemType,
+            item_id: parseInt(itemId),
+            item_title: itemTitle || '',
+            message: message || '',
+            from_department_id: DEPARTMENT_ID
+        };
+
+        const res = await apiCall('add_notification.php', 'POST', payload);
+
         if (res.success) {
+            console.log(`✅ Notification added for ${itemType}: ${itemTitle}`);
+            // Refresh unviewed counts
             await fetchUnviewedCounts();
         }
+
         return res;
-    } catch(e) {
-        console.log('Error marking notification viewed:', e);
+    } catch (e) {
+        console.error('Error adding notification:', e);
         return { success: false };
     }
 }
@@ -1164,13 +1386,39 @@ async function addToRecycleBin(itemId, itemType, itemName) {
     } catch(e) {}
 }
 
-async function restoreFromRecycleBin(recycleId) { 
-    const res = await apiCall('restore_from_recycle_bin.php', 'POST', { recycle_id: recycleId }); 
-    if (res.success) { 
-        showToast('Item restored successfully'); 
-        await loadRecycleBinFromDB(); 
-        renderCurrentSection();
-    } else { showToast(res.message || 'Failed to restore', true); } 
+// ============================================================
+// RESTORE FROM RECYCLE BIN - IRESTORE PROJECT NA DAILY WORK
+// ============================================================
+async function restoreFromRecycleBin(recycleId) {
+    try {
+        const res = await apiCall('restore_from_recycle_bin.php', 'POST', {
+            recycle_id: recycleId
+        });
+
+        if (res && res.success) {
+            showToast('✅ Item restored successfully');
+
+            // Force refresh all data
+            await Promise.all([
+                loadRecycleBinFromDB(),
+                fetchProjects(),
+                fetchDailyWork(),
+                renderCurrentSection(),
+                renderDashboard()
+            ]);
+
+            // Refresh UI
+            if (document.querySelector('.nav-item.active[data-section="settings"]')) {
+                renderSettings();
+            }
+
+        } else {
+            showToast(res?.message || 'Failed to restore', true);
+        }
+    } catch (e) {
+        console.error('Restore error:', e);
+        showToast('Network error: ' + e.message, true);
+    }
 }
 
 async function permanentlyDeleteItem(recycleId) { 
@@ -1195,146 +1443,78 @@ async function emptyRecycleBin() {
 }
 
 // ============================================================
-// FETCH PROJECTS - WITH DAILY WORK (FIXED FOR SURVEY)
+// FETCH PROJECTS - FIXED (Bila updateProjectBadge)
 // ============================================================
 async function fetchProjects() {
     try {
-        const timestamp = new Date().getTime();
-        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&_=${timestamp}`);
+        console.log('📡 Fetching projects for department:', DEPARTMENT_ID);
         
-        if (res.success && res.data) {
-            projectsData = res.data.filter(p =>
-                (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
+        const timestamp = new Date().getTime();
+        const url = API_BASE + 'get_projects.php?department_id=' + DEPARTMENT_ID + '&_=' + timestamp;
+        
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        console.log('📡 Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
+        const result = await response.json();
+        console.log('📥 API Response:', result);
+        
+        if (result.success && result.data) {
+            // ============================================================
+            // FILTER - ONDOA PROJECTS ZILIZOFUTWA
+            // ============================================================
+            projectsData = result.data.filter(p => 
+                (p.is_deleted === 0 || p.is_deleted === null || p.is_deleted === '0') &&
                 (!p.deleted_by_department || p.deleted_by_department != 1) &&
                 (!p.deleted_by_admin || p.deleted_by_admin != 1)
-            ).sort((a, b) => b.id - a.id);
+            );
             
-            console.log(`📋 Survey: Found ${projectsData.length} projects`);
+            console.log('📋 Total projects after filter:', projectsData.length);
+            console.log('📋 Projects:', projectsData);
             
             // ============================================================
-            // FETCH DAILY WORK FOR EACH PROJECT
+            // UPDATE PROJECT BADGE - HATUTUMII FUNCTION, TUNAFANYA DIRECT
             // ============================================================
-            for (let i = 0; i < projectsData.length; i++) {
-                const p = projectsData[i];
-                const projectId = p.original_project_id || p.id;
-                const projectName = p.project_name || p.name || '';
-                
-                console.log(`🔍 Survey: Checking daily work for: ${projectName} (ID: ${projectId})`);
-                
-                let dailyWork = [];
-                
-                // ============================================================
-                // METHOD 1: Get from API by project_name (for sent records)
-                // ============================================================
-                try {
-                    const dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
-                    if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-                        dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                        console.log(`✅ Survey Method 1: Found ${dailyWork.length} records by project_name for: ${projectName}`);
-                    }
-                } catch(e) {
-                    console.log('⚠️ Survey Method 1 failed:', e);
-                }
-                
-                // ============================================================
-                // METHOD 2: Get from API by project_id
-                // ============================================================
-                if (dailyWork.length === 0 && projectId) {
-                    try {
-                        const dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}&_=${timestamp}`);
-                        if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-                            dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                            console.log(`✅ Survey Method 2: Found ${dailyWork.length} records by project_id for: ${projectId}`);
-                        }
-                    } catch(e) {
-                        console.log('⚠️ Survey Method 2 failed:', e);
-                    }
-                }
-                
-                // ============================================================
-                // METHOD 3: Get from sent_dailywork (received records)
-                // ============================================================
-                if (dailyWork.length === 0) {
-                    try {
-                        // Get all sent daily work for this department
-                        const sentRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&_=${timestamp}`);
-                        if (sentRes.success && sentRes.data) {
-                            // Filter locally by project_name
-                            const allWork = sentRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                            dailyWork = allWork.filter(w =>
-                                w.dailywork_project_name === projectName ||
-                                w.project_name === projectName ||
-                                w.project_name === p.name
-                            );
-                            console.log(`✅ Survey Method 3: Found ${dailyWork.length} records from sent_dailywork for: ${projectName}`);
-                        }
-                    } catch(e) {
-                        console.log('⚠️ Survey Method 3 failed:', e);
-                    }
-                }
-                
-                // ============================================================
-                // METHOD 4: Get from dailyworkData (local cache)
-                // ============================================================
-                if (dailyWork.length === 0) {
-                    try {
-                        const localWork = dailyworkData.filter(w =>
-                            w.project_id == projectId ||
-                            w.project_name === projectName ||
-                            w.project_name === p.name
-                        );
-                        if (localWork.length > 0) {
-                            dailyWork = localWork;
-                            console.log(`✅ Survey Method 4: Found ${dailyWork.length} records from local cache for: ${projectName}`);
-                        }
-                    } catch(e) {
-                        console.log('⚠️ Survey Method 4 failed:', e);
-                    }
-                }
-                
-                // ============================================================
-                // UPDATE PROJECT WITH DAILY WORK
-                // ============================================================
-                p.daily_work = dailyWork;
-                p.daily_work_count = dailyWork.length;
-                p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
-                
-                console.log(`📊 Survey: ${projectName} has ${p.daily_work_count} daily work records`);
-                
-                // Log sample of daily work
-                if (dailyWork.length > 0) {
-                    console.log(`📋 Sample:`, dailyWork[0]);
+            unviewedProjectsCount = projectsData.filter(p => p._is_unviewed === 1).length;
+            
+            // Update badge directly
+            const badge = document.getElementById('projectBadge');
+            if (badge) {
+                if (unviewedProjectsCount > 0) {
+                    badge.classList.remove('hidden');
+                    badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount;
+                } else {
+                    badge.classList.add('hidden');
                 }
             }
             
-            // ============================================================
-            // UPDATE UNVIEWED COUNT
-            // ============================================================
-            unviewedProjectsCount = projectsData.filter(p =>
-                p.sent_from_dept &&
-                p.sent_from_dept != DEPARTMENT_ID &&
-                p.sent_to_dept === DEPARTMENT_ID &&
-                (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
-                !viewedProjectIds.includes(p.id)
-            ).length;
-            
-            updateProjectBadge();
-            
-            // Log summary
-            const totalDailyRecords = projectsData.reduce((sum, p) => sum + (p.daily_work_count || 0), 0);
-            console.log(`📊 Survey Total daily work records across all projects: ${totalDailyRecords}`);
-            
+            return projectsData;
         } else {
+            console.error('❌ API returned error:', result.message);
             projectsData = [];
+            return [];
         }
-    } catch(e) {
-        console.error('❌ Survey fetchProjects error:', e);
+        
+    } catch (error) {
+        console.error('❌ Error fetching projects:', error);
         projectsData = [];
+        return [];
     }
-    
-    await fetchUnviewedCounts();
 }
-
 // ============================================================
 // HELPER: Calculate Daily Work Summary
 // ============================================================
@@ -1653,9 +1833,9 @@ function downloadDocumentFile(url, fileName) {
 }
 
 // ============================================================
-// SEND FUNCTIONS - KWA NOTIFICATIONS
+// SEND PROJECT TO DEPARTMENT - WITH DAILY WORK
 // ============================================================
-async function sendProjectToDept(projectId, deptId) { 
+async function sendProjectToDept(projectId, deptId) {
     const p = projectsData.find(p => p.id === projectId);
     if (!p) {
         showToast('Project not found', true);
@@ -1667,20 +1847,47 @@ async function sendProjectToDept(projectId, deptId) {
     }
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
-    
+
     const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
         btn.disabled = true;
     }
-    
+
     try {
-        const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
-        
+        // ============================================================
+        // GET DAILY WORK FOR THIS PROJECT
+        // ============================================================
+        const timestamp = new Date().getTime();
+        const projectName = p.name || '';
+        const projectIdForDw = p.original_project_id || p.id;
+
+        let dailyWorkRecords = [];
+
+        // Try to get daily work
+        try {
+            const dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
+            if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                dailyWorkRecords = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                console.log(`✅ Found ${dailyWorkRecords.length} daily work records for sending`);
+            }
+        } catch (e) {}
+
+        if (dailyWorkRecords.length === 0 && projectIdForDw) {
+            try {
+                const dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectIdForDw}&_=${timestamp}`);
+                if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                    dailyWorkRecords = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                    console.log(`✅ Found ${dailyWorkRecords.length} daily work records by project_id`);
+                }
+            } catch (e) {}
+        }
+
+        // Calculate summary
         let totalBudget = 0, totalExpenses = 0;
         let completedCount = 0, partialCount = 0, pendingCount = 0;
-        for (let w of projectDailyWork) {
+        for (let w of dailyWorkRecords) {
             totalBudget += parseFloat(w.budget) || 0;
             totalExpenses += parseFloat(w.amount) || 0;
             if (w.status === 'completed') completedCount++;
@@ -1688,7 +1895,10 @@ async function sendProjectToDept(projectId, deptId) {
             else pendingCount++;
         }
         let remainingBudget = totalBudget - totalExpenses;
-        
+
+        // ============================================================
+        // BUILD PAYLOAD WITH DAILY WORK
+        // ============================================================
         const payload = {
             project_id: parseInt(projectId),
             to_department_id: parseInt(deptId),
@@ -1704,11 +1914,12 @@ async function sendProjectToDept(projectId, deptId) {
             image: p.image || '',
             start_date: p.start_date || '',
             end_date: p.end_date || '',
+            daily_work_records: dailyWorkRecords,
             daily_summary: {
                 total_budget: totalBudget,
                 total_expenses: totalExpenses,
                 remaining_budget: remainingBudget,
-                records_count: projectDailyWork.length,
+                records_count: dailyWorkRecords.length,
                 completed_count: completedCount,
                 partial_count: partialCount,
                 pending_count: pendingCount
@@ -1716,17 +1927,29 @@ async function sendProjectToDept(projectId, deptId) {
             sent_by: CURRENT_USER || 'Town Planning Manager',
             duplicate_send: true
         };
-        
+
+        console.log('📤 Sending project payload:', payload);
+
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
-        
+
         if (res && res.success) {
-            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${projectDailyWork.length} daily work records (summary)`, false);
+            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${dailyWorkRecords.length} daily work records`, false);
             addLog(`Project "${p.name}" sent to ${deptName}`);
-            
+
             p.sent_to_dept = deptId;
             p.sent_from_dept = DEPARTMENT_ID;
             p.is_viewed_by_department = 0;
-            
+
+            // Add notification
+            await apiCall('add_notification.php', 'POST', {
+                department_id: deptId,
+                item_type: 'project',
+                item_id: p.id,
+                item_title: p.name,
+                message: `Project "${p.name}" sent from Town Planning with ${dailyWorkRecords.length} daily work records`,
+                from_department_id: DEPARTMENT_ID
+            });
+
             await fetchProjects();
             await fetchDailyWork();
             await renderProjects();
@@ -1734,7 +1957,7 @@ async function sendProjectToDept(projectId, deptId) {
         } else {
             showToast(res?.message || 'Failed to send project', true);
         }
-    } catch(e) {
+    } catch (e) {
         console.error('Send error:', e);
         showToast('Network error: ' + e.message, true);
     } finally {
@@ -1746,7 +1969,6 @@ async function sendProjectToDept(projectId, deptId) {
         closeModal('viewProjectModal');
     }
 }
-
 async function sendReportToDept(reportId, deptId) {
     const r = reportsList.find(r => r.id === reportId);
     if (!r) {
@@ -1976,23 +2198,30 @@ function setupMoneyInputs() {
 }
 
 // ============================================================
-// DASHBOARD WITH 4 CARDS
+// RENDER DASHBOARD - FIXED
 // ============================================================
 async function renderDashboard() {
     const dashboardSection = document.getElementById('dashboardSection');
     if (!dashboardSection) return;
+    
     dashboardSection.innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span>Loading...</span></div>';
     
+    // ============================================================
+    // FORCE REFRESH DATA
+    // ============================================================
     await Promise.all([
-        fetchProjects(), 
-        fetchRequests(), 
-        fetchReports(), 
-        fetchProjectDocuments(), 
-        fetchUploadedReports(), 
+        forceRefreshProjects(),
+        fetchRequests(),
+        fetchReports(),
+        fetchProjectDocuments(),
+        fetchUploadedReports(),
         fetchDailyWork(),
         fetchUnviewedCounts()
     ]);
     
+    // ============================================================
+    // HESABU KUTOKA DATA - FAFANUA VARIABLES KABLA
+    // ============================================================
     let totalProjects = projectsData.length;
     let totalDocs = projectDocuments.length;
     let totalAddedReports = reportsList.length;
@@ -2002,19 +2231,43 @@ async function renderDashboard() {
     let cancelledRequests = requestsData.filter(r => r.status === 'cancelled').length;
     let totalRequests = requestsData.length;
     
-    let totalBudget = 0, totalExpenses = 0;
+    // ============================================================
+    // HESABU TOTAL BUDGET NA EXPENSES - FAFANUA HAPA
+    // ============================================================
+    let totalBudget = 0;
+    let totalExpenses = 0;
+    
     for (let w of dailyworkData) {
         totalBudget += parseFloat(w.budget) || 0;
         totalExpenses += parseFloat(w.amount) || 0;
     }
     let remainingBudget = totalBudget - totalExpenses;
     
+    console.log('📊 Rendering dashboard with:', {
+        totalProjects,
+        totalDocs,
+        totalBudget,
+        totalExpenses,
+        remainingBudget,
+        totalRequests
+    });
+    
+    // ============================================================
+    // UPDATE DASHBOARD HTML
+    // ============================================================
     dashboardSection.innerHTML = `
-        <div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Town Planning Dashboard</h2><p class="text-xs text-gray-500">Urban Planning & Financial Management</p></div>
+        <div class="mb-4">
+            <h2 class="text-xl font-bold text-gray-800">Town Planning Dashboard</h2>
+            <p class="text-xs text-gray-500">Urban Planning & Financial Management</p>
+            <p class="text-xs text-gray-400 mt-1">📊 Projects: ${totalProjects} | Documents: ${totalDocs}</p>
+        </div>
         
         <div class="dashboard-summary-grid">
+            <!-- Projects Card -->
             <div class="summary-card-large projects" onclick="showSection('projects')">
-                <div class="new-badge-small" id="projectNewBadge">${unviewedProjectsCount} new</div>
+                <div class="new-badge-small" id="projectNewBadge" style="${unviewedProjectsCount > 0 ? 'display:block;' : 'display:none;'}">
+                    ${unviewedProjectsCount} new
+                </div>
                 <div class="card-icon"><i class="fas fa-tasks"></i></div>
                 <div class="card-title">Projects & Documents</div>
                 <div class="card-number">${totalProjects + totalDocs}</div>
@@ -2024,8 +2277,11 @@ async function renderDashboard() {
                 </div>
             </div>
             
+            <!-- Reports Card -->
             <div class="summary-card-large reports" onclick="showSection('reports')">
-                <div class="new-badge-small" id="reportNewBadge">${unviewedReportsCount} new</div>
+                <div class="new-badge-small" id="reportNewBadge" style="${unviewedReportsCount > 0 ? 'display:block;' : 'display:none;'}">
+                    ${unviewedReportsCount} new
+                </div>
                 <div class="card-icon"><i class="fas fa-chart-bar"></i></div>
                 <div class="card-title">All Reports</div>
                 <div class="card-number">${totalAddedReports + totalUploadedReports}</div>
@@ -2035,8 +2291,11 @@ async function renderDashboard() {
                 </div>
             </div>
             
+            <!-- Requests Card -->
             <div class="summary-card-large requests" onclick="showSection('requests')">
-                <div class="new-badge-small" id="requestNewBadge">${unviewedRequestsCount} new</div>
+                <div class="new-badge-small" id="requestNewBadge" style="${unviewedRequestsCount > 0 ? 'display:block;' : 'display:none;'}">
+                    ${unviewedRequestsCount} new
+                </div>
                 <div class="card-icon"><i class="fas fa-hand-holding-usd"></i></div>
                 <div class="card-title">Fund Requests</div>
                 <div class="card-number">${totalRequests}</div>
@@ -2047,6 +2306,7 @@ async function renderDashboard() {
                 </div>
             </div>
             
+            <!-- Daily Work Card -->
             <div class="summary-card-large dailywork" onclick="showSection('projects')">
                 <div class="card-icon"><i class="fas fa-calendar-day"></i></div>
                 <div class="card-title">Daily Work</div>
@@ -2059,6 +2319,7 @@ async function renderDashboard() {
             </div>
         </div>
         
+        <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
             <div class="bg-white rounded-xl p-4 shadow-sm">
                 <h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-indigo-600 mr-2"></i>Request Status</h3>
@@ -2079,12 +2340,24 @@ async function renderDashboard() {
             </div>
         </div>
         
-        <div class="bg-white rounded-xl p-4 shadow-sm"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-indigo-600 mr-1"></i>Recent Activity</h3></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">${activityLogs.slice(0,5).map(l=>`<div class="py-1 border-b flex justify-between"><span>${escapeHtml(l.action)}</span><span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('')}</div></div>
+        <!-- Recent Activity -->
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-sm font-semibold"><i class="fas fa-history text-indigo-600 mr-1"></i>Recent Activity</h3>
+            </div>
+            <div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">
+                ${activityLogs.slice(0,5).map(l => `
+                    <div class="py-1 border-b flex justify-between">
+                        <span>${escapeHtml(l.action)}</span>
+                        <span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
     `;
     
     addLog("Dashboard loaded");
 }
-
 // ============================================================
 // PROJECTS SECTION
 // ============================================================
@@ -2161,63 +2434,57 @@ async function saveProject() {
 }
 
 // ============================================================
-// DELETE PROJECT - FORCE REMOVE FROM ALL VIEWS
+// DELETE PROJECT - FORCE DELETE SENT PROJECTS
 // ============================================================
-async function deleteProject(id) { 
-    if(!confirm('Delete this project? It will be moved to recycle bin.')) {
+async function deleteProject(id) {
+    if (!confirm('Delete this project? It will be moved to recycle bin.')) {
         return;
     }
-    
+
     const p = projectsData.find(proj => proj.id === id);
-    if(!p) {
+    if (!p) {
         showToast('Project not found', true);
         return;
     }
-    
-    // Show loading state on card
+
+    console.log(`📡 Deleting project: ${id}, name: ${p.name}, source: ${p.source_type}`);
+
+    // Show loading
     const card = document.getElementById(`proj-card-${id}`);
     if (card) {
         card.style.opacity = '0.4';
         card.style.pointerEvents = 'none';
-        card.style.transition = 'opacity 0.3s';
     }
-    
+
     try {
-        // 1. Add to recycle bin
-        await addToRecycleBin(id, 'project', p.name);
-        
-        // 2. Delete from database
-        const res = await apiCall('delete_project.php', 'POST', { 
-            project_id: id, 
-            department_id: DEPARTMENT_ID, 
+        // ============================================================
+        // CALL DELETE API
+        // ============================================================
+        const res = await apiCall('delete_project.php', 'POST', {
+            project_id: id,
+            department_id: DEPARTMENT_ID,
             is_deleted: 1,
-            deleted_by_department: DEPARTMENT_ID,
-            deleted_by_admin: 0
+            deleted_by: CURRENT_USER || 'System'
         });
-        
-        console.log('Delete project response:', res);
-        
+
+        console.log('📥 Delete response:', res);
+
         // ============================================================
-        // 3. FORCE REMOVE FROM ALL LOCAL DATA
+        // FORCE REMOVE FROM LOCAL DATA
         // ============================================================
-        
-        // Remove from projectsData
         projectsData = projectsData.filter(proj => proj.id !== id);
-        
-        // Remove from dailyworkData
         dailyworkData = dailyworkData.filter(w => w.project_id !== id);
-        
-        // Remove from any project's daily_work array
+
+        // Remove from any project's daily_work
         projectsData.forEach(proj => {
             if (proj.daily_work) {
                 proj.daily_work = proj.daily_work.filter(w => w.project_id !== id);
             }
-            if (proj.daily_work_records) {
-                proj.daily_work_records = proj.daily_work_records.filter(w => w.project_id !== id);
-            }
         });
-        
-        // 4. Remove the card from DOM
+
+        // ============================================================
+        // REMOVE CARD FROM DOM
+        // ============================================================
         if (card && card.parentNode) {
             card.style.opacity = '0';
             card.style.transition = 'opacity 0.3s';
@@ -2227,31 +2494,38 @@ async function deleteProject(id) {
                 }
             }, 400);
         }
-        
-        // 5. Force reload from API with cache buster
-        await fetchProjects();
-        await loadDashboard();
-        
-        // 6. If projects page is visible, reload it
+
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
+        unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
+        updateProjectBadge();
+        updateDashboardBadges();
+
+        // ============================================================
+        // FORCE REFRESH
+        // ============================================================
+        await forceRefreshProjects();
+
+        // ============================================================
+        // RENDER PROJECTS (IF VISIBLE)
+        // ============================================================
         const projectsPage = document.getElementById('projectsPage');
         if (projectsPage && !projectsPage.classList.contains('hidden')) {
             await renderProjects();
         }
-        
-        // 7. Update count in tabs
-        updateProjectBadge();
-        
-        if(res && res.success) { 
-            showToast('✅ Project moved to recycle bin'); 
-            addLog(`Project deleted: ${p.name}`);
-        } else { 
-            showToast('Project removed from view', false);
+
+        await renderDashboard();
+
+        if (res && res.success) {
+            const totalDeleted = (res.data?.dailywork_deleted || 0) + (res.data?.sent_dailywork_deleted || 0);
+            showToast(`✅ Project "${p.name}" and ${totalDeleted} daily work records deleted`);
+        } else {
+            showToast('✅ Project removed from view', false);
         }
-        
-    } catch(e) { 
-        console.error('Delete project error:', e);
-        
-        // Still remove from local even if API fails
+
+    } catch (error) {
+        console.error('❌ Delete error:', error);
         projectsData = projectsData.filter(proj => proj.id !== id);
         if (card && card.parentNode) {
             card.style.opacity = '0';
@@ -2261,15 +2535,96 @@ async function deleteProject(id) {
                 }
             }, 400);
         }
-        
-        await fetchProjects();
-        await loadDashboard();
+        await forceRefreshProjects();
         showToast('Network error, but project removed from view', true);
     } finally {
         if (card) {
             card.style.opacity = '1';
             card.style.pointerEvents = 'auto';
         }
+    }
+}
+
+// ============================================================
+// FORCE REFRESH PROJECTS - WITH CACHE BUSTER
+// ============================================================
+async function forceRefreshProjects() {
+    try {
+        const timestamp = new Date().getTime();
+        const url = API_BASE + 'get_projects.php?department_id=' + DEPARTMENT_ID + '&_=' + timestamp;
+        
+        console.log('📡 Force refreshing from:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
+        const result = await response.json();
+        console.log('📥 Force refresh response:', result);
+        
+        if (result.success && result.data) {
+            projectsData = result.data.filter(p => 
+                (p.is_deleted === 0 || p.is_deleted === null || p.is_deleted === '0') &&
+                (!p.deleted_by_department || p.deleted_by_department != 1) &&
+                (!p.deleted_by_admin || p.deleted_by_admin != 1)
+            );
+            console.log('📋 Projects after force refresh:', projectsData.length);
+        }
+        
+        return projectsData;
+    } catch (error) {
+        console.error('❌ Force refresh error:', error);
+        return projectsData;
+    }
+}
+// ============================================================
+// FORCE REFRESH PROJECTS - WITH CACHE BUSTER
+// ============================================================
+async function forceRefreshProjects() {
+    try {
+        const timestamp = new Date().getTime();
+        const url = API_BASE + 'get_projects.php?department_id=' + DEPARTMENT_ID + '&_=' + timestamp;
+        
+        console.log('📡 Force refreshing projects from:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
+        const result = await response.json();
+        console.log('📥 Force refresh response:', result);
+        
+        if (result.success && result.data) {
+            projectsData = result.data.filter(p => 
+                (p.is_deleted === 0 || p.is_deleted === null || p.is_deleted === '0') &&
+                (!p.deleted_by_department || p.deleted_by_department != 1) &&
+                (!p.deleted_by_admin || p.deleted_by_admin != 1)
+            );
+            console.log('📋 Projects after force refresh:', projectsData.length);
+        }
+        
+        return projectsData;
+    } catch (error) {
+        console.error('❌ Force refresh error:', error);
+        return projectsData;
     }
 }
 function editProject(id) { 
@@ -2318,14 +2673,12 @@ function editProject(id) {
     } 
 }
 
-
 // ============================================================
-// VIEW PROJECT DETAILS - FIXED
+// VIEW PROJECT DETAILS - Toleo Jipya
 // ============================================================
 async function viewProjectDetails(id) {
     console.log('📋 viewProjectDetails called with ID:', id);
     
-    // Find project by ID
     const p = projectsData.find(proj => proj.id === id);
     if (!p) {
         console.error('❌ Project not found for ID:', id);
@@ -2334,6 +2687,9 @@ async function viewProjectDetails(id) {
     }
     
     console.log('📋 Found project:', p.name, 'ID:', p.id);
+    console.log('📋 Project source_type:', p.source_type);
+    console.log('📋 Project sent_from_dept:', p.sent_from_dept);
+    console.log('📋 DEPARTMENT_ID:', DEPARTMENT_ID);
     
     // Mark as viewed if sent from another department
     if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
@@ -2341,7 +2697,6 @@ async function viewProjectDetails(id) {
         p.is_viewed_by_department = 1;
         p._is_unviewed = false;
         
-        // Remove NEW badge
         const card = document.getElementById('proj-card-' + id);
         if (card) {
             const badge = card.querySelector('.new-badge');
@@ -2350,100 +2705,125 @@ async function viewProjectDetails(id) {
     }
     
     currentProjectId = id;
+    const isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+    console.log('📋 isReceived:', isReceived);
     
     // ============================================================
-    // FORCE REFRESH DAILY WORK FOR THIS PROJECT
+    // GET IMAGE URL
     // ============================================================
-    try {
-        console.log('📊 Fetching daily work for project:', p.name);
-        const timestamp = new Date().getTime();
-        const projectName = p.name || '';
-        const projectId = p.original_project_id || p.id;
-        
-        // Try multiple methods to get daily work
-        let dailyWork = [];
-        
-        // Method 1: By project_name
-        let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
-        if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-            dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-            console.log(`✅ Found ${dailyWork.length} records by project_name`);
-        }
-        
-        // Method 2: By project_id
-        if (dailyWork.length === 0) {
-            dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}&_=${timestamp}`);
-            if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-                dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                console.log(`✅ Found ${dailyWork.length} records by project_id`);
+    let imageUrl = null;
+    let isImage = false;
+    
+    if (p.image) {
+        imageUrl = getCleanImageUrl(p.image);
+        isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
+    }
+    
+    if (!imageUrl && p.project_data) {
+        try {
+            const projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+            if (projectData && projectData.image) {
+                imageUrl = getCleanImageUrl(projectData.image);
+                isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
             }
-        }
-        
-        // Method 3: From local dailyworkData
-        if (dailyWork.length === 0) {
-            const localWork = dailyworkData.filter(w => 
-                w.project_id == projectId || 
-                w.project_name === projectName
-            );
-            if (localWork.length > 0) {
-                dailyWork = localWork;
-                console.log(`✅ Found ${dailyWork.length} records from local data`);
-            }
-        }
-        
-        // Store daily work in project
-        p.daily_work = dailyWork;
-        p.daily_work_count = dailyWork.length;
-        p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
-        
-        console.log(`📊 Daily work for ${p.name}: ${dailyWork.length} records`);
-        
-    } catch(e) {
-        console.error('❌ Error fetching daily work:', e);
-        p.daily_work = [];
-        p.daily_work_count = 0;
-        p.daily_work_summary = calculateDailyWorkSummary([]);
+        } catch (e) {}
     }
     
     // ============================================================
-    // BUILD VIEW
+    // BUILD IMAGE HTML
     // ============================================================
-    let fileUrl = getCleanImageUrl(p.image);
-    let isImage = fileUrl && (fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
+    let imageHtml = '';
+    if (imageUrl && isImage) {
+        imageHtml = `
+            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;overflow:hidden;cursor:pointer;" onclick="showFullImage('${imageUrl}')">
+                <img src="${imageUrl}?t=${Date.now()}" style="width:100%;height:100%;object-fit:cover;" 
+                     onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;\\'><i class=\\'fas fa-image text-4xl text-gray-400\\'></i><p class=\\'text-sm text-gray-500 ml-2\\'>Image failed to load</p></div>'">
+            </div>
+        `;
+    } else {
+        imageHtml = `
+            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <i class="fas fa-image text-4xl text-gray-400"></i>
+                <p class="text-sm text-gray-500 ml-2">No Image Available</p>
+            </div>
+        `;
+    }
     
-    let imageHtml = fileUrl && isImage ?
-        `<div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;overflow:hidden;cursor:pointer;" onclick="showFullImage('${fileUrl}')">
-            <img src="${fileUrl}?t=${Date.now()}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;\\'><i class=\\'fas fa-image text-4xl text-gray-400\\'></i><p class=\\'text-sm text-gray-500 ml-2\\'>Image failed to load</p></div>'">
-        </div>` :
-        `<div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;">
-            <i class="fas fa-image text-4xl text-gray-400"></i>
-            <p class="text-sm text-gray-500 ml-2">No Image Available</p>
-        </div>`;
+    // ============================================================
+    // GET DAILY WORK - FORCE REFRESH
+    // ============================================================
+    let dailyWork = p.daily_work || [];
+    if (dailyWork.length === 0) {
+        try {
+            const timestamp = new Date().getTime();
+            const projectName = p.name || '';
+            const projectId = p.original_project_id || p.id;
+            
+            // Method 1: By project_name
+            let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
+            if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                console.log(`✅ Found ${dailyWork.length} daily work records by project_name`);
+            }
+            
+            // Method 2: By project_id
+            if (dailyWork.length === 0) {
+                dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}&_=${timestamp}`);
+                if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                    dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                    console.log(`✅ Found ${dailyWork.length} daily work records by project_id`);
+                }
+            }
+            
+            p.daily_work = dailyWork;
+            p.daily_work_count = dailyWork.length;
+            p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
+        } catch (e) {
+            console.error('❌ Error fetching daily work:', e);
+        }
+    }
     
-    let statusClass = getProjectStatusClass(p.status);
-    let statusText = getProjectStatusText(p.status);
+    // ============================================================
+    // LOG DAILY WORK FOR DEBUGGING
+    // ============================================================
+    console.log(`📊 Daily work for ${p.name}: ${dailyWork.length} records`);
+    if (dailyWork.length > 0) {
+        console.log('📋 First daily work record:', dailyWork[0]);
+        console.log('📋 Daily work records:', dailyWork);
+    }
     
-    // Get daily work
-    const dailyWork = p.daily_work || [];
-    const dwSummary = p.daily_work_summary || calculateDailyWorkSummary(dailyWork);
+    const dwSummary = p.daily_work_summary || { total_budget: 0, total_expenses: 0, remaining_budget: 0, records_count: 0 };
+    const totalBudget = dwSummary.total_budget || 0;
+    const totalExpenses = dwSummary.total_expenses || 0;
+    const remainingBudget = totalBudget - totalExpenses;
     
-    let totalBudget = dwSummary.total_budget || 0;
-    let totalExpenses = dwSummary.total_expenses || 0;
-    let remainingBudget = totalBudget - totalExpenses;
-    
-    // Build daily work table
+    // ============================================================
+    // BUILD DAILY WORK TABLE - SENT RECORDS HAVE VIEW ONLY
+    // ============================================================
     let dailyWorkHtml = '';
     if (dailyWork.length > 0) {
         let tableRows = '';
         for (let w of dailyWork) {
-            const isSent = w.is_sent_record === 1 || w.source === 'sent';
-            const sentBadge = isSent ? 
-                `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || 'another department'}"><i class="fas fa-paper-plane"></i></span>` : '';
+            // ============================================================
+            // CHECK IF THIS IS A SENT RECORD
+            // ============================================================
+            const isSent = w.is_sent === 1 || 
+                          w.source_type === 'sent' || 
+                          w.is_sent_record === 1 ||
+                          (w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID) ||
+                          (w.from_department_id && w.from_department_id != DEPARTMENT_ID) ||
+                          (w.sent_from_name && w.sent_from_name !== '') ||
+                          (w.source === 'sent');
             
-            const budget = parseFloat(w.budget || 0);
-            const amount = parseFloat(w.amount || 0);
-            const status = w.status || 'pending';
-            const recordDate = w.date || 'N/A';
+            const sentBadge = isSent ? 
+                `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || w.from_department_name || 'another department'}">
+                    <i class="fas fa-paper-plane"></i>
+                </span>` : '';
+            
+            const budget = parseFloat(w.budget || w.dailywork_budget || 0);
+            const amount = parseFloat(w.amount || w.dailywork_amount || 0);
+            const status = w.status || w.dailywork_status || 'pending';
+            const recordDate = w.date || w.dailywork_date || 'N/A';
             const description = w.work_description || '';
             const createdBy = w.sent_by || w.created_by || 'System';
             
@@ -2452,26 +2832,68 @@ async function viewProjectDetails(id) {
             let statusTextDw = status === 'completed' ? 'Completed' :
                               status === 'partial' ? 'Partial' : 'Pending';
             
+            // ============================================================
+            // ACTIONS - VIEW ONLY FOR SENT RECORDS
+            // ============================================================
+            let actionsHtml = '';
+            if (isSent) {
+                // SENT RECORD - VIEW ONLY (NO EDIT, NO DELETE)
+                actionsHtml = `
+                    <button onclick="viewDailyWorkDetails(${w.id || w.original_dailywork_id || w.id})" class="action-btn view" title="View">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
+                        <i class="fas fa-paper-plane mr-1"></i> Received
+                    </span>
+                `;
+                console.log(`📋 Sent record: ${w.id} - View only`);
+            } else {
+                // ORIGINAL RECORD - VIEW, EDIT, DELETE
+                actionsHtml = `
+                    <button onclick="viewDailyWorkDetails(${w.id})" class="action-btn view" title="View">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                `;
+                console.log(`📋 Original record: ${w.id} - View, Edit, Delete`);
+            }
+            
+            const sentFromDisplay = isSent ? 
+                `<div class="text-[8px] text-purple-500 mt-1">
+                    <i class="fas fa-paper-plane mr-1"></i> 
+                    Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || w._sent_from || 'Unknown')}
+                </div>` : '';
+            
             tableRows += `
-                <tr style="border-bottom: 1px solid #e5e7eb; ${isSent ? 'background: #faf5ff;' : ''}">
+                <tr style="border-bottom: 1px solid #e5e7eb; ${isSent ? 'background: #faf5ff;' : ''}" id="daily-row-${w.id}">
                     <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
                         ${new Date(recordDate).toLocaleString()}
                         ${sentBadge}
                     </td>
                     <td style="padding: 10px 8px; word-break: break-word; font-size:12px;">
                         ${escapeHtml(description || '-')}
-                        ${isSent ? `<div class="text-[8px] text-purple-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || 'Unknown')}</div>` : ''}
+                        ${sentFromDisplay}
                     </td>
-                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(budget)}</td>
-                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(amount)}</td>
-                    <td style="padding: 10px 8px; text-align: center; font-size:12px;"><span class="status-badge ${statusClassDw}">${statusTextDw}</span></td>
-                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">${escapeHtml(createdBy)}</td>
+                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">
+                        ${formatMoney(budget)}
+                    </td>
+                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">
+                        ${formatMoney(amount)}
+                    </td>
+                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">
+                        <span class="status-badge ${statusClassDw}">${statusTextDw}</span>
+                    </td>
+                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">
+                        ${escapeHtml(createdBy)}
+                    </td>
                     <td style="padding: 10px 8px; text-align: center; font-size:12px;">
                         <div class="flex gap-1 justify-center">
-                            <button onclick="viewDailyWorkDetails(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
-                            ${!isSent ? `<button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
-                            ${!isSent ? `<button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>` : ''}
-                            ${isSent ? `<span class="text-[8px] text-purple-500"><i class="fas fa-check-circle"></i> Received</span>` : ''}
+                            ${actionsHtml}
                         </div>
                     </td>
                 </tr>
@@ -2520,7 +2942,13 @@ async function viewProjectDetails(id) {
         `;
     }
     
-    // Build details table
+    // ============================================================
+    // BUILD DETAILS TABLE
+    // ============================================================
+    let statusClass = getProjectStatusClass(p.status);
+    let statusText = getProjectStatusText(p.status);
+    const fromDeptName = isReceived ? getDepartmentName(p.sent_from_dept) : '';
+    
     let detailsHtml = `
         <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 15px;">
             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -2573,42 +3001,57 @@ async function viewProjectDetails(id) {
                     <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Daily Work Records:</td>
                     <td style="padding: 12px 16px;"><strong>${dailyWork.length} records</strong></td>
                 </tr>
-                ${p.sent_from_dept ? `<tr style="border-bottom: 1px solid #e5e7eb;">
+                ${isReceived ? `<tr style="border-bottom: 1px solid #e5e7eb;">
                     <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Received From:</td>
-                    <td style="padding: 12px 16px;"><span class="from-badge">${escapeHtml(getDepartmentName(p.sent_from_dept))}</span></td>
+                    <td style="padding: 12px 16px;"><span class="from-badge">${escapeHtml(fromDeptName)}</span></td>
                 </tr>` : ''}
             </table>
         </div>
     `;
     
-    // Set content
-    document.getElementById('viewProjectContent').innerHTML = `
-        <div style="padding: 5px 0;">
-            ${imageHtml}
-            ${detailsHtml}
-            
-            <div style="margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-                    <h4 style="margin: 0; font-size: 15px; font-weight: 700;">
-                        <i class="fas fa-calendar-day text-purple-500 mr-2"></i>
-                        Daily Work Records (${dailyWork.length})
-                        ${dailyWork.filter(w => w.is_sent_record === 1).length > 0 ? 
-                            `<span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-2">
-                                ${dailyWork.filter(w => w.is_sent_record === 1).length} received
-                            </span>` : ''}
-                    </h4>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <button onclick="openDailyWorkModal()" class="btn-cyan text-white text-xs py-1.5 px-3 rounded-lg"><i class="fas fa-plus mr-1"></i> Add</button>
-                        <button onclick="exportDailyWorkToExcel()" class="btn-success text-white text-xs py-1.5 px-3 rounded-lg"><i class="fas fa-file-excel mr-1"></i> Excel</button>
-                        <button onclick="exportDailyWorkToPDF()" class="btn-danger text-white text-xs py-1.5 px-3 rounded-lg"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+    // ============================================================
+    // SET CONTENT
+    // ============================================================
+    const contentDiv = document.getElementById('viewProjectContent');
+    if (contentDiv) {
+        contentDiv.innerHTML = `
+            <div style="padding: 5px 0;">
+                ${imageHtml}
+                ${detailsHtml}
+                
+                <div style="margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                        <h4 style="margin: 0; font-size: 15px; font-weight: 700;">
+                            <i class="fas fa-calendar-day text-purple-500 mr-2"></i>
+                            Daily Work Records (${dailyWork.length})
+                            ${dailyWork.filter(w => w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID).length > 0 ? 
+                                `<span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-2">
+                                    ${dailyWork.filter(w => w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID).length} received
+                                </span>` : ''}
+                        </h4>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            ${!isReceived ? `
+                                <button onclick="openDailyWorkModal()" class="btn-cyan text-white text-xs py-1.5 px-3 rounded-lg" style="background: #06b6d4; border: none; cursor: pointer;">
+                                    <i class="fas fa-plus mr-1"></i> Add
+                                </button>
+                            ` : ''}
+                            <button onclick="exportDailyWorkToExcel()" class="btn-success text-white text-xs py-1.5 px-3 rounded-lg" style="background: #10b981; border: none; cursor: pointer;">
+                                <i class="fas fa-file-excel mr-1"></i> Excel
+                            </button>
+                            <button onclick="exportDailyWorkToPDF()" class="btn-danger text-white text-xs py-1.5 px-3 rounded-lg" style="background: #ef4444; border: none; cursor: pointer;">
+                                <i class="fas fa-file-pdf mr-1"></i> PDF
+                            </button>
+                        </div>
                     </div>
+                    ${dailyWorkHtml}
                 </div>
-                ${dailyWorkHtml}
             </div>
-        </div>
-    `;
+        `;
+    }
     
-    // Build buttons
+    // ============================================================
+    // BUILD BUTTONS - Excel, PDF, View Image, Send ONLY
+    // ============================================================
     let deptOptions = '';
     allDepartmentsForSend.forEach(d => {
         if (d.id !== DEPARTMENT_ID) {
@@ -2616,20 +3059,135 @@ async function viewProjectDetails(id) {
         }
     });
     
-    document.getElementById('viewProjButtons').innerHTML = `
-        <button onclick="exportSingleProjectExcel(${p.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel"></i> Excel</button>
-        <button onclick="exportProjectToPDFNewWindow(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf"></i> PDF</button>
-        ${fileUrl && isImage ? `<button onclick="showFullImage('${fileUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View Image</button>` : ''}
-        <div class="send-dropdown">
-            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send</button>
-            <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
+    // ============================================================
+    // BUTTONS - Excel, PDF, View Image, Send ONLY
+    // NO EDIT, NO DELETE
+    // ============================================================
+    let buttonsHtml = `
+        <button onclick="exportSingleProjectExcel(${p.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm" style="background: #10b981; border: none; cursor: pointer; transition: all 0.2s;">
+            <i class="fas fa-file-excel"></i> Excel
+        </button>
+        <button onclick="exportProjectToPDFNewWindow(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm" style="background: #ef4444; border: none; cursor: pointer; transition: all 0.2s;">
+            <i class="fas fa-file-pdf"></i> PDF
+        </button>
+        ${imageUrl && isImage ? `
+            <button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm" style="background: #4338ca; border: none; cursor: pointer; transition: all 0.2s;">
+                <i class="fas fa-eye"></i> View Image
+            </button>
+        ` : ''}
+        <div class="send-dropdown" style="display: inline-block; position: relative;">
+            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')" 
+                    style="background: #4338ca; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;">
+                <i class="fas fa-paper-plane"></i> ${isReceived ? 'Forward' : 'Send'}
+            </button>
+            <div id="projSendDropdown-${p.id}" class="send-dropdown-content" style="display: none; position: absolute; right: 0; top: 100%; background: #1e293b; min-width: 180px; border-radius: 8px; z-index: 100; border: 1px solid #334155; max-height: 300px; overflow-y: auto; margin-top: 5px;">
+                ${deptOptions}
+            </div>
         </div>
     `;
     
-    // Open modal
+    const buttonsDiv = document.getElementById('viewProjButtons');
+    if (buttonsDiv) {
+        buttonsDiv.innerHTML = buttonsHtml;
+    }
+    
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
     openModal('viewProjectModal');
     console.log('✅ viewProjectDetails completed for:', p.name);
 }
+// ============================================================
+// VIEW DAILY WORK DETAILS - INASHOWA SENT BADGE
+// ============================================================
+async function viewDailyWorkDetails(id) {
+    // Tafuta daily work kwa ID (kwanza kwenye dailywork, kisha sent_dailywork)
+    let w = dailyworkData.find(item => item.id == id);
+    
+    // Ikiwa haipo kwenye dailywork, tafuta kwenye sent_dailywork
+    if (!w) {
+        // Tafuta kwenye project's daily_work
+        for (let p of projectsData) {
+            if (p.daily_work) {
+                const found = p.daily_work.find(item => item.id == id);
+                if (found) {
+                    w = found;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!w) {
+        showToast('Daily work record not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // CHECK IF SENT RECORD
+    // ============================================================
+    const isSent = w.is_sent === 1 || 
+                   w.source_type === 'sent' || 
+                   w.is_sent_record === 1 ||
+                   (w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID) ||
+                   (w.from_department_id && w.from_department_id != DEPARTMENT_ID);
+    
+    const sentBadge = isSent ? 
+        `<div class="text-xs text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full inline-block mt-1">
+            <i class="fas fa-paper-plane mr-1"></i> Received from ${escapeHtml(w.sent_from_name || w.from_department_name || 'another department')}
+        </div>` : '';
+    
+    const budget = parseFloat(w.budget || w.dailywork_budget || 0);
+    const amount = parseFloat(w.amount || w.dailywork_amount || 0);
+    const status = w.status || w.dailywork_status || 'pending';
+    const recordDate = w.date || w.dailywork_date || 'N/A';
+    const description = w.work_description || '';
+    const createdBy = w.sent_by || w.created_by || 'System';
+    
+    let statusText = status === 'completed' ? 'Completed' :
+                    status === 'partial' ? 'Partial' : 'Pending';
+    let statusClass = status === 'completed' ? 'status-completed' :
+                     status === 'partial' ? 'status-partial' : 'status-pending';
+    
+    document.getElementById('viewDailyworkContent').innerHTML = `
+        <div class="space-y-3">
+            <div class="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-4 rounded-lg">
+                <h3 class="text-lg font-bold">Daily Work Details</h3>
+                <p class="text-xs opacity-90 mt-1">Record ID: #${w.id}</p>
+                ${sentBadge}
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+                <div><strong>Date/Time:</strong></div>
+                <div>${new Date(recordDate).toLocaleString()}</div>
+                <div><strong>Project Name:</strong></div>
+                <div>${escapeHtml(w.project_name || w.dailywork_project_name || 'N/A')}</div>
+                <div><strong>Description:</strong></div>
+                <div class="col-span-2">${escapeHtml(description || '-')}</div>
+                <div><strong>Budget:</strong></div>
+                <div class="text-green-600 font-bold">${formatMoney(budget)}</div>
+                <div><strong>Amount:</strong></div>
+                <div class="text-orange-600 font-bold">${formatMoney(amount)}</div>
+                <div><strong>Status:</strong></div>
+                <div><span class="status-badge ${statusClass}">${statusText}</span></div>
+                <div><strong>Created By:</strong></div>
+                <div>${escapeHtml(createdBy)}</div>
+            </div>
+            ${isSent ? `
+                <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-center">
+                    <i class="fas fa-paper-plane text-purple-600 mr-2"></i>
+                    <span class="text-sm text-purple-700">This record was sent from another department</span>
+                </div>
+            ` : `
+                <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                    <i class="fas fa-check-circle text-blue-600 mr-2"></i>
+                    <span class="text-sm text-blue-700">This is your original record</span>
+                </div>
+            `}
+        </div>
+    `;
+    openModal('viewDailyworkModal');
+}
+
 // ============================================================
 // FORCE REFRESH DAILY WORK FOR A PROJECT
 // ============================================================
@@ -2701,117 +3259,294 @@ async function forceRefreshDailyWorkForProject(project) {
 }
 
 // ============================================================
-// RENDER PROJECTS - WITH TAB SWITCHING SUPPORT
+// RENDER PROJECTS - COMPLETE WITH UPLOADED DOCUMENTS
 // ============================================================
 async function renderProjects(highlightId = null) {
-    try {
-        await Promise.all([fetchProjects(), fetchProjectDocuments(), fetchUnviewedCounts()]);
-        const projectsSection = document.getElementById('projectsSection');
-        if (!projectsSection) return;
-        
-        console.log(`📋 Rendering projects tab: ${currentProjectTab}, projects: ${projectsData.length}, documents: ${projectDocuments.length}`);
-        
-        let html = `
-            <div class="tab-container">
-                <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')">
-                    <i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span>
-                </button>
-                <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')">
-                    <i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span>
-                </button>
+    console.log('📋 renderProjects called, currentTab:', currentProjectTab);
+    
+    // Fetch projects first
+    await fetchProjects();
+    await fetchProjectDocuments();
+    await fetchUnviewedCounts();
+    
+    const projectsSection = document.getElementById('projectsSection');
+    if (!projectsSection) {
+        console.error('❌ projectsSection not found');
+        return;
+    }
+    
+    console.log(`📋 Rendering projects tab: ${currentProjectTab}, projects: ${projectsData.length}, documents: ${projectDocuments.length}`);
+    
+    // ============================================================
+    // BUILD HTML - TABS
+    // ============================================================
+    let html = `
+        <div class="tab-container">
+            <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')">
+                <i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span>
+            </button>
+            <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')">
+                <i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span>
+            </button>
+        </div>
+    `;
+    
+    if (currentProjectTab === 'added') {
+        // ============================================================
+        // ADDED PROJECTS TAB
+        // ============================================================
+        html += `
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
+                <div class="flex gap-2">
+                    <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Project</button>
+                    <button onclick="exportAllProjectsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                    <button onclick="exportAllProjectsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                </div>
             </div>
+            <div class="projects-grid" id="projectsGrid"></div>
         `;
+        projectsSection.innerHTML = html;
         
-        if (currentProjectTab === 'added') {
-            // ... existing added projects code ...
-            html += `
-                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <h2 class="text-xl font-bold"><i class="fas fa-tasks text-indigo-600 mr-2"></i>Projects (${projectsData.length})</h2>
-                    <div class="flex gap-2">
-                        <button onclick="openAddProjectModal()" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Project</button>
-                        <button onclick="exportAllProjectsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
-                        <button onclick="exportAllProjectsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
-                    </div>
+        if (projectsData.length === 0) {
+            document.getElementById('projectsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl">
+                    <i class="fas fa-folder-open text-4xl mb-3 block"></i>
+                    <p>No projects found. Click "Add Project" to create one.</p>
+                    <p class="text-xs text-gray-400 mt-2">Debug: ${projectsData.length} projects loaded</p>
                 </div>
-                <div class="projects-grid" id="projectsGrid"></div>
             `;
-            projectsSection.innerHTML = html;
-            
-            // ... rest of added projects rendering ...
-            
-        } else {
-            // ============================================================
-            // UPLOADED DOCUMENTS TAB - FIXED
-            // ============================================================
-            html += `
-                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
-                    <div class="flex gap-2">
-                        <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
-                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
-                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
-                    </div>
-                </div>
-                <div class="documents-grid" id="uploadedDocsGrid"></div>
-            `;
-            projectsSection.innerHTML = html;
-            
-            if (projectDocuments.length === 0) {
-                document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents found.</div>';
-                return;
-            }
-            
-            let docsHtml = '';
-            for (let doc of projectDocuments) {
-                let isHighlighted = highlightId && doc.id === highlightId;
-                let fromDept = '';
-                if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-                    fromDept = `<span class="from-badge">From: ${getDepartmentName(doc.sent_from_department)}</span>`;
-                }
-                
-                let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
-                let fileIcon = 'fa-file-alt';
-                if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
-                else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
-                else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
-                else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
-                
-                docsHtml += `
-                    <div class="document-card ${isHighlighted ? 'search-highlight' : ''}" id="doc-card-${doc.id}" style="max-height:280px; cursor:pointer;" onclick="viewUploadedDocument(${doc.id})">
-                        <div class="card-header" style="padding: 6px 12px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <h4 style="font-size:12px;"><i class="fas ${fileIcon} mr-1"></i>${escapeHtml(doc.title)}</h4>
-                                <span style="font-size:8px; opacity:0.7;">#${doc.id}</span>
-                            </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
-                                <p style="font-size:8px; opacity:0.7;">${doc.file_name || 'Document'}</p>
-                                ${fromDept}
-                            </div>
-                        </div>
-                        <div class="p-3" style="padding: 8px 12px;">
-                            <div class="flex justify-between items-start mb-2">
-                                <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                                <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
-                            </div>
-                            <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
-                            <div class="flex gap-2 mt-2 pt-1 border-t">
-                                <button onclick="event.stopPropagation(); viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                                <button onclick="event.stopPropagation(); deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                            </div>
-                            <div class="user-info">${escapeHtml(doc.uploaded_by || 'System')} · ${formatDisplayDate(doc.created_at)}</div>
-                        </div>
-                    </div>`;
-            }
-            document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+            return;
         }
         
-        updateProjectBadge();
-    } catch(e) {
-        console.error("renderProjects error:", e);
-        showToast("Error loading projects: " + e.message, true);
+        // ============================================================
+        // BUILD PROJECT CARDS
+        // ============================================================
+        let gridHtml = '';
+        for (let p of projectsData) {
+            console.log('📋 Rendering project:', p.id, p.name, 'source:', p.source_type);
+            
+            let isUnviewed = p._is_unviewed === 1;
+            let isHighlighted = highlightId && p.id === highlightId;
+            let imageUrl = getCleanImageUrl(p.image);
+            let fromDept = '';
+            if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
+                fromDept = `<span class="from-badge">From: ${getDepartmentName(p.sent_from_dept)}</span>`;
+            }
+            
+            // Daily work info
+            const dwCount = p.daily_work_count || 0;
+            let dwBadge = '';
+            if (dwCount > 0) {
+                dwBadge = `<span class="text-[8px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 px-1.5 py-0.5 rounded-full ml-1"><i class="fas fa-calendar-day mr-0.5"></i> ${dwCount}</span>`;
+            }
+            
+            let imageHtml = '';
+            if (imageUrl) {
+                imageHtml = `<div class="project-image-wrapper" onclick="event.stopPropagation(); showFullImage('${imageUrl}')">
+                    <img src="${imageUrl}?t=${Date.now()}" class="project-image" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'no-image\\'><i class=\\'fas fa-image\\'></i><p>Image failed</p></div>'">
+                </div>`;
+            } else {
+                imageHtml = `<div class="project-image-wrapper">
+                    <div class="no-image">
+                        <i class="fas fa-image"></i>
+                        <p>No Image</p>
+                    </div>
+                </div>`;
+            }
+            
+            const isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+            
+            gridHtml += `<div class="project-card ${isHighlighted ? 'search-highlight' : ''}" id="proj-card-${p.id}" onclick="viewProjectDetails(${p.id})" style="max-height:370px;">
+                <div class="card-header" style="padding: 6px 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h4 style="font-size:12px;">${escapeHtml(p.name)}</h4>
+                        <span style="font-size:8px; opacity:0.7;">#${p.id}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                        <p style="font-size:8px; opacity:0.7;">${escapeHtml(p.client_name||'N/A')}</p>
+                        <div>
+                            ${dwBadge}
+                            ${fromDept}
+                        </div>
+                    </div>
+                </div>
+                ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                ${imageHtml}
+                <div class="p-3" style="padding: 8px 12px; flex-shrink: 0;">
+                    <div class="flex justify-between items-center">
+                        <span class="px-1.5 py-0.5 text-[8px] rounded-full ${getProjectStatusClass(p.status)}">${getProjectStatusText(p.status)}</span>
+                        <span class="text-sm font-semibold text-purple-600">${formatMoney(p.amount)}</span>
+                    </div>
+                    <div class="mt-1">
+                        <div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress||0}%</span></div>
+                        <div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-indigo-600 h-1 rounded-full" style="width:${p.progress||0}%"></div></div>
+                    </div>
+                    <div class="flex gap-2 mt-2 pt-1 border-t">
+                        <button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
+                        ${!isReceived ? `
+                            <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
+                            <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
+                        ` : `
+                            <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
+                        `}
+                    </div>
+                    <div class="user-info">${escapeHtml(p.created_by || 'System')} · ${formatDisplayDate(p.created_at)}</div>
+                </div>
+            </div>`;
+        }
+        document.getElementById('projectsGrid').innerHTML = gridHtml;
+        
+        if (highlightId) { 
+            const el = document.getElementById(`proj-card-${highlightId}`); 
+            if(el) { 
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                setTimeout(() => el.classList.remove('search-highlight'), 3000); 
+            } 
+        }
+    } else {
+        // ============================================================
+        // UPLOADED DOCUMENTS TAB
+        // ============================================================
+        html += `
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h2 class="text-xl font-bold"><i class="fas fa-file-upload text-indigo-600 mr-2"></i>Uploaded Documents (${projectDocuments.length})</h2>
+                <div class="flex gap-2">
+                    <button onclick="openUploadProjectDocModal()" class="btn-cyan"><i class="fas fa-upload mr-1"></i> Upload Document</button>
+                    <button onclick="exportAllProjectDocsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
+                    <button onclick="exportAllProjectDocsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                </div>
+            </div>
+            <div class="documents-grid" id="uploadedDocsGrid"></div>
+        `;
+        projectsSection.innerHTML = html;
+        
+        if (projectDocuments.length === 0) {
+            document.getElementById('uploadedDocsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl">
+                    <i class="fas fa-file-upload text-4xl mb-3 block"></i>
+                    <p>No uploaded documents found. Click "Upload Document" to add one.</p>
+                    <p class="text-xs text-gray-400 mt-2">Debug: ${projectDocuments.length} documents loaded</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // ============================================================
+        // BUILD DOCUMENT CARDS
+        // ============================================================
+        let docsHtml = '';
+        for (let doc of projectDocuments) {
+            console.log('📋 Rendering document:', doc.id, doc.title);
+            
+            let isHighlighted = highlightId && doc.id === highlightId;
+            let fromDept = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                fromDept = `<span class="from-badge">From: ${getDepartmentName(doc.sent_from_department)}</span>`;
+            }
+            
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
+            let fileIcon = 'fa-file-alt';
+            if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
+            else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
+            else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
+            else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
+            
+            let isUnviewed = doc._is_unviewed || false;
+            
+            docsHtml += `
+                <div class="document-card ${isHighlighted ? 'search-highlight' : ''} ${isUnviewed ? 'unviewed' : ''}" 
+                     id="doc-card-${doc.id}" 
+                     style="max-height:280px; cursor:pointer;" 
+                     onclick="viewUploadedDocument(${doc.id})">
+                    
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    
+                    <div class="card-header" style="padding: 6px 12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h4 style="font-size:12px;"><i class="fas ${fileIcon} mr-1"></i>${escapeHtml(doc.title)}</h4>
+                            <span style="font-size:8px; opacity:0.7;">#${doc.id}</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                            <p style="font-size:8px; opacity:0.7;">${doc.file_name || 'Document'}</p>
+                            ${fromDept}
+                        </div>
+                    </div>
+                    
+                    <div class="p-3" style="padding: 8px 12px;">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                        </div>
+                        
+                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                        
+                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                            <button onclick="event.stopPropagation(); viewUploadedDocument(${doc.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteProjectDocument(${doc.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                        
+                        <div class="user-info">${escapeHtml(doc.uploaded_by || 'System')} · ${formatDisplayDate(doc.created_at)}</div>
+                    </div>
+                </div>
+            `;
+        }
+        document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
+        
+        if (highlightId) { 
+            const el = document.getElementById(`doc-card-${highlightId}`); 
+            if(el) { 
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                setTimeout(() => el.classList.remove('search-highlight'), 3000); 
+            } 
+        }
+    }
+    
+    updateProjectBadge();
+    console.log('✅ renderProjects completed');
+}
+// ============================================================
+// BADGE FUNCTIONS - FIXED
+// ============================================================
+function updateProjectBadge() {
+    const badge = document.getElementById('projectBadge');
+    if (badge) {
+        if (unviewedProjectsCount > 0) {
+            badge.classList.remove('hidden');
+            badge.innerText = unviewedProjectsCount > 99 ? '99+' : unviewedProjectsCount;
+        } else {
+            badge.classList.add('hidden');
+        }
     }
 }
 
+function updateReportBadge() {
+    const badge = document.getElementById('reportBadge');
+    if (badge) {
+        if (unviewedReportsCount > 0) {
+            badge.classList.remove('hidden');
+            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+}
+
+function updateRequestBadge() {
+    const badge = document.getElementById('requestBadge');
+    if (badge) {
+        if (unviewedRequestsCount > 0) {
+            badge.classList.remove('hidden');
+            badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount;
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+}
 // ============================================================
 // RENDER PROJECTS - WITH TAB SWITCHING SUPPORT - COMPLETE
 // ============================================================
@@ -3015,7 +3750,21 @@ async function renderProjects(highlightId = null) {
 }
 
 function switchProjectTab(tab) { 
+    console.log('🔄 Switching project tab to:', tab);
     currentProjectTab = tab; 
+    
+    // Update tab button active states
+    const tabButtons = document.querySelectorAll('.tab-button');
+    tabButtons.forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.textContent.includes('Added Projects') && tab === 'added') {
+            btn.classList.add('active');
+        } else if (btn.textContent.includes('Uploaded Documents') && tab === 'uploaded') {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Reload the projects section with the selected tab
     renderProjects(); 
 }
 

@@ -1,183 +1,189 @@
 <?php
-// delete_uploaded_report.php - Delete Uploaded Reports and Sent Uploaded Reports
+// backend/api/delete_uploaded_report.php
 
+// ============================================================
+// HEADERS
+// ============================================================
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
-
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-$host = 'localhost';
-$dbname = 'geotraverse_erp';
-$username = 'root';
-$password = '';
-
+// ============================================================
+// DATABASE CONNECTION - KWA PDO
+// ============================================================
 try {
+    $host = 'localhost';
+    $dbname = 'geotraverse_erp';
+    $username = 'root';
+    $password = '';
+    
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'DB Connection Error: ' . $e->getMessage()]);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    
+} catch (PDOException $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database connection failed: ' . $e->getMessage()
+    ]);
     exit;
 }
 
-$data = json_decode(file_get_contents('php://input'), true);
+// ============================================================
+// GET INPUT DATA
+// ============================================================
+$input = json_decode(file_get_contents('php://input'), true);
 
-if (!$data || empty($data['id'])) {
-    echo json_encode(['success' => false, 'message' => 'Uploaded report ID required']);
+if (!$input || !isset($input['id']) || !isset($input['department_id'])) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Missing required fields: id, department_id'
+    ]);
     exit;
 }
 
-$reportId = (int)$data['id'];
-$departmentId = isset($data['department_id']) ? (int)$data['department_id'] : 0;
-$isAdmin = isset($data['is_admin']) && $data['is_admin'] ? 1 : 0;
-$deletedByDepartment = isset($data['deleted_by_department']) ? (int)$data['deleted_by_department'] : $departmentId;
-$deletedByAdmin = isset($data['deleted_by_admin']) ? (int)$data['deleted_by_admin'] : $isAdmin;
-
-try {
-    // ============================================================
-    // 1. CHECK IF REPORT EXISTS IN uploaded_reports TABLE
-    // ============================================================
-    $checkStmt = $pdo->prepare("
-        SELECT id, title, department_id, sent_from_department, sent_to_department 
-        FROM uploaded_reports 
-        WHERE id = ?
-        AND (is_deleted = 0 OR is_deleted IS NULL)
-    ");
-    $checkStmt->execute([$reportId]);
-    $report = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($report) {
-        // Check permission
-        $isOwner = ($report['department_id'] == $departmentId);
-        $isRecipient = ($report['sent_to_department'] == $departmentId);
-        
-        if (!$isOwner && !$isRecipient && $deletedByAdmin == 0) {
-            echo json_encode(['success' => false, 'message' => 'Permission denied']);
-            exit;
-        }
-        
-        // Soft delete
-        $stmt = $pdo->prepare("
-            UPDATE uploaded_reports 
-            SET 
-                is_deleted = 1,
-                deleted_by_department = :dept_deleted,
-                deleted_by_admin = :admin_deleted,
-                deleted_at = NOW()
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            'dept_deleted' => $deletedByDepartment,
-            'admin_deleted' => $deletedByAdmin,
-            'id' => $reportId
-        ]);
-        
-        // Add to recycle bin
-        addToRecycleBin($pdo, $reportId, 'uploaded_report', $report['title'], $deletedByDepartment, $deletedByAdmin);
-        
-        echo json_encode([
-            'success' => true,
-            'message' => 'Uploaded report moved to recycle bin',
-            'source' => 'uploaded_reports_table'
-        ]);
-        exit;
-    }
-    
-    // ============================================================
-    // 2. CHECK IF REPORT EXISTS IN sent_uploaded_reports TABLE
-    // ============================================================
-    $checkSentStmt = $pdo->prepare("
-        SELECT 
-            id, 
-            report_title, 
-            from_department_id, 
-            to_department_id
-        FROM sent_uploaded_reports 
-        WHERE id = ?
-        AND (is_deleted = 0 OR is_deleted IS NULL)
-    ");
-    $checkSentStmt->execute([$reportId]);
-    $sentReport = $checkSentStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($sentReport) {
-        // Check permission
-        $isRecipient = ($sentReport['to_department_id'] == $departmentId);
-        $isSender = ($sentReport['from_department_id'] == $departmentId);
-        
-        if (!$isRecipient && !$isSender && $deletedByAdmin == 0) {
-            echo json_encode(['success' => false, 'message' => 'Permission denied']);
-            exit;
-        }
-        
-        // Soft delete
-        $stmt = $pdo->prepare("
-            UPDATE sent_uploaded_reports 
-            SET 
-                is_deleted = 1,
-                deleted_by_department = :dept_deleted,
-                deleted_by_admin = :admin_deleted,
-                deleted_at = NOW()
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            'dept_deleted' => $deletedByDepartment,
-            'admin_deleted' => $deletedByAdmin,
-            'id' => $reportId
-        ]);
-        
-        // Add to recycle bin
-        addToRecycleBin($pdo, $reportId, 'sent_uploaded_report', $sentReport['report_title'] ?? 'Sent Uploaded Report', $deletedByDepartment, $deletedByAdmin);
-        
-        echo json_encode([
-            'success' => true,
-            'message' => 'Sent uploaded report moved to recycle bin',
-            'source' => 'sent_uploaded_reports_table'
-        ]);
-        exit;
-    }
-    
-    echo json_encode(['success' => false, 'message' => 'Uploaded report not found']);
-    
-} catch(PDOException $e) {
-    error_log('Delete uploaded report error: ' . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
-}
+$report_id = intval($input['id']);
+$department_id = intval($input['department_id']);
+$deleted_by = isset($input['deleted_by']) ? $input['deleted_by'] : 'System';
 
 // ============================================================
-// HELPER FUNCTION: Add to recycle bin
+// FUNCTION TO ADD TO RECYCLE BIN
 // ============================================================
-function addToRecycleBin($pdo, $itemId, $itemType, $itemName, $deletedByDepartment, $deletedByAdmin) {
+function addToRecycleBin($pdo, $item_id, $item_type, $item_name, $department_id, $deleted_by) {
     try {
-        $checkBinStmt = $pdo->prepare("
-            SELECT id FROM recycle_bin 
-            WHERE item_id = ? AND item_type = ?
-        ");
-        $checkBinStmt->execute([$itemId, $itemType]);
-        
-        if (!$checkBinStmt->fetch()) {
-            $stmt2 = $pdo->prepare("
-                INSERT INTO recycle_bin 
-                (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin) 
-                VALUES (?, ?, ?, ?, ?)
-            ");
-            $stmt2->execute([
-                $itemId,
-                $itemType,
-                $itemName,
-                $deletedByDepartment > 0 ? $deletedByDepartment : null,
-                $deletedByAdmin
-            ]);
-        }
+        $query = "INSERT INTO recycle_bin (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, deleted_by_name, created_at) 
+                  VALUES (?, ?, ?, ?, 0, ?, NOW())";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$item_id, $item_type, $item_name, $department_id, $deleted_by]);
         return true;
-    } catch(PDOException $e) {
-        error_log('Recycle bin error: ' . $e->getMessage());
+    } catch (Exception $e) {
         return false;
     }
+}
+
+// ============================================================
+// DELETE UPLOADED REPORTS
+// ============================================================
+try {
+    $deleted_count = 0;
+    $deleted_ids = [];
+    $deleted_items = [];
+    
+    // ============================================================
+    // 1. DELETE ORIGINAL UPLOADED REPORT
+    // ============================================================
+    $query = "SELECT id, title FROM uploaded_reports WHERE id = ? AND is_deleted = 0";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$report_id]);
+    $report = $stmt->fetch();
+    
+    if ($report) {
+        $query = "UPDATE uploaded_reports SET 
+                  is_deleted = 1,
+                  deleted_at = NOW(),
+                  deleted_by = ?
+                  WHERE id = ?";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$deleted_by, $report_id]);
+        $deleted_count++;
+        $deleted_ids[] = $report_id;
+        $deleted_items[] = [
+            'table' => 'uploaded_reports',
+            'id' => $report_id,
+            'name' => $report['title'],
+            'type' => 'original'
+        ];
+        
+        addToRecycleBin($pdo, $report_id, 'uploaded_report', $report['title'], $department_id, $deleted_by);
+    }
+    
+    // ============================================================
+    // 2. DELETE SENT UPLOADED REPORTS (Kwa original_uploaded_report_id)
+    // ============================================================
+    $query = "SELECT id, uploaded_report_title FROM sent_uploaded_reports 
+              WHERE original_uploaded_report_id = ? AND is_deleted = 0";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$report_id]);
+    $sentReports = $stmt->fetchAll();
+    
+    foreach ($sentReports as $sent) {
+        $query = "UPDATE sent_uploaded_reports SET 
+                  is_deleted = 1,
+                  deleted_at = NOW()
+                  WHERE id = ?";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$sent['id']]);
+        $deleted_count++;
+        $deleted_ids[] = $sent['id'];
+        $deleted_items[] = [
+            'table' => 'sent_uploaded_reports',
+            'id' => $sent['id'],
+            'name' => $sent['uploaded_report_title'],
+            'type' => 'sent'
+        ];
+        
+        addToRecycleBin($pdo, $sent['id'], 'sent_uploaded_report', $sent['uploaded_report_title'], $department_id, $deleted_by);
+    }
+    
+    // ============================================================
+    // 3. DELETE SENT UPLOADED REPORT KWA ID (Kama original haipo)
+    // ============================================================
+    if ($deleted_count == 0) {
+        $query = "SELECT id, uploaded_report_title FROM sent_uploaded_reports 
+                  WHERE id = ? AND is_deleted = 0";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$report_id]);
+        $sent = $stmt->fetch();
+        
+        if ($sent) {
+            $query = "UPDATE sent_uploaded_reports SET 
+                      is_deleted = 1,
+                      deleted_at = NOW()
+                      WHERE id = ?";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([$report_id]);
+            $deleted_count++;
+            $deleted_ids[] = $report_id;
+            $deleted_items[] = [
+                'table' => 'sent_uploaded_reports',
+                'id' => $report_id,
+                'name' => $sent['uploaded_report_title'],
+                'type' => 'sent'
+            ];
+            
+            addToRecycleBin($pdo, $report_id, 'sent_uploaded_report', $sent['uploaded_report_title'], $department_id, $deleted_by);
+        }
+    }
+    
+    // ============================================================
+    // SEND RESPONSE
+    // ============================================================
+    if ($deleted_count > 0) {
+        echo json_encode([
+            'success' => true,
+            'message' => 'Uploaded report(s) deleted successfully',
+            'deleted_count' => $deleted_count,
+            'deleted_ids' => $deleted_ids,
+            'deleted_items' => $deleted_items
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Uploaded report not found',
+            'deleted_count' => 0
+        ]);
+    }
+    
+} catch (PDOException $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database error: ' . $e->getMessage()
+    ]);
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage()
+    ]);
 }
 ?>

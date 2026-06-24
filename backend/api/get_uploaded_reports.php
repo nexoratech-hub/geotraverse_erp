@@ -1,144 +1,121 @@
 <?php
-// get_uploaded_reports.php - Fetch both original and sent uploaded reports
+// backend/api/get_uploaded_reports.php
 
+// ============================================================
+// ERROR REPORTING
+// ============================================================
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// ============================================================
+// HEADERS
+// ============================================================
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-error_reporting(0);
-ini_set('display_errors', 0);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
-$host = 'localhost';
-$dbname = 'geotraverse_erp';
-$username = 'root';
-$password = '';
-
+// ============================================================
+// DATABASE CONNECTION
+// ============================================================
 try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo = new PDO("mysql:host=localhost;dbname=geotraverse_erp;charset=utf8mb4", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'DB Error']);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database error: ' . $e->getMessage(),
+        'data' => []
+    ]);
     exit;
 }
 
-$departmentId = isset($_GET['department_id']) ? (int)$_GET['department_id'] : 0;
+// ============================================================
+// GET PARAMETERS
+// ============================================================
+$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
 
-if (!$departmentId) {
-    echo json_encode(['success' => false, 'message' => 'Department ID required']);
-    exit;
-}
-
+// ============================================================
+// GET UPLOADED REPORTS
+// ============================================================
 try {
     $reports = [];
+
+    // 1. Original uploaded reports
+    $query = "SELECT 
+                id, title, description, file_name, file_path,
+                file_size, file_type, period, department_id,
+                uploaded_by, created_at, updated_at,
+                is_deleted, deleted_at,
+                'original' as source_type,
+                0 as is_sent
+              FROM uploaded_reports 
+              WHERE (is_deleted = 0 OR is_deleted IS NULL)
+              ORDER BY id DESC";
     
-    // ============================================================
-    // 1. Get original uploaded reports
-    // ============================================================
-    $stmt = $pdo->prepare("SELECT 
-        *,
-        'original' as source_type
-        FROM uploaded_reports 
-        WHERE (department_id = ? OR sent_to_department = ?)
-        AND (is_deleted = 0 OR is_deleted IS NULL)
-        ORDER BY created_at DESC");
-    $stmt->execute([$departmentId, $departmentId]);
-    $originalReports = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($originalReports as $r) {
-        $r['is_sent_report'] = isset($r['sent_to_department']) && $r['sent_to_department'] > 0;
-        $r['is_original'] = true;
-        $r['is_unviewed'] = ($r['is_sent_report'] && ($r['is_viewed_by_department'] == 0 || $r['is_viewed_by_department'] === null));
-        $r['_is_unviewed'] = $r['is_unviewed'];
-        $reports[] = $r;
+    $stmt = $pdo->query($query);
+    while ($row = $stmt->fetch()) {
+        $row['is_sent'] = 0;
+        $reports[] = $row;
     }
+
+    // 2. Sent uploaded reports (to this department)
+    $query = "SELECT 
+                original_uploaded_report_id as id,
+                uploaded_report_title as title,
+                NULL as description,
+                uploaded_report_file as file_name,
+                NULL as file_path,
+                0 as file_size,
+                NULL as file_type,
+                uploaded_report_period as period,
+                from_department_id as department_id,
+                sent_by as uploaded_by,
+                sent_at as created_at,
+                last_sent_at as updated_at,
+                is_deleted,
+                'sent' as source_type,
+                1 as is_sent,
+                from_department_name as sent_from_name,
+                to_department_name as sent_to_name
+              FROM sent_uploaded_reports 
+              WHERE (is_deleted = 0 OR is_deleted IS NULL)";
     
-    // ============================================================
-    // 2. Get sent uploaded reports from sent_uploaded_reports table
-    // ============================================================
-    $sentStmt = $pdo->prepare("SELECT 
-        sur.*,
-        'sent' as source_type,
-        sur.sent_at as created_at,
-        sur.from_department_name as sender_name,
-        sur.to_department_name as receiver_name
-        FROM sent_uploaded_reports sur
-        WHERE sur.to_department_id = ?
-        AND (sur.is_deleted = 0 OR sur.is_deleted IS NULL)
-        ORDER BY sur.sent_at DESC");
-    $sentStmt->execute([$departmentId]);
-    $sentReports = $sentStmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($sentReports as $r) {
-        // Decode report data
-        $reportData = [];
-        if (isset($r['uploaded_report_data']) && $r['uploaded_report_data']) {
-            $decoded = json_decode($r['uploaded_report_data'], true);
-            if ($decoded) {
-                $reportData = $decoded;
-            }
-        }
-        
-        $isUnviewed = ($r['is_viewed'] == 0 || $r['is_viewed'] === null);
-        
-        $sentReport = [
-            'id' => $r['id'],
-            'original_uploaded_report_id' => $r['original_uploaded_report_id'],
-            'title' => $r['uploaded_report_title'] ?? $reportData['title'] ?? 'Sent Uploaded Report',
-            'period' => $r['uploaded_report_period'] ?? $reportData['period'] ?? 'monthly',
-            'description' => $reportData['description'] ?? '',
-            'file_name' => $r['uploaded_report_file'] ?? $reportData['file_name'] ?? '',
-            'file_path' => $reportData['file_path'] ?? $r['uploaded_report_file'] ?? '',
-            'file_size' => $reportData['file_size'] ?? 0,
-            'file_type' => $reportData['file_type'] ?? '',
-            'uploaded_by' => $reportData['uploaded_by'] ?? $r['sent_by'] ?? 'System',
-            'department_id' => $r['to_department_id'],
-            'created_at' => $r['sent_at'],
-            'is_deleted' => $r['is_deleted'] ?? 0,
-            'sent_from_department' => $r['from_department_id'],
-            'sent_to_department' => $r['to_department_id'],
-            'sent_count' => $r['sent_count'] ?? 0,
-            'is_sent' => 1,
-            'last_sent_at' => $r['last_sent_at'],
-            'is_original' => false,
-            'is_sent_report' => true,
-            'sent_from_name' => $r['from_department_name'] ?? $r['sender_name'] ?? '',
-            'sent_to_name' => $r['to_department_name'] ?? $r['receiver_name'] ?? '',
-            'source_type' => 'sent',
-            'sent_by' => $r['sent_by'] ?? 'System',
-            'is_viewed_by_department' => $r['is_viewed'] ?? 0,
-            'is_unviewed' => $isUnviewed,
-            '_is_unviewed' => $isUnviewed,
-            'is_new' => $isUnviewed,
-            'viewed_at' => $r['viewed_at'] ?? null
-        ];
-        
-        $reports[] = $sentReport;
+    if ($department_id > 0) {
+        $query .= " AND to_department_id = " . intval($department_id);
     }
+    $query .= " ORDER BY sent_at DESC";
     
-    // ============================================================
-    // 3. Sort: Unviewed first
-    // ============================================================
-    usort($reports, function($a, $b) {
-        $aUnviewed = isset($a['is_unviewed']) ? $a['is_unviewed'] : false;
-        $bUnviewed = isset($b['is_unviewed']) ? $b['is_unviewed'] : false;
-        
-        if ($aUnviewed && !$bUnviewed) return -1;
-        if (!$aUnviewed && $bUnviewed) return 1;
-        
-        $aDate = isset($a['created_at']) ? strtotime($a['created_at']) : 0;
-        $bDate = isset($b['created_at']) ? strtotime($b['created_at']) : 0;
-        return $bDate - $aDate;
-    });
-    
+    $stmt = $pdo->query($query);
+    while ($row = $stmt->fetch()) {
+        $reports[] = $row;
+    }
+
     echo json_encode([
         'success' => true,
         'data' => $reports,
-        'total' => count($reports),
-        'original_count' => count($originalReports),
-        'sent_count' => count($sentReports),
-        'unviewed_count' => count(array_filter($reports, function($r) { return $r['is_unviewed']; }))
+        'count' => count($reports),
+        'message' => 'Uploaded reports retrieved successfully'
     ]);
-    
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Query error: ' . $e->getMessage()]);
+
+} catch (PDOException $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database error: ' . $e->getMessage(),
+        'data' => []
+    ]);
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage(),
+        'data' => []
+    ]);
 }
 ?>
