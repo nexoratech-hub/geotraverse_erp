@@ -711,21 +711,37 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
 }
 
-// ============================================================
-// ==================== NOTIFICATIONS SYSTEM ====================
-// ============================================================
 async function fetchNotifications() {
     try {
         const res = await apiCall(`get_notifications.php?department_id=${DEPARTMENT_ID}`);
-        if (res.success && res.data) {
-            notifications = res.data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            unviewedNotificationsCount = notifications.filter(n => n.is_viewed == 0).length;
+        console.log('📥 Notifications response:', res);
+        
+        if (res && res.success) {
+            if (Array.isArray(res.data)) {
+                notifications = res.data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                unviewedNotificationsCount = notifications.filter(n => n.is_viewed == 0).length;
+                updateNotificationBadge();
+                renderNotifications();
+            } else {
+                console.warn('⚠️ Notifications data is not an array:', res.data);
+                notifications = [];
+                unviewedNotificationsCount = 0;
+                updateNotificationBadge();
+                renderNotifications();
+            }
+        } else {
+            console.warn('⚠️ Failed to fetch notifications:', res?.message);
+            notifications = [];
+            unviewedNotificationsCount = 0;
             updateNotificationBadge();
             renderNotifications();
         }
     } catch(e) {
-        console.error('Error fetching notifications:', e);
+        console.error('❌ Error fetching notifications:', e);
         notifications = [];
+        unviewedNotificationsCount = 0;
+        updateNotificationBadge();
+        renderNotifications();
     }
 }
 
@@ -822,12 +838,44 @@ document.getElementById('notificationBell')?.addEventListener('click', function(
     }
 });
 
-// ============================================================
-// ==================== RECYCLE BIN ====================
-// ============================================================
 async function loadRecycleBinFromDB() {
-    const res = await apiCall('get_recycle_bin.php');
-    recycleBinData = (res.success && res.data) ? res.data.filter(i => i.deleted_by_department_id === DEPARTMENT_ID || i.deleted_by_admin === 1) : [];
+    try {
+        const res = await apiCall('get_recycle_bin.php');
+        
+        console.log('📥 Recycle bin response:', res);
+        
+        if (res && res.success) {
+            // Hakikisha data ni array
+            if (Array.isArray(res.data)) {
+                recycleBinData = res.data.filter(i => 
+                    i.deleted_by_department_id === DEPARTMENT_ID || 
+                    i.deleted_by_admin === 1
+                );
+            } else if (res.data && typeof res.data === 'object') {
+                // Kama ni object, jaribu kubadilisha kuwa array
+                const dataArray = Object.values(res.data);
+                if (Array.isArray(dataArray) && dataArray.length > 0) {
+                    recycleBinData = dataArray.filter(i => 
+                        i.deleted_by_department_id === DEPARTMENT_ID || 
+                        i.deleted_by_admin === 1
+                    );
+                } else {
+                    recycleBinData = [];
+                }
+            } else {
+                recycleBinData = [];
+            }
+        } else {
+            recycleBinData = [];
+        }
+        
+        console.log('📋 Recycle bin items:', recycleBinData.length);
+        return recycleBinData;
+    } catch (error) {
+        console.error('❌ Error loading recycle bin:', error);
+        recycleBinData = [];
+        return [];
+    }
 }
 async function addToRecycleBin(itemId, itemType, itemName) { 
     await apiCall('add_to_recycle_bin.php', 'POST', { item_id: itemId, item_type: itemType, item_name: itemName, deleted_by_department_id: DEPARTMENT_ID, deleted_by_admin: 1 }); 
