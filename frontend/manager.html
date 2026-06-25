@@ -3968,7 +3968,7 @@ function switchProjectTab(tab) {
 }
 
 // ============================================================
-// ==================== VIEW PROJECT DETAILS - FIXED ====================
+// ==================== VIEW PROJECT DETAILS ====================
 // ============================================================
 function viewProjectDetails(id) {
     var p = projectsData.find(function(p) { return p.id === id; });
@@ -3979,18 +3979,14 @@ function viewProjectDetails(id) {
     
     console.log('📋 viewProjectDetails called for:', p.name);
     
-    // ============================================================
-    // DETERMINE PROJECT TYPE
-    // ============================================================
+    // Determine project type
     var isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
     var isOriginal = p.source_type === 'original' || p.department_id === parseInt(DEPARTMENT_ID) || !isSent;
     
     console.log('📋 isSent:', isSent);
     console.log('📋 isOriginal:', isOriginal);
     
-    // ============================================================
-    // MARK AS VIEWED IF SENT
-    // ============================================================
+    // Mark as viewed if sent
     if (isSent) {
         markProjectViewed(id);
         p._is_unviewed = false;
@@ -4031,8 +4027,8 @@ function viewProjectDetails(id) {
                     p.daily_work_count = dailyWork.length;
                     p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
                     
-                    // Update the table after data loads
                     renderDailyWorkTableForProject(id);
+                    updateDailyWorkButtonsVisibility(isOriginal, dailyWork.length);
                 }
             });
             
@@ -4049,6 +4045,7 @@ function viewProjectDetails(id) {
                         p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
                         
                         renderDailyWorkTableForProject(id);
+                        updateDailyWorkButtonsVisibility(isOriginal, dailyWork.length);
                     }
                 });
             }
@@ -4097,7 +4094,7 @@ function viewProjectDetails(id) {
     }
     
     // ============================================================
-    // BUILD SENT BADGE HTML
+    // BUILD SENT BADGE
     // ============================================================
     var sentBadgeHtml = '';
     if (isSent) {
@@ -4211,7 +4208,7 @@ function viewProjectDetails(id) {
     detailsHtml += '</table></div>';
     
     // ============================================================
-    // SET CONTENT - REMOVED DAILY WORK TABLE FROM HERE
+    // SET CONTENT
     // ============================================================
     var contentDiv = document.getElementById('viewProjContent');
     if (contentDiv) {
@@ -4223,10 +4220,12 @@ function viewProjectDetails(id) {
     }
     
     // ============================================================
-    // RENDER DAILY WORK TABLE IN THE DEDICATED CONTAINER
+    // RENDER DAILY WORK TABLE AND UPDATE BUTTONS
     // ============================================================
-    // Call the function to render daily work table
     renderDailyWorkTableForProject(id);
+    
+    // ✅ Update button visibility based on project type and records
+    updateDailyWorkButtonsVisibility(isOriginal, dailyWork ? dailyWork.length : 0);
     
     // ============================================================
     // BUILD BUTTONS
@@ -4267,59 +4266,6 @@ function viewProjectDetails(id) {
     document.getElementById('viewProjButtons').innerHTML = buttonsHtml;
     
     // ============================================================
-    // UPDATE DAILY WORK BUTTONS
-    // ============================================================
-    var addBtn = document.getElementById('addDailyWorkBtn');
-    if (addBtn) {
-        if (isSent || !isOriginal) {
-            addBtn.style.display = 'none';
-        } else {
-            addBtn.style.display = 'inline-flex';
-        }
-    }
-    
-    // ============================================================
-    // SHOW/HIDE SUMMARY AND TABLE FOR SENT PROJECTS
-    // ============================================================
-    var summaryContainer = document.getElementById('dailyWorkSummary');
-    var tableContainer = document.getElementById('dailyWorkListContainer');
-    
-    if (isSent || !isOriginal) {
-        if (summaryContainer) summaryContainer.style.display = 'none';
-        if (tableContainer) tableContainer.style.display = 'block';
-        var toggleBtn = document.getElementById('toggleDailyWorkBtn');
-        if (toggleBtn) toggleBtn.style.display = 'none';
-        // Show message in table
-        var tbody = document.getElementById('dailyWorkTableBody');
-        if (tbody) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">' +
-                '<i class="fas fa-info-circle text-2xl block mb-2 opacity-50"></i>' +
-                'Daily work records are not available for received projects' +
-                '<br><span class="text-xs text-orange-500">This project was sent from another department</span>' +
-                '</td></tr>';
-        }
-    } else {
-        if (dailyWork && dailyWork.length > 0) {
-            if (summaryContainer) summaryContainer.style.display = 'grid';
-            if (tableContainer) tableContainer.style.display = 'block';
-        } else {
-            if (summaryContainer) summaryContainer.style.display = 'none';
-            if (tableContainer) tableContainer.style.display = 'block';
-            // Show "No records" message
-            var tbody = document.getElementById('dailyWorkTableBody');
-            if (tbody && (!dailyWork || dailyWork.length === 0)) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">' +
-                    '<i class="fas fa-calendar-day text-2xl block mb-2 opacity-50"></i>' +
-                    'No daily work records found for this project' +
-                    '<br><span class="text-xs text-gray-400 mt-2">Click "Add" to create a new daily work record</span>' +
-                    '</td></tr>';
-            }
-        }
-        var toggleBtn = document.getElementById('toggleDailyWorkBtn');
-        if (toggleBtn) toggleBtn.style.display = 'inline-flex';
-    }
-    
-    // ============================================================
     // OPEN MODAL
     // ============================================================
     openModal('viewProjModal');
@@ -4327,7 +4273,58 @@ function viewProjectDetails(id) {
 }
 
 // ============================================================
-// ==================== RENDER DAILY WORK TABLE FOR PROJECT ====================
+// ==================== UPDATE DAILY WORK BUTTONS VISIBILITY ====================
+// ============================================================
+function updateDailyWorkButtonsVisibility(isOriginal, recordCount) {
+    var addBtn = document.getElementById('addDailyWorkBtn');
+    var excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+    var pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+    var toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    
+    if (!isOriginal) {
+        // Received project - hide all buttons
+        if (addBtn) addBtn.style.display = 'none';
+        if (excelBtn) excelBtn.style.display = 'none';
+        if (pdfBtn) pdfBtn.style.display = 'none';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        return;
+    }
+    
+    // Original project - show add button always
+    if (addBtn) {
+        addBtn.style.display = 'inline-flex';
+        addBtn.style.visibility = 'visible';
+        addBtn.style.opacity = '1';
+    }
+    
+    // Show Excel and PDF only if there are records
+    if (recordCount > 0) {
+        if (excelBtn) {
+            excelBtn.style.display = 'inline-flex';
+            excelBtn.style.visibility = 'visible';
+            excelBtn.style.opacity = '1';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'inline-flex';
+            pdfBtn.style.visibility = 'visible';
+            pdfBtn.style.opacity = '1';
+        }
+        if (toggleBtn) {
+            toggleBtn.style.display = 'inline-flex';
+            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        }
+    } else {
+        // No records - hide Excel and PDF
+        if (excelBtn) excelBtn.style.display = 'none';
+        if (pdfBtn) pdfBtn.style.display = 'none';
+        if (toggleBtn) {
+            toggleBtn.style.display = 'inline-flex';
+            toggleBtn.innerHTML = '<i class="fas fa-table mr-1"></i> Show Daily Work';
+        }
+    }
+}
+// ============================================================
+// ==================== RENDER DAILY WORK TABLE ====================
 // ============================================================
 function renderDailyWorkTableForProject(projectId) {
     var project = projectsData.find(function(p) { return parseInt(p.id) === parseInt(projectId); });
@@ -4340,8 +4337,25 @@ function renderDailyWorkTableForProject(projectId) {
     var isReceived = project.sent_from_dept && parseInt(project.sent_from_dept) !== parseInt(DEPARTMENT_ID);
     var isOriginal = !isReceived && (project.source_type === 'original' || project.department_id === parseInt(DEPARTMENT_ID));
     
-    // For received projects
+    // Get button references
+    var addBtn = document.getElementById('addDailyWorkBtn');
+    var excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+    var pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+    var toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    var summaryContainer = document.getElementById('dailyWorkSummary');
+    var tableContainer = document.getElementById('dailyWorkListContainer');
+    
+    // For received projects - hide everything except table with message
     if (isReceived) {
+        if (summaryContainer) summaryContainer.style.display = 'none';
+        if (tableContainer) {
+            tableContainer.style.display = 'block';
+        }
+        if (addBtn) addBtn.style.display = 'none';
+        if (excelBtn) excelBtn.style.display = 'none';
+        if (pdfBtn) pdfBtn.style.display = 'none';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        
         tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">' +
             '<i class="fas fa-info-circle text-2xl block mb-2 opacity-50"></i>' +
             'Daily work records are not available for received projects' +
@@ -4352,6 +4366,23 @@ function renderDailyWorkTableForProject(projectId) {
     
     // For original projects with no records
     if (records.length === 0) {
+        if (summaryContainer) summaryContainer.style.display = 'none';
+        if (tableContainer) {
+            tableContainer.style.display = 'block';
+        }
+        // ✅ SHOW ADD BUTTON, HIDE EXCEL AND PDF
+        if (addBtn) {
+            addBtn.style.display = 'inline-flex';
+            addBtn.style.visibility = 'visible';
+            addBtn.style.opacity = '1';
+        }
+        if (excelBtn) excelBtn.style.display = 'none';
+        if (pdfBtn) pdfBtn.style.display = 'none';
+        if (toggleBtn) {
+            toggleBtn.style.display = 'inline-flex';
+            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        }
+        
         tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">' +
             '<i class="fas fa-calendar-day text-2xl block mb-2 opacity-50"></i>' +
             'No daily work records found for this project' +
@@ -4360,17 +4391,54 @@ function renderDailyWorkTableForProject(projectId) {
         return;
     }
     
-    // Build table rows
-    var html = '';
+    // ✅ SHOW ALL BUTTONS - ADD, EXCEL, PDF
+    if (summaryContainer) summaryContainer.style.display = 'grid';
+    if (tableContainer) tableContainer.style.display = 'block';
+    
+    if (addBtn) {
+        addBtn.style.display = 'inline-flex';
+        addBtn.style.visibility = 'visible';
+        addBtn.style.opacity = '1';
+    }
+    if (excelBtn) {
+        excelBtn.style.display = 'inline-flex';
+        excelBtn.style.visibility = 'visible';
+        excelBtn.style.opacity = '1';
+    }
+    if (pdfBtn) {
+        pdfBtn.style.display = 'inline-flex';
+        pdfBtn.style.visibility = 'visible';
+        pdfBtn.style.opacity = '1';
+    }
+    if (toggleBtn) {
+        toggleBtn.style.display = 'inline-flex';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+    }
+    
+    // Calculate totals
     var totalBudget = 0, totalExpenses = 0;
+    var completedCount = 0, partialCount = 0, pendingCount = 0;
     
     for (var i = 0; i < records.length; i++) {
         var w = records[i];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+        if (w.status === 'completed') completedCount++;
+        else if (w.status === 'partial') partialCount++;
+        else pendingCount++;
+    }
+    
+    var remaining = totalBudget - totalExpenses;
+    
+    // Update summary cards
+    updateDailyWorkSummaryCards(totalBudget, totalExpenses, remaining);
+    
+    // Build table rows
+    var html = '';
+    for (var j = 0; j < records.length; j++) {
+        var w = records[j];
         var budget = parseFloat(w.budget) || 0;
         var amount = parseFloat(w.amount) || 0;
-        totalBudget += budget;
-        totalExpenses += amount;
-        
         var status = w.status || 'pending';
         var recordDate = w.date ? safeFormatDateTime(w.date) : 'N/A';
         var description = w.work_description || '';
@@ -4410,7 +4478,7 @@ function renderDailyWorkTableForProject(projectId) {
     }
     
     // Add total row
-    var remaining = totalBudget - totalExpenses;
+    var remainingClass = remaining < 0 ? 'remaining-negative' : (remaining === 0 ? 'remaining-zero' : 'remaining-value');
     html += '<tr class="total-row">' +
         '<td colspan="2" class="text-right"><strong>TOTAL</strong></td>' +
         '<td class="text-right"><strong>' + formatMoney(totalBudget) + '</strong></td>' +
@@ -4419,9 +4487,6 @@ function renderDailyWorkTableForProject(projectId) {
         '</tr>';
     
     tbody.innerHTML = html;
-    
-    // Update summary cards
-    updateDailyWorkSummaryCards(totalBudget, totalExpenses, remaining);
 }
 
 // ============================================================
@@ -4783,6 +4848,9 @@ function calculateDailyWorkSummary(records) {
     };
 }
 
+// ============================================================
+// ==================== TOGGLE DAILY WORK TABLE ====================
+// ============================================================
 function toggleDailyWorkTable() {
     var c = document.getElementById('dailyWorkListContainer');
     var s = document.getElementById('dailyWorkSummary');
@@ -4795,19 +4863,27 @@ function toggleDailyWorkTable() {
         c.style.display = 'block';
         s.style.display = 'grid';
         if (a) a.style.display = 'inline-flex';
-        if (e) e.style.display = 'inline-flex';
-        if (p) p.style.display = 'inline-flex';
-        if (t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Hide Daily Work';
+        // ✅ SHOW EXCEL AND PDF BUTTONS
+        if (e) {
+            e.style.display = 'inline-flex';
+            e.style.visibility = 'visible';
+            e.style.opacity = '1';
+        }
+        if (p) {
+            p.style.display = 'inline-flex';
+            p.style.visibility = 'visible';
+            p.style.opacity = '1';
+        }
+        if (t) t.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
     } else {
         c.style.display = 'none';
         s.style.display = 'none';
         if (a) a.style.display = 'none';
         if (e) e.style.display = 'none';
         if (p) p.style.display = 'none';
-        if (t) t.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
+        if (t) t.innerHTML = '<i class="fas fa-table mr-1"></i> Show Daily Work';
     }
 }
-
 function openDailyWorkModalForProject(projectId) {
     var p = projectsData.find(function(p) { return p.id === projectId; });
     if (p) {
@@ -4923,21 +4999,231 @@ function exportDailyWorkToExcel() {
     showToast('Exported to Excel');
 }
 
+// ============================================================
+// ==================== EXPORT DAILY WORK TO PDF ====================
+// ============================================================
 function exportDailyWorkToPDF() {
     var project = projectsData.find(function(p) { return p.id === currentProjectId; });
     if (!project) {
         showToast('Project not found', true);
         return;
     }
+    
+    // Get daily work records for this project
     var work = dailyworkData.filter(function(w) {
         return w.project_id == currentProjectId || w.project_name === project.name;
     });
+    
     if (work.length === 0) {
         showToast('No daily work records found for project: ' + project.name, true);
         return;
     }
-    // ... (rest of PDF export function)
-    showToast('📄 PDF preview opened', false);
+    
+    // Calculate totals
+    var totalBudget = 0;
+    var totalExpenses = 0;
+    var totalIncome = 0;
+    var totalProfit = 0;
+    
+    for (var i = 0; i < work.length; i++) {
+        var w = work[i];
+        totalBudget += parseFloat(w.budget) || 0;
+        totalExpenses += parseFloat(w.amount) || 0;
+        totalIncome += parseFloat(w.income || w.total_amount || 0) || 0;
+        totalProfit += (parseFloat(w.income || w.total_amount || 0) || 0) - (parseFloat(w.expenses) || 0);
+    }
+    
+    var remainingBudget = totalBudget - totalExpenses;
+    var remainingColor = remainingBudget >= 0 ? '#059669' : '#dc2626';
+    
+    // Build table rows
+    var rows = '';
+    for (var j = 0; j < work.length; j++) {
+        var w = work[j];
+        var budget = parseFloat(w.budget) || 0;
+        var amount = parseFloat(w.amount) || 0;
+        var income = parseFloat(w.income || w.total_amount || 0) || 0;
+        var expenses = parseFloat(w.expenses) || 0;
+        var profit = income - expenses;
+        var profitColor = profit >= 0 ? '#059669' : '#dc2626';
+        
+        var statusValue = w.status || w.payment_status || 'pending';
+        var statusText = '';
+        var statusBg = '';
+        var statusColor = '';
+        
+        if (statusValue === 'completed' || statusValue === 'Completed' || statusValue === 'paid') {
+            statusText = 'Completed';
+            statusBg = '#d1fae5';
+            statusColor = '#059669';
+        } else if (statusValue === 'partial' || statusValue === 'Partial') {
+            statusText = 'Partial';
+            statusBg = '#fef3c7';
+            statusColor = '#d97706';
+        } else if (statusValue === 'in_progress' || statusValue === 'In Progress') {
+            statusText = 'In Progress';
+            statusBg = '#dbeafe';
+            statusColor = '#2563eb';
+        } else {
+            statusText = 'Pending';
+            statusBg = '#fee2e2';
+            statusColor = '#dc2626';
+        }
+        
+        var createdBy = w.created_by || w.uploaded_by || 'System';
+        var description = w.work_description || '-';
+        var formattedDescription = description.replace(/\n/g, '<br>');
+        var dateTime = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+        
+        rows += '<tr style="border-bottom: 1px solid #e2e8f0;">';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; white-space: nowrap; font-size: 10px;">' + dateTime + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; word-break: break-word; white-space: normal; font-size: 10px;">' + escapeHtml(formattedDescription) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; white-space: nowrap; font-family: monospace; font-size: 10px;">' + formatMoney(budget) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; white-space: nowrap; font-family: monospace; font-size: 10px;">' + formatMoney(amount) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; color: #059669; font-size: 10px;">' + formatMoney(income) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; white-space: nowrap; font-family: monospace; font-size: 10px;">' + formatMoney(expenses) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: right; white-space: nowrap; font-family: monospace; font-weight: 600; color: ' + profitColor + '; font-size: 10px;">' + formatMoney(profit) + '</td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; white-space: nowrap; font-size: 10px;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 9px; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span></td>';
+        rows += '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; white-space: nowrap; font-size: 10px;">' + escapeHtml(createdBy) + '</td>';
+        rows += '</tr>';
+    }
+    
+    // Get department name
+    var departmentName = "Manager Department";
+    var departmentId = DEPARTMENT_ID;
+    
+    // Open new window for PDF
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+    
+    // Write HTML content
+    printWindow.document.write('<!DOCTYPE html>\n');
+    printWindow.document.write('<html>\n');
+    printWindow.document.write('<head>\n');
+    printWindow.document.write('<meta charset="UTF-8">\n');
+    printWindow.document.write('<title>Daily Work Report - ' + escapeHtml(project.name) + '</title>\n');
+    printWindow.document.write('<style>\n');
+    printWindow.document.write('* { margin: 0; padding: 0; box-sizing: border-box; }\n');
+    printWindow.document.write('body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n');
+    printWindow.document.write('.report-container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #1e40af; }\n');
+    printWindow.document.write('.header { background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 25px; text-align: center; }\n');
+    printWindow.document.write('.header h1 { font-size: 24px; margin: 0 0 8px 0; font-weight: 700; }\n');
+    printWindow.document.write('.header p { font-size: 12px; opacity: 0.85; margin: 0; }\n');
+    printWindow.document.write('.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; font-size: 12px; flex-wrap: wrap; gap: 10px; }\n');
+    printWindow.document.write('.summary-section { padding: 20px 25px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; }\n');
+    printWindow.document.write('.summary-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; }\n');
+    printWindow.document.write('.summary-card { background: white; border-radius: 12px; padding: 15px; text-align: center; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }\n');
+    printWindow.document.write('.summary-card .label { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }\n');
+    printWindow.document.write('.summary-card .value { font-size: 18px; font-weight: 800; font-family: monospace; }\n');
+    printWindow.document.write('.summary-card.budget .value { color: #3b82f6; }\n');
+    printWindow.document.write('.summary-card.expenses .value { color: #ea580c; }\n');
+    printWindow.document.write('.summary-card.income .value { color: #059669; }\n');
+    printWindow.document.write('.summary-card.profit .value { color: #2563eb; }\n');
+    printWindow.document.write('.summary-card.remaining .value { color: ' + remainingColor + '; }\n');
+    printWindow.document.write('.table-container { overflow-x: auto; padding: 20px 25px; }\n');
+    printWindow.document.write('.daily-table { width: 100%; border-collapse: collapse; font-size: 11px; min-width: 1200px; }\n');
+    printWindow.document.write('.daily-table th { background: #1e40af; color: white; padding: 12px 8px; font-weight: 700; text-align: left; border: 1px solid #1e3a8a; font-size: 11px; }\n');
+    printWindow.document.write('.daily-table th.text-right { text-align: right; }\n');
+    printWindow.document.write('.daily-table th.text-center { text-align: center; }\n');
+    printWindow.document.write('.daily-table td { padding: 10px 8px; border: 1px solid #cbd5e1; vertical-align: middle; font-size: 10px; }\n');
+    printWindow.document.write('.daily-table td.text-right { text-align: right; }\n');
+    printWindow.document.write('.daily-table td.text-center { text-align: center; }\n');
+    printWindow.document.write('.daily-table th:nth-child(1), .daily-table td:nth-child(1) { white-space: nowrap; width: 14%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(2), .daily-table td:nth-child(2) { word-break: break-word; width: 22%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(3), .daily-table td:nth-child(3) { text-align: right; width: 10%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(4), .daily-table td:nth-child(4) { text-align: right; width: 10%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(5), .daily-table td:nth-child(5) { text-align: right; width: 10%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(6), .daily-table td:nth-child(6) { text-align: right; width: 10%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(7), .daily-table td:nth-child(7) { text-align: right; width: 10%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(8), .daily-table td:nth-child(8) { text-align: center; width: 8%; }\n');
+    printWindow.document.write('.daily-table th:nth-child(9), .daily-table td:nth-child(9) { text-align: center; width: 12%; }\n');
+    printWindow.document.write('.daily-table tfoot td { background: #fef3c7; font-weight: 700; font-size: 11px; }\n');
+    printWindow.document.write('.daily-table tfoot td.text-right { text-align: right; }\n');
+    printWindow.document.write('.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n');
+    printWindow.document.write('.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n');
+    printWindow.document.write('.print-btn button { background: #1e40af; color: white; border: none; padding: 10px 28px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: background 0.2s; }\n');
+    printWindow.document.write('.print-btn button:hover { background: #1e3a8a; }\n');
+    printWindow.document.write('.print-btn button.close-btn { background: #6b7280; margin-left: 10px; }\n');
+    printWindow.document.write('.print-btn button.close-btn:hover { background: #4b5563; }\n');
+    printWindow.document.write('@media print { .print-btn { display: none; } body { background: white; padding: 0; } .report-container { border: none; box-shadow: none; } .header { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .daily-table th { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .summary-card { border: 1px solid #cbd5e1; } }\n');
+    printWindow.document.write('</style>\n');
+    printWindow.document.write('</head>\n');
+    printWindow.document.write('<body>\n');
+    printWindow.document.write('<div class="report-container">\n');
+    printWindow.document.write('<div class="header">\n');
+    printWindow.document.write('<h1>📊 Daily Work Report</h1>\n');
+    printWindow.document.write('<p>' + escapeHtml(project.name) + ' - Generated: ' + new Date().toLocaleString() + '</p>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="info-bar">\n');
+    printWindow.document.write('<span><strong>Project ID:</strong> #' + project.id + '</span>\n');
+    printWindow.document.write('<span><strong>Department:</strong> ' + escapeHtml(departmentName) + '</span>\n');
+    printWindow.document.write('<span><strong>Total Records:</strong> ' + work.length + '</span>\n');
+    printWindow.document.write('<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n');
+    printWindow.document.write('<span><strong>Generated On:</strong> ' + new Date().toLocaleString() + '</span>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="summary-section">\n');
+    printWindow.document.write('<div class="summary-cards">\n');
+    printWindow.document.write('<div class="summary-card budget"><div class="label">💰 Total Budget</div><div class="value">' + formatMoney(totalBudget) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card expenses"><div class="label">💸 Total Expenses</div><div class="value">' + formatMoney(totalExpenses) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card income"><div class="label">📈 Total Income</div><div class="value">' + formatMoney(totalIncome) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card profit"><div class="label">📊 Total Profit</div><div class="value" style="color: ' + (totalProfit >= 0 ? '#059669' : '#dc2626') + ';">' + formatMoney(totalProfit) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card remaining"><div class="label">📋 Remaining Budget</div><div class="value">' + formatMoney(remainingBudget) + '</div></div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="table-container">\n');
+    printWindow.document.write('<table class="daily-table">\n');
+    printWindow.document.write('<thead>\n');
+    printWindow.document.write('<tr>\n');
+    printWindow.document.write('<th>Date/Time</th>\n');
+    printWindow.document.write('<th>Description</th>\n');
+    printWindow.document.write('<th class="text-right">Budget (TZS)</th>\n');
+    printWindow.document.write('<th class="text-right">Amount (TZS)</th>\n');
+    printWindow.document.write('<th class="text-right">Income (TZS)</th>\n');
+    printWindow.document.write('<th class="text-right">Expenses (TZS)</th>\n');
+    printWindow.document.write('<th class="text-right">Profit (TZS)</th>\n');
+    printWindow.document.write('<th class="text-center">Status</th>\n');
+    printWindow.document.write('<th class="text-center">Created By</th>\n');
+    printWindow.document.write('</tr>\n');
+    printWindow.document.write('</thead>\n');
+    printWindow.document.write('<tbody>\n');
+    printWindow.document.write(rows);
+    printWindow.document.write('</tbody>\n');
+    printWindow.document.write('<tfoot>\n');
+    printWindow.document.write('<tr>\n');
+    printWindow.document.write('<td colspan="2" class="text-right"><strong>TOTAL</strong></td>\n');
+    printWindow.document.write('<td class="text-right"><strong>' + formatMoney(totalBudget) + '</strong></td>\n');
+    printWindow.document.write('<td class="text-right"><strong>' + formatMoney(totalExpenses) + '</strong></td>\n');
+    printWindow.document.write('<td class="text-right"><strong>' + formatMoney(totalIncome) + '</strong></td>\n');
+    printWindow.document.write('<td class="text-right"><strong>' + formatMoney(totalExpenses) + '</strong></td>\n');
+    printWindow.document.write('<td class="text-right" style="color: ' + (totalProfit >= 0 ? '#059669' : '#dc2626') + ';"><strong>' + formatMoney(totalProfit) + '</strong></td>\n');
+    printWindow.document.write('<td colspan="2"></td>\n');
+    printWindow.document.write('</tr>\n');
+    printWindow.document.write('</tfoot>\n');
+    printWindow.document.write('</table>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="footer">\n');
+    printWindow.document.write('GeoTraverse ERP System - ' + escapeHtml(departmentName) + ' | Official Daily Work Report<br>\n');
+    printWindow.document.write('This document is system generated and requires no signature\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="print-btn">\n');
+    printWindow.document.write('<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n');
+    printWindow.document.write('🖨️ SAVE AS PDF / PRINT\n');
+    printWindow.document.write('</button>\n');
+    printWindow.document.write('<button class="close-btn" onclick="window.close();">\n');
+    printWindow.document.write('❌ CLOSE\n');
+    printWindow.document.write('</button>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</body>\n');
+    printWindow.document.write('</html>\n');
+    
+    printWindow.document.close();
+    printWindow.focus();
+    
+    showToast('📄 PDF preview opened - Found ' + work.length + ' record(s)', false);
 }
 
 // ============================================================
@@ -5060,33 +5346,397 @@ function exportAllProjectsToExcel() {
     showToast('All projects exported to Excel');
 }
 
+// ============================================================
+// ==================== EXPORT ALL PROJECTS TO PDF ====================
+// ============================================================
 function exportAllProjectsToPDF() {
-    showToast('📄 Generating All Projects PDF...', false);
-    // Use the existing generateAllProjectsPDF function
-    if (typeof generateAllProjectsPDF === 'function') {
-        generateAllProjectsPDF();
-    } else {
-        // Fallback - simple export
-        var printWindow = window.open('', '_blank');
-        if (!printWindow) {
-            showToast("Please allow popups to generate PDF", true);
-            return;
-        }
-        var html = '<html><head><meta charset="UTF-8"><title>All Projects - Manager Department</title>';
-        html += '<style>body{font-family:Arial;padding:20px;}table{width:100%;border-collapse:collapse;font-size:12px;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}th{background:#1e40af;color:white;}.header{text-align:center;margin-bottom:20px;}</style></head><body>';
-        html += '<div class="header"><h1>All Projects Report</h1><p>Generated: ' + new Date().toLocaleString() + ' | Department: Manager</p></div>';
-        html += '<table><thead><tr><th>#</th><th>Name</th><th>Client</th><th>Amount</th><th>Status</th><th>Progress</th><th>Location</th></tr></thead><tbody>';
-        projectsData.forEach(function(p, idx) {
-            html += '<tr><td>' + (idx+1) + '</td><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.client_name || '-') + '</td><td>' + formatMoney(p.amount) + '</td><td>' + p.status + '</td><td>' + (p.progress||0) + '%</td><td>' + escapeHtml(p.location || '-') + '</td></tr>';
+    if (projectsData.length === 0) {
+        showToast('No projects to export', true);
+        return;
+    }
+
+    showToast('📄 Generating All Projects PDF with Daily Work...', false);
+    
+    // Ensure daily work data is loaded
+    if (dailyworkData.length === 0) {
+        fetchDailyWork().then(function() {
+            generateAllProjectsPDFContent();
         });
-        html += '</tbody></table>';
-        html += '<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(function(){window.close();},1500);">Save as PDF</button></div>';
-        html += '</body></html>';
-        printWindow.document.write(html);
-        printWindow.document.close();
+    } else {
+        generateAllProjectsPDFContent();
     }
 }
 
+// ============================================================
+// ==================== GENERATE ALL PROJECTS PDF CONTENT ====================
+// ============================================================
+function generateAllProjectsPDFContent() {
+    // Calculate overall totals
+    var totalAmount = 0;
+    var pendingCount = 0, inProgressCount = 0, completedCount = 0, approvedCount = 0;
+    var totalBudgetAll = 0, totalExpensesAll = 0, totalIncomeAll = 0, totalProfitAll = 0;
+    var totalDailyRecords = 0;
+    var totalQuantityProduced = 0;
+    
+    for (var i = 0; i < projectsData.length; i++) {
+        var p = projectsData[i];
+        totalAmount += parseFloat(p.amount) || 0;
+        
+        if (p.status === 'pending') pendingCount++;
+        else if (p.status === 'in_progress') inProgressCount++;
+        else if (p.status === 'completed') completedCount++;
+        else if (p.status === 'approved') approvedCount++;
+        
+        var projectWork = dailyworkData.filter(function(w) {
+            return parseInt(w.project_id) === parseInt(p.id) || w.project_name === p.name;
+        });
+        
+        totalDailyRecords += projectWork.length;
+        
+        for (var k = 0; k < projectWork.length; k++) {
+            var w = projectWork[k];
+            totalBudgetAll += parseFloat(w.budget) || 0;
+            totalExpensesAll += parseFloat(w.amount) || 0;
+            totalIncomeAll += parseFloat(w.income || w.total_amount || 0) || 0;
+            totalProfitAll += (parseFloat(w.income || w.total_amount || 0) || 0) - (parseFloat(w.expenses) || 0);
+            totalQuantityProduced += parseInt(w.quantity_produced) || 0;
+        }
+    }
+    
+    var totalRemainingAll = totalBudgetAll - totalExpensesAll;
+    var totalRemainingColor = totalRemainingAll >= 0 ? '#059669' : '#dc2626';
+    var totalProfitColor = totalProfitAll >= 0 ? '#059669' : '#dc2626';
+    
+    // Build HTML for each project
+    var projectsHtml = '';
+    var projectCounter = 1;
+    
+    for (var m = 0; m < projectsData.length; m++) {
+        var p = projectsData[m];
+        
+        // Get image URL - handle both base64 and file paths
+        var imageUrl = getFullImageUrl(p.image);
+        var isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) || imageUrl.startsWith('data:image/'));
+        
+        if (!imageUrl && p.image && p.image !== 'null' && p.image !== 'undefined') {
+            var fileName = p.image.split('/').pop();
+            if (fileName && fileName !== '') {
+                imageUrl = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+                isImage = imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) !== null;
+            }
+        }
+        
+        var statusBadgeClass = '';
+        var statusText = '';
+        var statusBg = '';
+        var statusColor = '';
+        
+        if (p.status === 'pending') {
+            statusBadgeClass = 'status-pending';
+            statusText = 'Pending';
+            statusBg = '#fef3c7';
+            statusColor = '#d97706';
+        } else if (p.status === 'in_progress') {
+            statusBadgeClass = 'status-progress';
+            statusText = 'In Progress';
+            statusBg = '#dbeafe';
+            statusColor = '#2563eb';
+        } else if (p.status === 'completed') {
+            statusBadgeClass = 'status-completed';
+            statusText = 'Completed';
+            statusBg = '#d1fae5';
+            statusColor = '#059669';
+        } else {
+            statusBadgeClass = 'status-approved';
+            statusText = 'Approved';
+            statusBg = '#e9d5ff';
+            statusColor = '#7e22ce';
+        }
+        
+        // Get daily work for this project
+        var projectWork = dailyworkData.filter(function(w) {
+            return parseInt(w.project_id) === parseInt(p.id) || w.project_name === p.name;
+        });
+        
+        var projBudget = 0, projExpenses = 0, projIncome = 0, projProfit = 0;
+        var projQuantity = 0;
+        
+        for (var n = 0; n < projectWork.length; n++) {
+            var w = projectWork[n];
+            projBudget += parseFloat(w.budget) || 0;
+            projExpenses += parseFloat(w.amount) || 0;
+            projIncome += parseFloat(w.income || w.total_amount || 0) || 0;
+            projProfit += (parseFloat(w.income || w.total_amount || 0) || 0) - (parseFloat(w.expenses) || 0);
+            projQuantity += parseInt(w.quantity_produced) || 0;
+        }
+        
+        var projRemaining = projBudget - projExpenses;
+        var projRemainingColor = projRemaining >= 0 ? '#059669' : '#dc2626';
+        var projProfitColor = projProfit >= 0 ? '#059669' : '#dc2626';
+        
+        // Build daily work table rows for this project
+        var dailyRows = '';
+        if (projectWork.length > 0) {
+            for (var o = 0; o < projectWork.length; o++) {
+                var w = projectWork[o];
+                var budget = parseFloat(w.budget) || 0;
+                var amount = parseFloat(w.amount) || 0;
+                var income = parseFloat(w.income || w.total_amount || 0) || 0;
+                var expenses = parseFloat(w.expenses) || 0;
+                var profit = income - expenses;
+                var profitColor = profit >= 0 ? '#059669' : '#dc2626';
+                
+                var statusValue = w.status || w.payment_status || 'pending';
+                var statusTextDW = '';
+                var statusBgDW = '';
+                var statusColorDW = '';
+                
+                if (statusValue === 'completed' || statusValue === 'Completed' || statusValue === 'paid') {
+                    statusTextDW = 'Completed';
+                    statusBgDW = '#d1fae5';
+                    statusColorDW = '#059669';
+                } else if (statusValue === 'partial' || statusValue === 'Partial') {
+                    statusTextDW = 'Partial';
+                    statusBgDW = '#fef3c7';
+                    statusColorDW = '#d97706';
+                } else if (statusValue === 'in_progress' || statusValue === 'In Progress') {
+                    statusTextDW = 'In Progress';
+                    statusBgDW = '#dbeafe';
+                    statusColorDW = '#2563eb';
+                } else {
+                    statusTextDW = 'Pending';
+                    statusBgDW = '#fee2e2';
+                    statusColorDW = '#dc2626';
+                }
+                
+                var description = (w.work_description || '-').replace(/\n/g, '<br>');
+                var recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                var createdBy = w.created_by || w.uploaded_by || 'System';
+                var quantityProduced = parseInt(w.quantity_produced) || 0;
+                
+                dailyRows += '<tr style="border-bottom: 1px solid #e2e8f0;">';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; white-space: nowrap; font-size: 9px;">' + recordDate + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; word-break: break-word; font-size: 9px;">' + escapeHtml(description) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">' + formatMoney(budget) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">' + formatMoney(amount) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-weight: 600; color: #059669; font-size: 9px;">' + formatMoney(income) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">' + formatMoney(expenses) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-weight: 600; color: ' + profitColor + '; font-size: 9px;">' + formatMoney(profit) + '</td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;"><span style="display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 8px; background: ' + statusBgDW + '; color: ' + statusColorDW + ';">' + statusTextDW + '</span></td>';
+                dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;">' + escapeHtml(createdBy) + '</td>';
+                dailyRows += '</tr>';
+            }
+            
+            // Add total row for this project
+            dailyRows += '<tr style="background: #fef3c7; font-weight: bold;">';
+            dailyRows += '<td colspan="2" style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-size: 10px;"><strong>TOTAL:</strong></td>';
+            dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 10px;"><strong>' + formatMoney(projBudget) + '</strong></td>';
+            dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 10px;"><strong>' + formatMoney(projExpenses) + '</strong></td>';
+            dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 10px;"><strong>' + formatMoney(projIncome) + '</strong></td>';
+            dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 10px;"><strong>' + formatMoney(projExpenses) + '</strong></td>';
+            dailyRows += '<td style="padding: 8px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-weight: 700; color: ' + projProfitColor + '; font-size: 10px;"><strong>' + formatMoney(projProfit) + '</strong></td>';
+            dailyRows += '<td colspan="2" style="border: 1px solid #cbd5e1;"></td>';
+            dailyRows += '</tr>';
+            
+        } else {
+            dailyRows = '<tr><td colspan="9" style="padding: 30px; text-align: center; color: #94a3b8; font-size: 11px;">No daily work records found for this project</td></tr>';
+        }
+        
+        var sourceDeptName = 'System';
+        if (p.sent_from_dept) {
+            sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
+        } else if (p.created_by) {
+            sourceDeptName = p.created_by;
+        }
+        var isSent = p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID;
+        
+        // Build each project card
+        projectsHtml += '<div style="margin-bottom: 40px; border: 2px solid #1e40af; border-radius: 16px; overflow: hidden; page-break-inside: avoid; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">';
+        projectsHtml += '<div style="background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 15px 20px;">';
+        projectsHtml += '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">';
+        projectsHtml += '<div>';
+        projectsHtml += '<h3 style="margin: 0; font-size: 17px; font-weight: 700;">#' + projectCounter + ' ' + escapeHtml(p.name) + '</h3>';
+        projectsHtml += '<p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Project ID: #' + p.id + ' | Client: ' + escapeHtml(p.client_name || 'N/A') + ' | Status: ' + statusText + '</p>';
+        if (isSent) {
+            projectsHtml += '<p style="margin: 2px 0 0; font-size: 10px; opacity: 0.7;"><i class="fas fa-paper-plane"></i> Sent from: ' + escapeHtml(sourceDeptName) + '</p>';
+        }
+        projectsHtml += '</div>';
+        projectsHtml += '<span style="display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span>';
+        projectsHtml += '</div>';
+        projectsHtml += '<div style="font-size: 10px; margin-top: 4px; opacity: 0.7; padding: 0 20px 10px 20px;">';
+        projectsHtml += '<i class="fas ' + (isSent ? 'fa-paper-plane' : 'fa-user') + ' mr-1"></i>';
+        projectsHtml += 'Source: ' + escapeHtml(sourceDeptName);
+        if (isSent) {
+            projectsHtml += ' <span style="color: #6ee7b7;"><i class="fas fa-check-circle"></i> Sent</span>';
+        }
+        projectsHtml += ' | Total Records: ' + projectWork.length;
+        projectsHtml += '</div>';
+        projectsHtml += '</div>';
+        
+        // Project Image
+        projectsHtml += '<div style="text-align: center; padding: 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">';
+        if (imageUrl && isImage) {
+            projectsHtml += '<img src="' + imageUrl + '?t=' + Date.now() + '" style="max-width: 200px; max-height: 150px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=\\\'color:#999;padding:10px;\\\">No Image</div>\'">';
+        } else {
+            projectsHtml += '<div style="color:#999;padding:10px;"><i class="fas fa-image" style="font-size:24px;display:block;margin-bottom:5px;"></i>No Image Available</div>';
+        }
+        projectsHtml += '</div>';
+        
+        // Project Details
+        projectsHtml += '<div style="padding: 15px 20px; background: white; border-bottom: 1px solid #e5e7eb;">';
+        projectsHtml += '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; width: 35%; font-weight: 600; color: #1e40af;">💰 Amount:</td><td style="padding: 6px 12px;"><span style="color: #059669; font-weight: bold;">' + formatMoney(p.amount) + '</span></td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">📈 Progress:</td><td style="padding: 6px 12px;">' + (p.progress || 0) + '%<div style="background:#e2e8f0; border-radius:10px; margin-top:4px; height:4px; max-width:150px;"><div style="width:' + (p.progress||0) + '%; background:#1e40af; border-radius:10px; height:4px;"></div></div></td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">📍 Location:</td><td style="padding: 6px 12px;">' + escapeHtml(p.location || 'N/A') + '</td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">📅 Start Date:</td><td style="padding: 6px 12px;">' + (p.start_date || 'Not specified') + '</td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">📅 End Date:</td><td style="padding: 6px 12px;">' + (p.end_date || 'Not specified') + '</td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">📝 Description:</td><td style="padding: 6px 12px;">' + escapeHtml(p.description || 'No description') + '</td></tr>';
+        projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">👤 Created By:</td><td style="padding: 6px 12px;">' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</td></tr>';
+        if (p.updated_by) {
+            projectsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 6px 12px; font-weight: 600; color: #1e40af;">✏️ Updated By:</td><td style="padding: 6px 12px;">' + escapeHtml(p.updated_by) + ' on ' + formatDateTime(p.updated_at) + '</td></tr>';
+        }
+        projectsHtml += '</table>';
+        projectsHtml += '</div>';
+        
+        // Daily Work Section
+        projectsHtml += '<div style="background: #f8fafc; padding: 15px 20px; border-top: 2px solid #1e40af;">';
+        projectsHtml += '<h4 style="margin: 0 0 12px 0; font-size: 14px; color: #1e40af;">';
+        projectsHtml += '<i class="fas fa-calendar-day"></i> Daily Work Records';
+        projectsHtml += ' <span style="font-size: 11px; color: #6b7280; font-weight: normal;">(' + projectWork.length + ' records)</span>';
+        projectsHtml += '</h4>';
+        
+        // Daily Work Summary Cards for this project
+        if (projectWork.length > 0) {
+            projectsHtml += '<div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #d1fae5; min-width: 100px;"><div style="font-size: 9px; color: #166534; font-weight: 600; text-transform: uppercase;">💰 Budget</div><div style="font-size: 14px; font-weight: 700; color: #059669; font-family: monospace;">' + formatMoney(projBudget) + '</div></div>';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #fef3c7; min-width: 100px;"><div style="font-size: 9px; color: #92400e; font-weight: 600; text-transform: uppercase;">💸 Expenses</div><div style="font-size: 14px; font-weight: 700; color: #ea580c; font-family: monospace;">' + formatMoney(projExpenses) + '</div></div>';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #dbeafe; min-width: 100px;"><div style="font-size: 9px; color: #1e40af; font-weight: 600; text-transform: uppercase;">📈 Income</div><div style="font-size: 14px; font-weight: 700; color: #3b82f6; font-family: monospace;">' + formatMoney(projIncome) + '</div></div>';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #d1fae5; min-width: 100px;"><div style="font-size: 9px; color: #166534; font-weight: 600; text-transform: uppercase;">📊 Profit</div><div style="font-size: 14px; font-weight: 700; color: ' + projProfitColor + '; font-family: monospace;">' + formatMoney(projProfit) + '</div></div>';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #dbeafe; min-width: 100px;"><div style="font-size: 9px; color: #1e40af; font-weight: 600; text-transform: uppercase;">📦 Quantity</div><div style="font-size: 14px; font-weight: 700; color: #2563eb; font-family: monospace;">' + projQuantity.toLocaleString() + '</div></div>';
+            projectsHtml += '<div style="flex: 1; background: white; border-radius: 8px; padding: 10px 12px; text-align: center; border: 1px solid #e5e7eb; min-width: 100px;"><div style="font-size: 9px; color: #6b7280; font-weight: 600; text-transform: uppercase;">📋 Remaining</div><div style="font-size: 14px; font-weight: 700; color: ' + projRemainingColor + '; font-family: monospace;">' + formatMoney(projRemaining) + '</div></div>';
+            projectsHtml += '</div>';
+        }
+        
+        // Daily Work Table
+        projectsHtml += '<div style="overflow-x: auto;">';
+        projectsHtml += '<table style="width: 100%; border-collapse: collapse; font-size: 9px; border: 1px solid #4b5563;">';
+        projectsHtml += '<thead>';
+        projectsHtml += '<tr style="background: #1e40af; color: white;">';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; white-space: nowrap; width: 12%;">Date/Time</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; width: 18%;">Description</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: right; width: 8%;">Budget</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: right; width: 8%;">Amount</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: right; width: 8%;">Income</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: right; width: 8%;">Expenses</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: right; width: 8%;">Profit</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: center; width: 8%;">Status</th>';
+        projectsHtml += '<th style="padding: 8px 6px; border: 1px solid #1e3a8a; text-align: center; width: 12%;">Created By</th>';
+        projectsHtml += '</tr>';
+        projectsHtml += '</thead>';
+        projectsHtml += '<tbody>';
+        projectsHtml += dailyRows;
+        projectsHtml += '</tbody>';
+        projectsHtml += '</table>';
+        projectsHtml += '</div>';
+        
+        projectsHtml += '</div>';
+        projectsHtml += '</div>';
+        
+        projectCounter++;
+    }
+    
+    // Build the complete PDF
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast("Please allow popups to generate PDF", true);
+        return;
+    }
+    
+    var departmentName = "Manager Department";
+    
+    printWindow.document.write('<!DOCTYPE html>\n');
+    printWindow.document.write('<html>\n');
+    printWindow.document.write('<head>\n');
+    printWindow.document.write('<meta charset="UTF-8">\n');
+    printWindow.document.write('<title>All Projects Report - ' + departmentName + '</title>\n');
+    printWindow.document.write('<style>\n');
+    printWindow.document.write('* { margin: 0; padding: 0; box-sizing: border-box; }\n');
+    printWindow.document.write('body { font-family: "Inter", "Segoe UI", Arial, sans-serif; background: #f0f2f5; padding: 30px; }\n');
+    printWindow.document.write('.container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #1e40af; }\n');
+    printWindow.document.write('.header { background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; padding: 25px; text-align: center; }\n');
+    printWindow.document.write('.header h1 { font-size: 24px; margin: 0; }\n');
+    printWindow.document.write('.header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }\n');
+    printWindow.document.write('.info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }\n');
+    printWindow.document.write('.summary-section { padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }\n');
+    printWindow.document.write('.summary-cards { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; }\n');
+    printWindow.document.write('.summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }\n');
+    printWindow.document.write('.summary-card .label { font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.3px; }\n');
+    printWindow.document.write('.summary-card .value { font-size: 16px; font-weight: 800; margin-top: 4px; font-family: monospace; }\n');
+    printWindow.document.write('.summary-card.projects .value { color: #1e40af; }\n');
+    printWindow.document.write('.summary-card.amount .value { color: #059669; }\n');
+    printWindow.document.write('.summary-card.budget .value { color: #3b82f6; }\n');
+    printWindow.document.write('.summary-card.expenses .value { color: #dc2626; }\n');
+    printWindow.document.write('.summary-card.income .value { color: #059669; }\n');
+    printWindow.document.write('.summary-card.profit .value { color: ' + totalProfitColor + '; }\n');
+    printWindow.document.write('.summary-card.remaining .value { color: ' + totalRemainingColor + '; }\n');
+    printWindow.document.write('.projects-section { padding: 20px 25px; }\n');
+    printWindow.document.write('.footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }\n');
+    printWindow.document.write('.print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }\n');
+    printWindow.document.write('.print-btn button { background: #1e40af; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 5px; transition: background 0.2s; }\n');
+    printWindow.document.write('.print-btn button:hover { background: #1e3a8a; }\n');
+    printWindow.document.write('.print-btn button.close-btn { background: #6b7280; }\n');
+    printWindow.document.write('.print-btn button.close-btn:hover { background: #4b5563; }\n');
+    printWindow.document.write('@media print { .print-btn { display: none; } body { background: white; padding: 0; } .container { border: none; box-shadow: none; } .header { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .summary-cards { background: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }\n');
+    printWindow.document.write('</style>\n');
+    printWindow.document.write('</head>\n');
+    printWindow.document.write('<body>\n');
+    printWindow.document.write('<div class="container">\n');
+    printWindow.document.write('<div class="header">\n');
+    printWindow.document.write('<h1>📊 All Projects Report</h1>\n');
+    printWindow.document.write('<p>' + departmentName + ' - Complete Project Overview with Daily Work Records</p>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="info-bar">\n');
+    printWindow.document.write('<span><strong>Department ID:</strong> ' + DEPARTMENT_ID + '</span>\n');
+    printWindow.document.write('<span><strong>Total Projects:</strong> ' + projectsData.length + '</span>\n');
+    printWindow.document.write('<span><strong>Total Daily Records:</strong> ' + totalDailyRecords + '</span>\n');
+    printWindow.document.write('<span><strong>Generated By:</strong> ' + escapeHtml(CURRENT_USER) + '</span>\n');
+    printWindow.document.write('<span><strong>Generated:</strong> ' + new Date().toLocaleString() + '</span>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="summary-section">\n');
+    printWindow.document.write('<div class="summary-cards">\n');
+    printWindow.document.write('<div class="summary-card projects"><div class="label">📋 Projects</div><div class="value">' + projectsData.length + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card amount"><div class="label">💰 Total Amount</div><div class="value">' + formatMoney(totalAmount) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card budget"><div class="label">📊 Total Budget</div><div class="value">' + formatMoney(totalBudgetAll) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card expenses"><div class="label">💸 Total Expenses</div><div class="value">' + formatMoney(totalExpensesAll) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card income"><div class="label">📈 Total Income</div><div class="value">' + formatMoney(totalIncomeAll) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card profit"><div class="label">📊 Total Profit</div><div class="value" style="color: ' + totalProfitColor + ';">' + formatMoney(totalProfitAll) + '</div></div>\n');
+    printWindow.document.write('<div class="summary-card remaining"><div class="label">📋 Remaining Budget</div><div class="value" style="color: ' + totalRemainingColor + ';">' + formatMoney(totalRemainingAll) + '</div></div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="projects-section">\n');
+    printWindow.document.write(projectsHtml);
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="footer">\n');
+    printWindow.document.write('GeoTraverse ERP System - ' + departmentName + ' | Official All Projects Report<br>\n');
+    printWindow.document.write('This document is system generated and requires no signature\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('<div class="print-btn">\n');
+    printWindow.document.write('<button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">\n');
+    printWindow.document.write('🖨️ SAVE AS PDF / PRINT\n');
+    printWindow.document.write('</button>\n');
+    printWindow.document.write('<button class="close-btn" onclick="window.close();">\n');
+    printWindow.document.write('❌ CLOSE\n');
+    printWindow.document.write('</button>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</div>\n');
+    printWindow.document.write('</body>\n');
+    printWindow.document.write('</html>\n');
+    
+    printWindow.document.close();
+    printWindow.focus();
+    
+    showToast('📄 All Projects PDF with Daily Work Tables opened - Click "Save as PDF" to download', false);
+}
 function exportAllProjectDocsToExcel() {
     if (projectDocuments.length === 0) { showToast('No documents', true); return; }
     var ws = [['Title','Description','File Name','Uploaded By','Uploaded At','File Size']];
