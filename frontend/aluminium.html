@@ -1794,7 +1794,7 @@ function switchIronTab(tab) {
     }
 }
 
-// ==================== RENDER ALUMINIUM PROJECTS ====================
+// ==================== RENDER ALUMINIUM PROJECTS - FIXED ====================
 function renderAluminiumProjects() {
     const sortedAluminium = [...aluminiumProjects].sort((a, b) => {
         const aReceived = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID;
@@ -1811,14 +1811,52 @@ function renderAluminiumProjects() {
     let html = '';
     for (let p of sortedAluminium) {
         let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedAluminiumProjectIds.includes(p.id);
+        
+        // ============================================================
+        // GET IMAGE - Support multiple path formats
+        // ============================================================
         let imageUrl = getFullImageUrl(p.image);
+        if (!imageUrl && p.project_data) {
+            try {
+                let projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+                if (projectData && projectData.image) {
+                    imageUrl = getFullImageUrl(projectData.image);
+                }
+            } catch(e) {}
+        }
+        
         let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
         let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
         let sourceDept = p.sent_from_dept ? (departmentNames[p.sent_from_dept] || 'Unknown') : 'Self';
         let isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
         
-        html += `<div class="project-card" id="aluminium-card-${p.id}"><div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-            <div class="project-image-wrapper">${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}<div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-image text-3xl"></i><p class="text-[10px]">No Image</p></div></div>
+        // ============================================================
+        // CARD BUTTONS - Different for Original vs Sent
+        // ============================================================
+        let cardButtons = '';
+        if (isReceived) {
+            // SENT PROJECT: View and Delete ONLY
+            cardButtons = `
+                <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
+            `;
+        } else {
+            // ORIGINAL PROJECT: View, Edit, Delete
+            cardButtons = `
+                <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="editAluminiumProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+            `;
+        }
+        
+        html += `<div class="project-card" id="aluminium-card-${p.id}">
+            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p></div>
+            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+            <div class="project-image-wrapper">
+                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
+                <div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-image text-3xl"></i><p class="text-[10px]">No Image</p></div>
+            </div>
             <div class="p-3">
                 <div class="flex justify-between items-start">
                     <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
@@ -1827,14 +1865,15 @@ function renderAluminiumProjects() {
                 ${isReceived ? `<div class="text-[10px] text-purple-600 mb-1"><i class="fas fa-paper-plane mr-1"></i> Received from: ${escapeHtml(sourceDept)}</div>` : ''}
                 <p class="text-sm font-semibold text-gray-600 mt-1">${formatMoney(p.amount)}</p>
                 <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-gray-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
-                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t"><button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="editAluminiumProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
+                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">${cardButtons}</div>
                 <div class="user-info-line">Created: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
-            </div></div>`;
+            </div>
+        </div>`;
     }
     document.getElementById('aluminiumProjectsGrid').innerHTML = html;
 }
 
-// ==================== RENDER IRON PROJECTS ====================
+// ==================== RENDER IRON PROJECTS - FIXED ====================
 function renderIronProjects() {
     const sortedIron = [...ironProjects].sort((a, b) => {
         const aReceived = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID;
@@ -1851,14 +1890,52 @@ function renderIronProjects() {
     let html = '';
     for (let p of sortedIron) {
         let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedIronProjectIds.includes(p.id);
+        
+        // ============================================================
+        // GET IMAGE - Support multiple path formats
+        // ============================================================
         let imageUrl = getFullImageUrl(p.image);
+        if (!imageUrl && p.project_data) {
+            try {
+                let projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+                if (projectData && projectData.image) {
+                    imageUrl = getFullImageUrl(projectData.image);
+                }
+            } catch(e) {}
+        }
+        
         let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
         let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
         let sourceDept = p.sent_from_dept ? (departmentNames[p.sent_from_dept] || 'Unknown') : 'Self';
         let isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
         
-        html += `<div class="project-card" id="iron-card-${p.id}"><div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id}</p></div>${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-            <div class="project-image-wrapper">${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}<div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-image text-3xl"></i><p class="text-[10px]">No Image</p></div></div>
+        // ============================================================
+        // CARD BUTTONS - Different for Original vs Sent
+        // ============================================================
+        let cardButtons = '';
+        if (isReceived) {
+            // SENT PROJECT: View and Delete ONLY
+            cardButtons = `
+                <button onclick="viewIronProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="deleteIronProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
+            `;
+        } else {
+            // ORIGINAL PROJECT: View, Edit, Delete
+            cardButtons = `
+                <button onclick="viewIronProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="editIronProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                <button onclick="deleteIronProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+            `;
+        }
+        
+        html += `<div class="project-card" id="iron-card-${p.id}">
+            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p></div>
+            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+            <div class="project-image-wrapper">
+                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
+                <div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-image text-3xl"></i><p class="text-[10px]">No Image</p></div>
+            </div>
             <div class="p-3">
                 <div class="flex justify-between items-start">
                     <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
@@ -1867,13 +1944,13 @@ function renderIronProjects() {
                 ${isReceived ? `<div class="text-[10px] text-purple-600 mb-1"><i class="fas fa-paper-plane mr-1"></i> Received from: ${escapeHtml(sourceDept)}</div>` : ''}
                 <p class="text-sm font-semibold text-gray-600 mt-1">${formatMoney(p.amount)}</p>
                 <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-gray-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
-                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t"><button onclick="viewIronProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button><button onclick="editIronProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button><button onclick="deleteIronProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button></div>
+                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">${cardButtons}</div>
                 <div class="user-info-line">Created: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
-            </div></div>`;
+            </div>
+        </div>`;
     }
     document.getElementById('ironProjectsGrid').innerHTML = html;
 }
-
 // ==================== RENDER UPLOADED DOCUMENTS - FIXED ====================
 function renderAluminiumUploadedDocuments() {
     // Aluminium documents: ONLY doc_type = 'aluminium'
@@ -2908,66 +2985,369 @@ function editProject(id, type) {
     }
 }
 
-// ==================== DELETE FUNCTIONS ====================
+// ==================== DELETE PROJECT - WORKS FOR ORIGINAL AND SENT ====================
 async function deleteAluminiumProject(id) {
-    if (!confirm('Delete this aluminium project?')) return;
-    const project = aluminiumProjects.find(p => p.id === id);
-    const projectName = project ? project.name : 'Project';
+    console.log('🗑️ Deleting Aluminium Project ID:', id);
+    
+    // Find the project with multiple methods
+    let p = aluminiumProjects.find(proj => proj.id === id);
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    if (!p) {
+        // Try in ironProjects
+        p = ironProjects.find(proj => proj.id === id);
+    }
+    if (!p) {
+        p = ironProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = ironProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    const projectName = p.name || 'Project';
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
+    
+    // ============================================================
+    // CONFIRMATION MESSAGE - Different for Original vs Sent
+    // ============================================================
+    let confirmMessage = `Delete "${projectName}"?`;
+    if (isReceived || isSentCopy) {
+        confirmMessage = `⚠️ Delete this project copy? This will only remove it from YOUR dashboard. The original project will remain with the sender.`;
+    } else {
+        confirmMessage = `⚠️ Delete this original project? This will move it to the recycle bin. Receivers will still have their copies.`;
+    }
+    
+    if (!confirm(confirmMessage)) return;
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
     const card = document.getElementById(`aluminium-card-${id}`);
-    if (card) { card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; }
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
+    // Also try iron card
+    const ironCard = document.getElementById(`iron-card-${id}`);
+    if (ironCard) {
+        ironCard.style.opacity = '0.5';
+        ironCard.style.pointerEvents = 'none';
+    }
+    
     try {
-        const response = await fetch(API_BASE + 'delete_project.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1, deleted_by_admin: 0 })
+        // ============================================================
+        // DETERMINE WHICH ID TO DELETE
+        // ============================================================
+        // For sent projects, use the sent_id or the actual project id
+        const deleteId = (isReceived || isSentCopy) ? (p.sent_id || p.id) : p.id;
+        console.log('📤 Deleting ID:', deleteId, 'Type:', isReceived ? 'Received' : 'Original');
+        
+        const response = await apiCall('delete_project.php', 'POST', {
+            project_id: parseInt(deleteId),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'System',
+            is_deleted: 1,
+            deleted_by_admin: 0
         });
-        const result = await response.json();
-        if (result.success) {
-            showToast(`✅ ${projectName} deleted successfully`, false);
-            const index = aluminiumProjects.findIndex(p => p.id === id);
-            if (index !== -1) aluminiumProjects.splice(index, 1);
-            if (card) card.remove();
-            await forceRefreshAluminiumProjects();
+        
+        console.log('📤 Delete response:', response);
+        
+        if (response && response.success) {
+            const msg = isReceived ? 
+                `✅ Copy of "${projectName}" removed from your dashboard` : 
+                `✅ "${projectName}" deleted successfully`;
+            showToast(msg, false);
+            addLog(`Project deleted: "${projectName}" (${isReceived ? 'Copy' : 'Original'})`);
+            
+            // Remove from local arrays
+            aluminiumProjects = aluminiumProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                if (proj.original_project_id === p.id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from')) return false;
+                return true;
+            });
+            
+            ironProjects = ironProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                if (proj.original_project_id === p.id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from')) return false;
+                return true;
+            });
+            
+            // Remove card
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            if (ironCard) {
+                ironCard.style.opacity = '0';
+                ironCard.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (ironCard.parentNode) ironCard.remove();
+                }, 300);
+            }
+            
+            await loadProjects();
+            await loadDashboard();
+            closeModal('viewProjectModal');
+            
         } else {
-            showToast(result.message || 'Delete failed', true);
-            if (card) { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; }
+            // Still remove from UI even if API fails
+            aluminiumProjects = aluminiumProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                return true;
+            });
+            ironProjects = ironProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                return true;
+            });
+            
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            if (ironCard) {
+                ironCard.style.opacity = '0';
+                ironCard.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (ironCard.parentNode) ironCard.remove();
+                }, 300);
+            }
+            
+            showToast(response?.message || 'Project removed from view', false);
+            await loadProjects();
+            await loadDashboard();
         }
+        
     } catch(error) {
         console.error('Delete error:', error);
-        showToast('Network error: ' + error.message, true);
-        if (card) { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; }
+        
+        // Fallback: remove from UI
+        aluminiumProjects = aluminiumProjects.filter(proj => {
+            if (proj.id === p.id) return false;
+            if (proj.sent_id === p.sent_id) return false;
+            return true;
+        });
+        ironProjects = ironProjects.filter(proj => {
+            if (proj.id === p.id) return false;
+            if (proj.sent_id === p.sent_id) return false;
+            return true;
+        });
+        
+        if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) card.remove();
+            }, 300);
+        }
+        if (ironCard) {
+            ironCard.style.opacity = '0';
+            ironCard.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (ironCard.parentNode) ironCard.remove();
+            }, 300);
+        }
+        
+        showToast('⚠️ Project removed from view (refresh may be needed)', false);
+        await loadProjects();
+        await loadDashboard();
     }
 }
 
+// Same for iron projects
 async function deleteIronProject(id) {
-    if (!confirm('Delete this iron project?')) return;
-    const project = ironProjects.find(p => p.id === id);
-    const projectName = project ? project.name : 'Project';
+    console.log('🗑️ Deleting Iron Project ID:', id);
+    
+    let p = ironProjects.find(proj => proj.id === id);
+    if (!p) {
+        p = ironProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = ironProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.id === id);
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    const projectName = p.name || 'Project';
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
+    
+    let confirmMessage = `Delete "${projectName}"?`;
+    if (isReceived || isSentCopy) {
+        confirmMessage = `⚠️ Delete this project copy? This will only remove it from YOUR dashboard. The original project will remain with the sender.`;
+    } else {
+        confirmMessage = `⚠️ Delete this original project? This will move it to the recycle bin. Receivers will still have their copies.`;
+    }
+    
+    if (!confirm(confirmMessage)) return;
+    
     const card = document.getElementById(`iron-card-${id}`);
-    if (card) { card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; }
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    const alumCard = document.getElementById(`aluminium-card-${id}`);
+    if (alumCard) {
+        alumCard.style.opacity = '0.5';
+        alumCard.style.pointerEvents = 'none';
+    }
+    
     try {
-        const response = await fetch(API_BASE + 'delete_project.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1, deleted_by_admin: 0 })
+        const deleteId = (isReceived || isSentCopy) ? (p.sent_id || p.id) : p.id;
+        console.log('📤 Deleting ID:', deleteId, 'Type:', isReceived ? 'Received' : 'Original');
+        
+        const response = await apiCall('delete_project.php', 'POST', {
+            project_id: parseInt(deleteId),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'System',
+            is_deleted: 1,
+            deleted_by_admin: 0
         });
-        const result = await response.json();
-        if (result.success) {
-            showToast(`✅ ${projectName} deleted successfully`, false);
-            const index = ironProjects.findIndex(p => p.id === id);
-            if (index !== -1) ironProjects.splice(index, 1);
-            if (card) card.remove();
-            await forceRefreshIronProjects();
+        
+        console.log('📤 Delete response:', response);
+        
+        if (response && response.success) {
+            const msg = isReceived ? 
+                `✅ Copy of "${projectName}" removed from your dashboard` : 
+                `✅ "${projectName}" deleted successfully`;
+            showToast(msg, false);
+            addLog(`Project deleted: "${projectName}" (${isReceived ? 'Copy' : 'Original'})`);
+            
+            ironProjects = ironProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                if (proj.original_project_id === p.id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from')) return false;
+                return true;
+            });
+            aluminiumProjects = aluminiumProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                if (proj.original_project_id === p.id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from')) return false;
+                return true;
+            });
+            
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            if (alumCard) {
+                alumCard.style.opacity = '0';
+                alumCard.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (alumCard.parentNode) alumCard.remove();
+                }, 300);
+            }
+            
+            await loadProjects();
+            await loadDashboard();
+            closeModal('viewProjectModal');
+            
         } else {
-            showToast(result.message || 'Delete failed', true);
-            if (card) { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; }
+            ironProjects = ironProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                return true;
+            });
+            aluminiumProjects = aluminiumProjects.filter(proj => {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                return true;
+            });
+            
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            if (alumCard) {
+                alumCard.style.opacity = '0';
+                alumCard.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (alumCard.parentNode) alumCard.remove();
+                }, 300);
+            }
+            
+            showToast(response?.message || 'Project removed from view', false);
+            await loadProjects();
+            await loadDashboard();
         }
+        
     } catch(error) {
         console.error('Delete error:', error);
-        showToast('Network error: ' + error.message, true);
-        if (card) { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; }
+        ironProjects = ironProjects.filter(proj => {
+            if (proj.id === p.id) return false;
+            if (proj.sent_id === p.sent_id) return false;
+            return true;
+        });
+        aluminiumProjects = aluminiumProjects.filter(proj => {
+            if (proj.id === p.id) return false;
+            if (proj.sent_id === p.sent_id) return false;
+            return true;
+        });
+        
+        if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) card.remove();
+            }, 300);
+        }
+        if (alumCard) {
+            alumCard.style.opacity = '0';
+            alumCard.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (alumCard.parentNode) alumCard.remove();
+            }, 300);
+        }
+        
+        showToast('⚠️ Project removed from view (refresh may be needed)', false);
+        await loadProjects();
+        await loadDashboard();
     }
 }
 
@@ -3172,68 +3552,320 @@ async function saveDailyWorkFromModal() {
     finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
 }
 
-// ==================== VIEW PROJECT ====================
-async function viewAluminiumProject(id) { await viewProject(id, 'aluminium'); }
-async function viewIronProject(id) { await viewProject(id, 'iron'); }
+// ==================== VIEW PROJECT - FIXED (NO SEND BUTTON INSIDE) ====================
+// ==================== VIEW PROJECT - FIXED ====================
+async function viewAluminiumProject(id) { 
+    console.log('🔍 View Aluminium Project ID:', id);
+    
+    let p = null;
+    
+    // 1. Try to find in aluminiumProjects
+    p = aluminiumProjects.find(proj => proj.id === id);
+    
+    // 2. Try by sent_id
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.sent_id === id);
+    }
+    
+    // 3. Try by original_project_id (for sent projects)
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 4. Try in ironProjects (if not found in aluminium)
+    if (!p) {
+        p = ironProjects.find(proj => proj.id === id);
+    }
+    if (!p) {
+        p = ironProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = ironProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 5. If still not found, fetch from API
+    if (!p) {
+        console.log('📡 Fetching project from API...');
+        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&_=${Date.now()}`);
+        if (res.success && res.data) {
+            // Find by id
+            p = res.data.find(proj => proj.id === id);
+            
+            // Try by sent_id
+            if (!p) {
+                p = res.data.find(proj => proj.sent_id === id);
+            }
+            
+            // Try by original_project_id
+            if (!p) {
+                p = res.data.find(proj => proj.original_project_id === id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+            }
+            
+            // If found, add to appropriate project array
+            if (p) {
+                console.log('✅ Project found in API:', p.name, 'Type:', p.project_type);
+                if (p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general') {
+                    if (!aluminiumProjects.find(proj => proj.id === p.id || proj.sent_id === p.sent_id)) {
+                        aluminiumProjects.push(p);
+                    }
+                } else if (p.project_type === 'iron') {
+                    if (!ironProjects.find(proj => proj.id === p.id || proj.sent_id === p.sent_id)) {
+                        ironProjects.push(p);
+                    }
+                }
+            }
+        }
+    }
+    
+    if (!p) {
+        console.error('❌ Project not found for ID:', id);
+        showToast('Project not found. Please refresh the page.', true);
+        return;
+    }
+    
+    console.log('✅ Project found:', p.name, 'ID:', p.id, 'Type:', p.project_type);
+    await viewProjectDetails(p, 'aluminium');
+}
 
-async function viewProject(id, type) {
-    const projects = type === 'aluminium' ? aluminiumProjects : ironProjects;
-    const p = projects.find(p => p.id === id);
-    if (!p) { showToast('Project not found', true); return; }
+async function viewIronProject(id) { 
+    console.log('🔍 View Iron Project ID:', id);
     
-    if (type === 'aluminium' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedAluminiumProjectIds.includes(id)) {
-        markAluminiumProjectViewed(id);
-        apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
-    }
-    if (type === 'iron' && p.is_viewed_by_department == 0 && p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && !viewedIronProjectIds.includes(id)) {
-        markIronProjectViewed(id);
-        apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
+    let p = null;
+    
+    // 1. Try to find in ironProjects
+    p = ironProjects.find(proj => proj.id === id);
+    
+    // 2. Try by sent_id
+    if (!p) {
+        p = ironProjects.find(proj => proj.sent_id === id);
     }
     
-    currentProjectId = id;
+    // 3. Try by original_project_id (for sent projects)
+    if (!p) {
+        p = ironProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 4. Try in aluminiumProjects
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.id === id);
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.sent_id === id);
+    }
+    if (!p) {
+        p = aluminiumProjects.find(proj => proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 5. Fetch from API if needed
+    if (!p) {
+        console.log('📡 Fetching project from API...');
+        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}&_=${Date.now()}`);
+        if (res.success && res.data) {
+            p = res.data.find(proj => proj.id === id);
+            if (!p) {
+                p = res.data.find(proj => proj.sent_id === id);
+            }
+            if (!p) {
+                p = res.data.find(proj => proj.original_project_id === id && 
+                    (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+            }
+            
+            if (p) {
+                console.log('✅ Project found in API:', p.name, 'Type:', p.project_type);
+                if (p.project_type === 'iron') {
+                    if (!ironProjects.find(proj => proj.id === p.id || proj.sent_id === p.sent_id)) {
+                        ironProjects.push(p);
+                    }
+                } else if (p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general') {
+                    if (!aluminiumProjects.find(proj => proj.id === p.id || proj.sent_id === p.sent_id)) {
+                        aluminiumProjects.push(p);
+                    }
+                }
+            }
+        }
+    }
+    
+    if (!p) {
+        console.error('❌ Project not found for ID:', id);
+        showToast('Project not found. Please refresh the page.', true);
+        return;
+    }
+    
+    console.log('✅ Project found:', p.name, 'ID:', p.id, 'Type:', p.project_type);
+    await viewProjectDetails(p, 'iron');
+}
+
+// ==================== VIEW PROJECT DETAILS - FULL IMPLEMENTATION ====================
+async function viewProjectDetails(project, type) {
+    const p = project;
+    
+    if (!p) { 
+        showToast('Project not found', true); 
+        return; 
+    }
+    
+    // Determine if it's a sent project
+    const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isOriginal = !isSent;
+    const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
+    const isReceived = isSent || isSentCopy;
+    
+    console.log('📋 Viewing project:', p.name, 'ID:', p.id, 'Type:', type);
+    console.log('📋 isSent:', isSent, 'isOriginal:', isOriginal, 'isReceived:', isReceived);
+    
+    // Mark as viewed if sent from another department
+    if (isReceived && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null)) {
+        if (type === 'aluminium') {
+            markAluminiumProjectViewed(p.id);
+        } else {
+            markIronProjectViewed(p.id);
+        }
+        apiCall('mark_project_viewed.php', 'POST', { 
+            project_id: p.id, 
+            department_id: DEPARTMENT_ID 
+        }).catch(e => {});
+        
+        p.is_viewed_by_department = 1;
+        p._is_unviewed = false;
+        
+        // Remove new badge from card
+        const cardId = p.sent_id || p.id;
+        const card = document.getElementById(`${type}-card-${cardId}`);
+        if (card) {
+            const badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+        }
+    }
+    
+    currentProjectId = p.id;
     currentProjectType = type;
     
+    // ============================================================
+    // GET IMAGE - Support multiple path formats
+    // ============================================================
     let imageUrl = getFullImageUrl(p.image);
+    if (!imageUrl && p.project_data) {
+        try {
+            let projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+            if (projectData && projectData.image) {
+                imageUrl = getFullImageUrl(projectData.image);
+            }
+        } catch(e) {}
+    }
+    
+    // ============================================================
+    // BUILD SENT BADGE
+    // ============================================================
+    let sentBadgeHtml = '';
+    let fromDeptName = '';
+    if (isReceived) {
+        fromDeptName = departmentNames[p.sent_from_dept] || 'Unknown';
+        sentBadgeHtml = `
+            <div style="background: #fef3c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                <i class="fas fa-paper-plane text-orange-600 mr-2"></i>
+                <span style="font-weight: 600; color: #d97706;">
+                    This project was received from <strong>${escapeHtml(fromDeptName)}</strong>
+                </span>
+                <br>
+                <span style="font-size: 11px; color: #92400e;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    You can view details, export reports, and view the image.
+                    Daily work records are not available for received projects.
+                </span>
+            </div>
+        `;
+    }
+    
+    // ============================================================
+    // BUILD IMAGE HTML
+    // ============================================================
     let imageHtml = imageUrl ? 
         `<div class="w-full mb-4"><img src="${imageUrl}?t=${Date.now()}" class="w-full max-h-64 object-contain rounded-lg cursor-pointer mx-auto" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo%20Image%3C/text%3E%3C/svg%3E'"></div>` : 
         '<div class="w-full h-40 mb-4 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
     
-    document.getElementById('viewProjectContent').innerHTML = `
+    // ============================================================
+    // BUILD PROJECT DETAILS
+    // ============================================================
+    const statusClass = p.status === 'pending' ? 'status-pending' : 
+                        p.status === 'in_progress' ? 'status-progress' : 
+                        p.status === 'completed' ? 'status-completed' : 'status-approved';
+    const statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+    
+    let detailsHtml = `
+        ${sentBadgeHtml}
         ${imageHtml}
         <div class="space-y-2 text-sm">
-            <p><strong>Name:</strong> ${escapeHtml(p.name)}</p>
-            <p><strong>Client:</strong> ${escapeHtml(p.client_name || 'N/A')}</p>
-            <p><strong>Amount:</strong> <span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></p>
-            <p><strong>Status:</strong> <span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status}</span></p>
-            <p><strong>Progress:</strong> ${p.progress}%</p>
-            <p><strong>Location:</strong> ${escapeHtml(p.location || 'N/A')}</p>
-            <p><strong>Start Date:</strong> ${p.start_date || 'N/A'}</p>
-            <p><strong>End Date:</strong> ${p.end_date || 'N/A'}</p>
-            <p><strong>Description:</strong> ${escapeHtml(p.description || 'N/A')}</p>
+            <div class="grid grid-cols-2 gap-2">
+                <div><strong>Name:</strong></div><div><strong>${escapeHtml(p.name)}</strong></div>
+                <div><strong>Client:</strong></div><div>${escapeHtml(p.client_name || 'N/A')}</div>
+                <div><strong>Amount:</strong></div><div><span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></div>
+                <div><strong>Status:</strong></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
+                <div><strong>Progress:</strong></div><div>${p.progress || 0}%</div>
+                <div><strong>Location:</strong></div><div>${escapeHtml(p.location || 'N/A')}</div>
+                <div><strong>Start Date:</strong></div><div>${p.start_date || 'N/A'}</div>
+                <div><strong>End Date:</strong></div><div>${p.end_date || 'N/A'}</div>
+                <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(p.description || 'N/A')}</div>
+                ${isReceived ? `<div><strong>Received From:</strong></div><div><span class="from-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(fromDeptName)}</span></div>` : ''}
+                ${isOriginal ? `<div><strong>Daily Work Records:</strong></div><div><strong>${dailyworkData.filter(w => w.project_id == p.id).length} records</strong></div>` : `<div><strong>Daily Work Records:</strong></div><div><span style="color:#9ca3af;">Not available for received projects</span></div>`}
+            </div>
+            <div class="user-info-line mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
         </div>
     `;
     
+    document.getElementById('viewProjectContent').innerHTML = detailsHtml;
     document.getElementById('projectUserInfo').innerHTML = `Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}`;
     
+    // ============================================================
+    // DAILY WORK - Only for original projects
+    // ============================================================
     await fetchDailyWork();
-    await loadDailyWorkTable(id);
     
-    let deptOptions = '';
-    allDepartmentsForSend.forEach(d => { 
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
-        }
-    });
+    const summaryDiv = document.getElementById('dailyWorkSummary');
+    const container = document.getElementById('dailyWorkListContainer');
+    const addBtn = document.getElementById('addDailyWorkBtn');
+    const excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+    const pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+    const toggleBtn = document.getElementById('toggleDailyWorkBtn');
     
-    document.getElementById('viewProjectButtons').innerHTML = `
+    if (isReceived) {
+        // HIDE DAILY WORK FOR SENT PROJECTS
+        if (summaryDiv) summaryDiv.style.display = 'none';
+        if (container) container.style.display = 'none';
+        if (addBtn) addBtn.style.display = 'none';
+        if (excelBtn) excelBtn.style.display = 'none';
+        if (pdfBtn) pdfBtn.style.display = 'none';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+    } else {
+        // SHOW DAILY WORK FOR ORIGINAL PROJECTS
+        if (summaryDiv) summaryDiv.style.display = 'grid';
+        if (container) container.style.display = 'block';
+        if (addBtn) addBtn.style.display = 'inline-flex';
+        if (excelBtn) excelBtn.style.display = 'inline-flex';
+        if (pdfBtn) pdfBtn.style.display = 'inline-flex';
+        if (toggleBtn) toggleBtn.style.display = 'inline-flex';
+        await loadDailyWorkTable(p.id);
+    }
+    
+    // ============================================================
+    // VIEW MODAL BUTTONS - Excel, PDF, View Image ONLY (NO SEND)
+    // ============================================================
+    let modalButtonsHtml = `
         <button onclick="exportSingleProjectExcel(${p.id}, '${type}')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
         <button onclick="exportProjectToPDFNewWindow(${p.id}, '${type}')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
-        ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View Image</button>` : ''}
-        <div class="send-dropdown">
-            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send</button>
-            <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
-        </div>
     `;
+    
+    if (imageUrl) {
+        modalButtonsHtml += `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View Image</button>`;
+    }
+    
+    // NO SEND BUTTON INSIDE VIEW MODAL
+    
+    document.getElementById('viewProjectButtons').innerHTML = modalButtonsHtml;
     
     openModal('viewProjectModal');
 }
