@@ -1,7 +1,7 @@
 <?php
 // backend/api/send_project_advanced.php
 // ============================================================
-// FIXED: Receiver anapofoward, haitumwi kwa Original Sender
+// FIXED: Daily work inabaki kwa sender, receiver haioni
 // ============================================================
 
 header('Content-Type: application/json');
@@ -77,7 +77,7 @@ try {
 }
 
 // ============================================================
-// FETCH PROJECT DATA
+// FETCH PROJECT DATA - DETERMINE IF SENT PROJECT
 // ============================================================
 $originalProjectId = $projectId;
 $isSentProject = false;
@@ -104,7 +104,6 @@ if (empty($projectData)) {
         $isSentProject = true;
         $sentProjectId = $sentProject['id'];
         
-        // Get original sender info from sent project
         if (isset($sentProject['original_sender_id'])) {
             $originalSenderId = (int)$sentProject['original_sender_id'];
         }
@@ -137,58 +136,10 @@ $image = $projectData['image'] ?? '';
 $imagePath = $projectData['image_path'] ?? '';
 
 // ============================================================
-// FETCH DAILY WORK
-// ============================================================
-$dailyWorkRecords = [];
-
-try {
-    $dwStmt = $pdo->prepare("SELECT * FROM dailywork WHERE project_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY id ASC");
-    $dwStmt->execute([$originalProjectId]);
-    $dailyWorkRecords = $dwStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch(PDOException $e) {
-    // Ignore
-}
-
-// ============================================================
-// CALCULATE DAILY WORK TOTALS
-// ============================================================
-$totalBudget = 0;
-$totalExpenses = 0;
-$totalRecords = count($dailyWorkRecords);
-$completedCount = 0;
-$partialCount = 0;
-$pendingCount = 0;
-
-foreach ($dailyWorkRecords as $dw) {
-    $budget = (float)($dw['budget'] ?? 0);
-    $amount = (float)($dw['amount'] ?? 0);
-    $status = $dw['status'] ?? 'pending';
-    
-    $totalBudget += $budget;
-    $totalExpenses += $amount;
-    
-    if ($status === 'completed') $completedCount++;
-    else if ($status === 'partial') $partialCount++;
-    else $pendingCount++;
-}
-
-$remainingBudget = $totalBudget - $totalExpenses;
-$dailySummary = [
-    'total_records' => $totalRecords,
-    'total_budget' => $totalBudget,
-    'total_expenses' => $totalExpenses,
-    'remaining_budget' => $remainingBudget,
-    'completed' => $completedCount,
-    'partial' => $partialCount,
-    'pending' => $pendingCount
-];
-
-// ============================================================
 // BUILD FORWARD CHAIN
 // ============================================================
 $forwardChain = isset($projectData['forward_chain']) ? $projectData['forward_chain'] : [];
 
-// Only add to forward chain if this is a forward (not original send)
 if ($isForward || $isSentProject) {
     $forwardChain[] = [
         'from_department_id' => $fromDeptId,
@@ -201,302 +152,171 @@ if ($isForward || $isSentProject) {
 }
 
 // ============================================================
-// CREATE SENT PROJECT DATA - HAIFANYI UPDATE KWA ORIGINAL SENDER
+// CREATE SENT PROJECT DATA - WITHOUT DAILY WORK
 // ============================================================
-$sentProjectData = $projectData;
-$sentProjectData['sent_from_dept'] = $fromDeptId;
-$sentProjectData['sent_from_name'] = $fromDeptName;
-$sentProjectData['sent_to_dept'] = $toDeptId;
-$sentProjectData['sent_to_name'] = $toDeptName;
-$sentProjectData['sent_at'] = date('Y-m-d H:i:s');
-$sentProjectData['is_sent'] = 1;
-$sentProjectData['is_sent_copy'] = 1;
-$sentProjectData['original_project_id'] = $originalProjectId;
-$sentProjectData['original_sender_id'] = $originalSenderId;
-$sentProjectData['original_sender_name'] = $originalSenderName;
-$sentProjectData['daily_work_records'] = $dailyWorkRecords;
-$sentProjectData['daily_work_summary'] = $dailySummary;
-$sentProjectData['is_forward'] = $isForward || $isSentProject ? 1 : 0;
-$sentProjectData['forward_chain'] = $forwardChain;
-$sentProjectData['forward_count'] = count($forwardChain);
+// Important: Daily work inabaki kwa sender, receiver haioni
+// ============================================================
+$sentProjectData = [
+    'name' => $projectName,
+    'client_name' => $projectData['client_name'] ?? '',
+    'amount' => $amount,
+    'status' => $projectData['status'] ?? 'pending',
+    'progress' => $projectData['progress'] ?? 0,
+    'location' => $projectData['location'] ?? '',
+    'description' => $projectData['description'] ?? '',
+    'image' => $image,
+    'image_path' => $imagePath,
+    'project_type' => $projectType,
+    'created_by' => $projectData['created_by'] ?? $sentBy,
+    'created_at' => $projectData['created_at'] ?? date('Y-m-d H:i:s'),
+    'original_project_id' => $originalProjectId,
+    'original_sender_id' => $originalSenderId,
+    'original_sender_name' => $originalSenderName,
+    'sent_from_dept' => $fromDeptId,
+    'sent_from_name' => $fromDeptName,
+    'sent_to_dept' => $toDeptId,
+    'sent_to_name' => $toDeptName,
+    'sent_at' => date('Y-m-d H:i:s'),
+    'is_sent' => 1,
+    'is_sent_copy' => 1,
+    'is_forward' => $isForward || $isSentProject ? 1 : 0,
+    'forward_chain' => $forwardChain,
+    'forward_count' => count($forwardChain)
+    // NO DAILY WORK - inabaki kwa sender
+];
 
 // ============================================================
-// CREATE TABLES IF NOT EXISTS
+// CHECK IF ALREADY SENT TO THIS DEPARTMENT (Prevent Duplicate)
 // ============================================================
-try {
-    $pdo->exec("
-    CREATE TABLE IF NOT EXISTS `sent_projects` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `original_project_id` int(11) NOT NULL,
-        `project_data` longtext DEFAULT NULL,
-        `from_department_id` int(11) NOT NULL,
-        `to_department_id` int(11) NOT NULL,
-        `sent_by` varchar(100) DEFAULT NULL,
-        `sent_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        `is_viewed` tinyint(4) DEFAULT 0,
-        `viewed_at` timestamp NULL DEFAULT NULL,
-        `is_deleted` tinyint(4) DEFAULT 0,
-        `deleted_at` timestamp NULL DEFAULT NULL,
-        `sent_count` int(11) DEFAULT 0,
-        `is_sent` tinyint(4) DEFAULT 0,
-        `last_sent_at` timestamp NULL DEFAULT NULL,
-        `from_department_name` varchar(100) DEFAULT NULL,
-        `to_department_name` varchar(100) DEFAULT NULL,
-        `project_name` varchar(255) DEFAULT NULL,
-        `project_type` varchar(50) DEFAULT NULL,
-        `amount` decimal(15,2) DEFAULT 0.00,
-        `daily_work_count` int(11) DEFAULT 0,
-        `daily_work_summary` longtext DEFAULT NULL,
-        `original_sender_id` int(11) DEFAULT NULL,
-        `original_sender_name` varchar(100) DEFAULT NULL,
-        `forward_count` int(11) DEFAULT 0,
-        `last_forwarded_from` int(11) DEFAULT NULL,
-        `is_forward` tinyint(4) DEFAULT 0,
-        PRIMARY KEY (`id`),
-        KEY `idx_original_project` (`original_project_id`),
-        KEY `idx_to_dept` (`to_department_id`),
-        KEY `idx_from_dept` (`from_department_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+$checkStmt = $pdo->prepare("SELECT id FROM sent_projects 
+                            WHERE original_project_id = ? AND to_department_id = ? AND is_deleted = 0");
+$checkStmt->execute([$originalProjectId, $toDeptId]);
+$existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
 
-    $pdo->exec("
-    CREATE TABLE IF NOT EXISTS `sent_dailywork` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `original_dailywork_id` int(11) NOT NULL,
-        `dailywork_data` longtext NOT NULL,
-        `from_department_id` int(11) NOT NULL,
-        `to_department_id` int(11) NOT NULL,
-        `sent_by` varchar(100) DEFAULT NULL,
-        `sent_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        `is_viewed` tinyint(4) DEFAULT 0,
-        `viewed_at` timestamp NULL DEFAULT NULL,
-        `is_deleted` tinyint(4) DEFAULT 0,
-        `deleted_at` timestamp NULL DEFAULT NULL,
-        `sent_count` int(11) DEFAULT 0,
-        `is_sent` tinyint(4) DEFAULT 0,
-        `last_sent_at` timestamp NULL DEFAULT NULL,
-        `from_department_name` varchar(100) DEFAULT NULL,
-        `to_department_name` varchar(100) DEFAULT NULL,
-        `dailywork_project_name` varchar(255) DEFAULT NULL,
-        `dailywork_date` datetime DEFAULT NULL,
-        `dailywork_amount` decimal(15,2) DEFAULT 0.00,
-        `dailywork_budget` decimal(15,2) DEFAULT 0.00,
-        `dailywork_status` varchar(50) DEFAULT 'pending',
-        PRIMARY KEY (`id`),
-        KEY `idx_original_dailywork` (`original_dailywork_id`),
-        KEY `idx_to_dept` (`to_department_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+if ($existing) {
+    // Update existing sent project
+    $stmt = $pdo->prepare("UPDATE sent_projects SET 
+        project_data = ?,
+        sent_by = ?,
+        sent_at = NOW(),
+        is_viewed = 0,
+        sent_count = sent_count + 1,
+        is_sent = 1,
+        last_sent_at = NOW(),
+        from_department_id = ?,
+        from_department_name = ?,
+        to_department_name = ?,
+        project_name = ?,
+        project_type = ?,
+        amount = ?,
+        forward_count = ?,
+        last_forwarded_from = ?,
+        is_forward = ?,
+        original_sender_id = ?,
+        original_sender_name = ?
+        WHERE id = ?");
     
-} catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Table creation failed: ' . $e->getMessage()]);
-    exit;
+    $stmt->execute([
+        json_encode($sentProjectData),
+        $sentBy,
+        $fromDeptId,
+        $fromDeptName,
+        $toDeptName,
+        $projectName,
+        $projectType,
+        $amount,
+        count($forwardChain),
+        $fromDeptId,
+        $isForward || $isSentProject ? 1 : 0,
+        $originalSenderId,
+        $originalSenderName,
+        $existing['id']
+    ]);
+    $sentProjectId = $existing['id'];
+    
+} else {
+    // Insert new sent project
+    $stmt = $pdo->prepare("INSERT INTO sent_projects (
+        original_project_id,
+        project_data,
+        from_department_id,
+        to_department_id,
+        sent_by,
+        sent_at,
+        is_viewed,
+        is_deleted,
+        sent_count,
+        is_sent,
+        last_sent_at,
+        from_department_name,
+        to_department_name,
+        project_name,
+        project_type,
+        amount,
+        forward_count,
+        last_forwarded_from,
+        is_forward,
+        original_sender_id,
+        original_sender_name
+    ) VALUES (?, ?, ?, ?, ?, NOW(), 0, 0, 1, 1, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    
+    $stmt->execute([
+        $originalProjectId,
+        json_encode($sentProjectData),
+        $fromDeptId,
+        $toDeptId,
+        $sentBy,
+        $fromDeptName,
+        $toDeptName,
+        $projectName,
+        $projectType,
+        $amount,
+        count($forwardChain),
+        $fromDeptId,
+        $isForward || $isSentProject ? 1 : 0,
+        $originalSenderId,
+        $originalSenderName
+    ]);
+    $sentProjectId = $pdo->lastInsertId();
 }
 
 // ============================================================
-// INSERT SENT PROJECT
+// DO NOT SAVE DAILY WORK TO RECEIVER
+// ============================================================
+// Daily work inabaki kwa sender tu
+// Receiver haioni daily work
+// ============================================================
+
+// ============================================================
+// UPDATE ORIGINAL PROJECT - ONLY IF SENDER IS ORIGINAL OWNER
+// ============================================================
+if ($fromDeptId == $originalSenderId && !$isSentProject) {
+    try {
+        $updateStmt = $pdo->prepare("UPDATE projects SET 
+            sent_to_dept = ?,
+            sent_from_dept = ?,
+            is_viewed_by_department = 0,
+            sent_count = COALESCE(sent_count, 0) + 1,
+            is_sent = 1,
+            last_sent_at = NOW()
+            WHERE id = ?");
+        $updateStmt->execute([$toDeptId, $fromDeptId, $originalProjectId]);
+    } catch(PDOException $e) {
+        // Ignore
+    }
+}
+
+// ============================================================
+// ADD NOTIFICATION - ONLY TO RECEIVER
 // ============================================================
 try {
-    // Check if already sent to this department
-    $checkStmt = $pdo->prepare("SELECT id FROM sent_projects 
-                                WHERE original_project_id = ? AND to_department_id = ? AND is_deleted = 0");
-    $checkStmt->execute([$originalProjectId, $toDeptId]);
-    $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($existing) {
-        // Update existing sent project
-        $stmt = $pdo->prepare("UPDATE sent_projects SET 
-            project_data = ?,
-            sent_by = ?,
-            sent_at = NOW(),
-            is_viewed = 0,
-            sent_count = sent_count + 1,
-            is_sent = 1,
-            last_sent_at = NOW(),
-            from_department_id = ?,
-            from_department_name = ?,
-            to_department_name = ?,
-            project_name = ?,
-            project_type = ?,
-            amount = ?,
-            daily_work_count = ?,
-            daily_work_summary = ?,
-            forward_count = ?,
-            last_forwarded_from = ?,
-            is_forward = ?,
-            original_sender_id = ?,
-            original_sender_name = ?
-            WHERE id = ?");
+    $notifCheck = $pdo->query("SHOW TABLES LIKE 'notifications'");
+    if ($notifCheck->rowCount() > 0) {
+        $dupNotif = $pdo->prepare("SELECT id FROM notifications 
+                                   WHERE department_id = ? AND item_type = 'project' AND item_id = ?");
+        $dupNotif->execute([$toDeptId, $sentProjectId]);
         
-        $stmt->execute([
-            json_encode($sentProjectData),
-            $sentBy,
-            $fromDeptId,
-            $fromDeptName,
-            $toDeptName,
-            $projectName,
-            $projectType,
-            $amount,
-            $totalRecords,
-            json_encode($dailySummary),
-            count($forwardChain),
-            $fromDeptId,
-            $isForward || $isSentProject ? 1 : 0,
-            $originalSenderId,
-            $originalSenderName,
-            $existing['id']
-        ]);
-        $sentProjectId = $existing['id'];
-    } else {
-        // Insert new sent project
-        $stmt = $pdo->prepare("INSERT INTO sent_projects (
-            original_project_id,
-            project_data,
-            from_department_id,
-            to_department_id,
-            sent_by,
-            sent_at,
-            is_viewed,
-            is_deleted,
-            sent_count,
-            is_sent,
-            last_sent_at,
-            from_department_name,
-            to_department_name,
-            project_name,
-            project_type,
-            amount,
-            daily_work_count,
-            daily_work_summary,
-            forward_count,
-            last_forwarded_from,
-            is_forward,
-            original_sender_id,
-            original_sender_name
-        ) VALUES (?, ?, ?, ?, ?, NOW(), 0, 0, 1, 1, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        
-        $stmt->execute([
-            $originalProjectId,
-            json_encode($sentProjectData),
-            $fromDeptId,
-            $toDeptId,
-            $sentBy,
-            $fromDeptName,
-            $toDeptName,
-            $projectName,
-            $projectType,
-            $amount,
-            $totalRecords,
-            json_encode($dailySummary),
-            count($forwardChain),
-            $fromDeptId,
-            $isForward || $isSentProject ? 1 : 0,
-            $originalSenderId,
-            $originalSenderName
-        ]);
-        $sentProjectId = $pdo->lastInsertId();
-    }
-    
-    // ============================================================
-    // SAVE DAILY WORK COPIES
-    // ============================================================
-    $dailyWorkInserted = 0;
-    
-    foreach ($dailyWorkRecords as $dw) {
-        $checkDwStmt = $pdo->prepare("SELECT id FROM sent_dailywork 
-                                      WHERE original_dailywork_id = ? AND to_department_id = ? AND is_deleted = 0");
-        $checkDwStmt->execute([$dw['id'] ?? 0, $toDeptId]);
-        $existingDw = $checkDwStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($existingDw) {
-            $updateDwStmt = $pdo->prepare("UPDATE sent_dailywork SET 
-                sent_count = sent_count + 1,
-                last_sent_at = NOW(),
-                is_sent = 1
-                WHERE id = ?");
-            $updateDwStmt->execute([$existingDw['id']]);
-            $dailyWorkInserted++;
-            continue;
-        }
-        
-        $dwData = $dw;
-        $dwData['sent_from_dept'] = $fromDeptId;
-        $dwData['sent_from_name'] = $fromDeptName;
-        $dwData['sent_to_dept'] = $toDeptId;
-        $dwData['sent_to_name'] = $toDeptName;
-        $dwData['is_sent'] = 1;
-        $dwData['is_sent_copy'] = 1;
-        $dwData['original_dailywork_id'] = $dw['id'] ?? 0;
-        
-        $dwStmt = $pdo->prepare("INSERT INTO sent_dailywork (
-            original_dailywork_id,
-            dailywork_data,
-            from_department_id,
-            to_department_id,
-            sent_by,
-            sent_at,
-            is_viewed,
-            is_deleted,
-            sent_count,
-            is_sent,
-            last_sent_at,
-            from_department_name,
-            to_department_name,
-            dailywork_project_name,
-            dailywork_date,
-            dailywork_amount,
-            dailywork_budget,
-            dailywork_status
-        ) VALUES (?, ?, ?, ?, ?, NOW(), 0, 0, 1, 1, NOW(), ?, ?, ?, ?, ?, ?, ?)");
-        
-        $result = $dwStmt->execute([
-            $dw['id'] ?? 0,
-            json_encode($dwData),
-            $fromDeptId,
-            $toDeptId,
-            $sentBy,
-            $fromDeptName,
-            $toDeptName,
-            $dw['project_name'] ?? $projectName,
-            $dw['date'] ?? null,
-            $dw['amount'] ?? 0,
-            $dw['budget'] ?? 0,
-            $dw['status'] ?? 'pending'
-        ]);
-        
-        if ($result) {
-            $dailyWorkInserted++;
-        }
-    }
-    
-    // ============================================================
-    // UPDATE ORIGINAL PROJECT - ONLY IF SENDER IS ORIGINAL OWNER
-    // ============================================================
-    // IMPORTANT: Only update original project if:
-    // 1. The sender is the original owner (fromDeptId == originalSenderId)
-    // 2. AND this is NOT a forward (isSentProject == false)
-    // Hii inazuia receiver kufanya update kwenye original project
-    // ============================================================
-    if ($fromDeptId == $originalSenderId && !$isSentProject) {
-        try {
-            $updateStmt = $pdo->prepare("UPDATE projects SET 
-                sent_to_dept = ?,
-                sent_from_dept = ?,
-                is_viewed_by_department = 0,
-                sent_count = COALESCE(sent_count, 0) + 1,
-                is_sent = 1,
-                last_sent_at = NOW()
-                WHERE id = ?");
-            $updateStmt->execute([$toDeptId, $fromDeptId, $originalProjectId]);
-        } catch(PDOException $e) {
-            // Ignore
-        }
-    }
-    
-    // ============================================================
-    // ADD NOTIFICATION - ONLY TO RECEIVER (SI ORIGINAL SENDER)
-    // ============================================================
-    try {
-        $notifCheck = $pdo->query("SHOW TABLES LIKE 'notifications'");
-        if ($notifCheck->rowCount() > 0) {
+        if ($dupNotif->rowCount() == 0) {
             $notifStmt = $pdo->prepare("INSERT INTO notifications (
                 department_id,
                 from_department_id,
@@ -511,39 +331,29 @@ try {
             $forwardText = ($isForward || $isSentProject) ? " (Forwarded from {$fromDeptName})" : "";
             $message = "📋 Project \"{$projectName}\" sent from {$fromDeptName} to {$toDeptName}{$forwardText}";
             $notifStmt->execute([$toDeptId, $fromDeptId, $sentProjectId, $projectName, $message]);
-            
-            // ============================================================
-            // DO NOT SEND NOTIFICATION TO ORIGINAL SENDER WHEN FORWARDING
-            // ============================================================
-            // Hii inazuia original sender kupata notification wakati receiver anafoward
         }
-    } catch(PDOException $e) {
-        // Ignore
     }
-    
-    // ============================================================
-    // RESPONSE
-    // ============================================================
-    echo json_encode([
-        'success' => true,
-        'message' => 'Project sent successfully with ' . $dailyWorkInserted . ' daily work records',
-        'sent_project_id' => $sentProjectId,
-        'original_project_id' => $originalProjectId,
-        'from_department' => $fromDeptId,
-        'from_department_name' => $fromDeptName,
-        'to_department' => $toDeptId,
-        'to_department_name' => $toDeptName,
-        'original_sender_id' => $originalSenderId,
-        'original_sender_name' => $originalSenderName,
-        'project_name' => $projectName,
-        'daily_work_count' => $dailyWorkInserted,
-        'is_forward' => $isForward || $isSentProject ? 1 : 0,
-        'forward_chain' => $forwardChain,
-        'daily_work_summary' => $dailySummary,
-        'note' => $isSentProject ? 'Forwarded from receiver - original sender not updated' : 'Sent from original sender'
-    ]);
-    
 } catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+    // Ignore
 }
+
+// ============================================================
+// RESPONSE
+// ============================================================
+echo json_encode([
+    'success' => true,
+    'message' => 'Project sent successfully',
+    'sent_project_id' => $sentProjectId,
+    'original_project_id' => $originalProjectId,
+    'from_department' => $fromDeptId,
+    'from_department_name' => $fromDeptName,
+    'to_department' => $toDeptId,
+    'to_department_name' => $toDeptName,
+    'original_sender_id' => $originalSenderId,
+    'original_sender_name' => $originalSenderName,
+    'project_name' => $projectName,
+    'is_forward' => $isForward || $isSentProject ? 1 : 0,
+    'forward_chain' => $forwardChain,
+    'note' => 'Daily work remains with the sender only. Receiver does not see daily work.'
+]);
 ?>

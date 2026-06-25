@@ -1,16 +1,7 @@
 <?php
 // backend/api/get_projects.php
 // ============================================================
-// COMPLETE VERSION - Kamili na Safi
-// ============================================================
-// Mahitaji:
-// 1. Sender anaona ORIGINAL projects zake tu
-// 2. Receiver anaona SENT projects zilizotumwa kwake tu
-// 3. Sender HAONI sent copies (zina skip)
-// 4. Inaonyesha forwarding chain
-// 5. Inaonyesha daily work summary
-// 6. Inaonyesha unviewed status
-// 7. Soft delete - is_deleted = 0 ONLY
+// FIXED: Receiver haoni daily work
 // ============================================================
 
 error_reporting(0);
@@ -70,43 +61,13 @@ if ($department_id <= 0) {
 try {
     $projects = [];
     $originalIds = [];
-    $sentIds = [];
+    $seenSentIds = [];
 
     // ============================================================
     // PART 1: ORIGINAL PROJECTS - SENDER ANAONA ZAKE TU
     // ============================================================
-    // Department iliyounda project (department_id = owner)
-    // Hawa ndio SENDER wa original project
-    // is_deleted = 0 ONLY
-    
     $query = "SELECT 
-                p.id,
-                p.name,
-                p.client_name,
-                p.amount,
-                p.location,
-                p.description,
-                p.status,
-                p.progress,
-                p.start_date,
-                p.end_date,
-                p.image,
-                p.image_path,
-                p.project_type,
-                p.department_id,
-                p.created_by,
-                p.created_at,
-                p.updated_at,
-                p.is_deleted,
-                p.deleted_at,
-                p.sent_from_dept,
-                p.sent_to_dept,
-                p.is_viewed_by_department,
-                p.is_original,
-                p.is_sent_copy,
-                p.original_project_id,
-                p.sent_count,
-                p.last_sent_at,
+                p.*,
                 'original' as source_type,
                 0 as is_sent,
                 0 as is_received,
@@ -121,8 +82,7 @@ try {
                 0 as forward_count,
                 NULL as forward_chain,
                 NULL as daily_work_summary,
-                0 as daily_work_count,
-                NULL as project_data
+                0 as daily_work_count
               FROM projects p
               WHERE p.department_id = ?
                 AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
@@ -140,10 +100,8 @@ try {
     // ============================================================
     // PART 2: SENT PROJECTS - RECEIVER ANAONA ZILIZOTUMWA KWAKE
     // ============================================================
-    // Department ambayo imepokea project (to_department_id = receiver)
-    // Hawa ndio RECEIVER wa sent project
-    // is_deleted = 0 ONLY
-    
+    // Receiver haoni daily work - only project details
+    // ============================================================
     $query = "SELECT 
                 sp.id as sent_id,
                 sp.original_project_id,
@@ -159,8 +117,6 @@ try {
                 sp.project_name,
                 sp.project_type,
                 sp.amount,
-                sp.daily_work_count,
-                sp.daily_work_summary,
                 sp.is_deleted,
                 sp.deleted_at,
                 sp.original_sender_id,
@@ -171,8 +127,8 @@ try {
                 'sent' as source_type,
                 1 as is_sent,
                 1 as is_received,
-                0 as is_original,
                 1 as is_sent_copy,
+                0 as is_original,
                 sp.from_department_name as sent_from_name,
                 sp.to_department_name as sent_to_name,
                 CASE 
@@ -191,46 +147,43 @@ try {
         if ($row['project_data']) {
             $projectData = json_decode($row['project_data'], true);
             if ($projectData && is_array($projectData)) {
-                // Merge project data into row
                 foreach ($projectData as $key => $value) {
                     if (!isset($row[$key]) || $row[$key] === null || $row[$key] === '') {
                         $row[$key] = $value;
                     }
                 }
-                
-                // Extract forward chain if exists
                 if (isset($projectData['forward_chain'])) {
                     $row['forward_chain'] = $projectData['forward_chain'];
                 }
                 if (isset($projectData['original_sender_name'])) {
                     $row['original_sender_name'] = $projectData['original_sender_name'];
                 }
-                if (isset($projectData['daily_work_records'])) {
-                    $row['daily_work_records'] = $projectData['daily_work_records'];
-                }
             }
         }
         unset($row['project_data']);
         
-        // Set id to original_project_id for compatibility
         $row['id'] = $row['original_project_id'];
         $row['_display_id'] = $row['sent_id'];
         
-        // Store sent_id for reference
-        $sentIds[$row['sent_id']] = true;
+        // NO DAILY WORK for receiver
+        $row['daily_work'] = [];
+        $row['daily_work_count'] = 0;
+        $row['daily_work_summary'] = [
+            'total_records' => 0,
+            'total_budget' => 0,
+            'total_expenses' => 0,
+            'remaining_budget' => 0
+        ];
         
-        // Add to projects array (receiver sees sent copy)
+        $seenSentIds[$row['sent_id']] = true;
         $projects[] = $row;
     }
 
     // ============================================================
     // PART 3: SENT PROJECTS - SENDER ANAONA ZILE ALIZOTUMA (HISTORY)
     // ============================================================
-    // Department ambayo imetuma project (from_department_id = sender)
-    // Hawa ndio SENDER wa sent project (wanaona historia ya kutuma)
-    // LAKINI - SKIP IKIWA ORIGINAL PROJECT IPO
-    // is_deleted = 0 ONLY
-    
+    // SKIP IKIWA ORIGINAL PROJECT IPO - SENDER HAONI COPY
+    // ============================================================
     $query = "SELECT 
                 sp.id as sent_id,
                 sp.original_project_id,
@@ -246,8 +199,6 @@ try {
                 sp.project_name,
                 sp.project_type,
                 sp.amount,
-                sp.daily_work_count,
-                sp.daily_work_summary,
                 sp.is_deleted,
                 sp.deleted_at,
                 sp.original_sender_id,
@@ -258,8 +209,8 @@ try {
                 'sent_from' as source_type,
                 1 as is_sent,
                 0 as is_received,
-                0 as is_original,
                 1 as is_sent_copy,
+                0 as is_original,
                 sp.from_department_name as sent_from_name,
                 sp.to_department_name as sent_to_name,
                 0 as _is_unviewed
@@ -271,18 +222,13 @@ try {
     $stmt = $pdo->prepare($query);
     $stmt->execute([$department_id]);
     while ($row = $stmt->fetch()) {
-        // ============================================================
-        // SKIP if original project already exists (sender sees original)
-        // Hii inazuia sender kuona sent copy - anabaki na original tu
-        // ============================================================
+        // SKIP if original exists (sender sees original instead)
         if (isset($originalIds[$row['original_project_id']])) {
-            // Sender anaona original, haitaki kuona duplicate
-            // Tuna skip hii sent record
             continue;
         }
         
-        // SKIP if already added as sent (receiver view)
-        if (isset($sentIds[$row['sent_id']])) {
+        // SKIP if already added as sent
+        if (isset($seenSentIds[$row['sent_id']])) {
             continue;
         }
         
@@ -298,9 +244,6 @@ try {
                 if (isset($projectData['forward_chain'])) {
                     $row['forward_chain'] = $projectData['forward_chain'];
                 }
-                if (isset($projectData['original_sender_name'])) {
-                    $row['original_sender_name'] = $projectData['original_sender_name'];
-                }
             }
         }
         unset($row['project_data']);
@@ -308,114 +251,51 @@ try {
         $row['id'] = $row['original_project_id'];
         $row['_display_id'] = $row['sent_id'];
         
-        // Add to projects array (sender sees sent history)
+        // NO DAILY WORK
+        $row['daily_work'] = [];
+        $row['daily_work_count'] = 0;
+        $row['daily_work_summary'] = [
+            'total_records' => 0,
+            'total_budget' => 0,
+            'total_expenses' => 0,
+            'remaining_budget' => 0
+        ];
+        
         $projects[] = $row;
     }
 
     // ============================================================
-    // PART 4: GET DAILY WORK FOR EACH PROJECT
+    // PART 4: GET DAILY WORK - ONLY FOR ORIGINAL PROJECTS (SENDER)
     // ============================================================
     foreach ($projects as &$project) {
-        $projectId = $project['id'];
-        $projectName = $project['name'] ?? $project['project_name'] ?? '';
-        $sourceType = $project['source_type'];
-        
-        $dailyWork = [];
-        
-        if ($sourceType === 'original') {
-            // Original project - get from dailywork table
-            $dwQuery = "SELECT 
-                          d.*,
-                          'original' as source_type,
-                          0 as is_sent_copy
-                        FROM dailywork d
-                        WHERE d.project_id = ? 
-                          AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
-                        ORDER BY d.date DESC";
+        if ($project['source_type'] === 'original') {
+            // Only original projects get daily work
+            $projectId = $project['id'];
+            $dwQuery = "SELECT * FROM dailywork 
+                        WHERE project_id = ? 
+                          AND (is_deleted = 0 OR is_deleted IS NULL)
+                        ORDER BY date DESC";
             $dwStmt = $pdo->prepare($dwQuery);
             $dwStmt->execute([$projectId]);
             $dailyWork = $dwStmt->fetchAll();
             
-        } else if ($sourceType === 'sent' || $sourceType === 'sent_from') {
-            // Sent project - first try to get from sent_dailywork
-            $dwQuery = "SELECT 
-                          sd.*,
-                          'sent' as source_type,
-                          1 as is_sent_copy
-                        FROM sent_dailywork sd
-                        WHERE sd.dailywork_project_name = ?
-                          AND sd.to_department_id = ?
-                          AND (sd.is_deleted = 0 OR sd.is_deleted IS NULL)
-                        ORDER BY sd.sent_at DESC";
-            $dwStmt = $pdo->prepare($dwQuery);
-            $dwStmt->execute([$projectName, $department_id]);
-            $dailyWork = $dwStmt->fetchAll();
-            
-            // If no sent dailywork found, try original dailywork
-            if (empty($dailyWork)) {
-                $dwQuery = "SELECT 
-                              d.*,
-                              'original' as source_type,
-                              0 as is_sent_copy
-                            FROM dailywork d
-                            WHERE d.project_id = ? 
-                              AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
-                            ORDER BY d.date DESC";
-                $dwStmt = $pdo->prepare($dwQuery);
-                $dwStmt->execute([$projectId]);
-                $dailyWork = $dwStmt->fetchAll();
+            $totalBudget = 0;
+            $totalExpenses = 0;
+            foreach ($dailyWork as $dw) {
+                $totalBudget += floatval($dw['budget'] ?? 0);
+                $totalExpenses += floatval($dw['amount'] ?? 0);
             }
             
-            // If still no dailywork, try from project_data
-            if (empty($dailyWork) && isset($project['daily_work_records'])) {
-                $dailyWork = $project['daily_work_records'];
-            }
+            $project['daily_work'] = $dailyWork;
+            $project['daily_work_summary'] = [
+                'total_records' => count($dailyWork),
+                'total_budget' => $totalBudget,
+                'total_expenses' => $totalExpenses,
+                'remaining_budget' => $totalBudget - $totalExpenses
+            ];
+            $project['daily_work_count'] = count($dailyWork);
         }
-        
-        // Calculate totals
-        $totalBudget = 0;
-        $totalExpenses = 0;
-        $totalIncome = 0;
-        $totalAmount = 0;
-        $completedCount = 0;
-        $partialCount = 0;
-        $pendingCount = 0;
-        
-        foreach ($dailyWork as $dw) {
-            $budget = floatval($dw['budget'] ?? $dw['dailywork_budget'] ?? 0);
-            $amount = floatval($dw['amount'] ?? $dw['dailywork_amount'] ?? 0);
-            $income = floatval($dw['income'] ?? 0);
-            $status = $dw['status'] ?? $dw['dailywork_status'] ?? 'pending';
-            
-            $totalBudget += $budget;
-            $totalExpenses += $amount;
-            $totalIncome += $income;
-            $totalAmount += $amount;
-            
-            if ($status === 'completed' || $status === 'Completed') {
-                $completedCount++;
-            } else if ($status === 'partial' || $status === 'Partial') {
-                $partialCount++;
-            } else {
-                $pendingCount++;
-            }
-        }
-        
-        $remainingBudget = $totalBudget - $totalExpenses;
-        
-        $project['daily_work'] = $dailyWork;
-        $project['daily_work_summary'] = [
-            'total_records' => count($dailyWork),
-            'total_budget' => $totalBudget,
-            'total_expenses' => $totalExpenses,
-            'total_income' => $totalIncome,
-            'total_amount' => $totalAmount,
-            'remaining_budget' => $remainingBudget,
-            'completed' => $completedCount,
-            'partial' => $partialCount,
-            'pending' => $pendingCount
-        ];
-        $project['daily_work_count'] = count($dailyWork);
+        // Sent projects already have no daily work
     }
 
     // ============================================================
@@ -427,23 +307,16 @@ try {
     $sentCount = count(array_filter($projects, function($p) { 
         return $p['source_type'] === 'sent' || $p['source_type'] === 'sent_from'; 
     }));
-    
-    // Count unviewed
-    $unviewedCount = count(array_filter($projects, function($p) { 
-        return isset($p['_is_unviewed']) && $p['_is_unviewed'] == 1; 
-    }));
 
     sendJson([
         'success' => true,
         'data' => $projects,
         'count' => count($projects),
         'department_id' => $department_id,
-        'unviewed_count' => $unviewedCount,
         'debug' => [
             'original_count' => $originalCount,
             'sent_count' => $sentCount,
-            'note' => 'Sender sees original only. Receiver sees sent copies only. Deleted projects are hidden.',
-            'forwarding_supported' => true
+            'note' => 'Sender sees original with daily work. Receiver sees sent project WITHOUT daily work.'
         ],
         'message' => 'Projects retrieved successfully'
     ]);
