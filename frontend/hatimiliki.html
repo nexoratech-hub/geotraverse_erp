@@ -1418,25 +1418,12 @@ function getProjectStatusText(s) {
     return map[s] || s; 
 }
 
+// ============================================================
+// LOAD TITLE DEEDS - FIXED (Show Sent Badge)
+// ============================================================
 function loadTitleDeeds() {
     Promise.all([fetchProjects(), fetchTitleDeedDocuments(), fetchDailyWork(), getUnviewedNotificationsCount()]).then(function() {
         console.log('📋 loadTitleDeeds - projects:', projects.length);
-        console.log('📋 loadTitleDeeds - dailyworkData:', dailyworkData.length);
-        
-        // ============================================================
-        // HESABU DAILY WORK SUMMARIES KWA PROJECT CARDS
-        // ============================================================
-        var projectDailyCounts = {};
-        for (var i = 0; i < dailyworkData.length; i++) {
-            var w = dailyworkData[i];
-            var key = w.project_id || w.project_name;
-            if (key) {
-                var keyStr = String(key);
-                if (!projectDailyCounts[keyStr]) projectDailyCounts[keyStr] = 0;
-                projectDailyCounts[keyStr]++;
-            }
-        }
-        console.log('📋 Daily counts by project:', projectDailyCounts);
         
         var html = '<div class="tab-container">' +
             '<button class="tab-button ' + (currentProjectTab === 'added' ? 'active' : '') + '" onclick="switchProjectTab(\'added\')"><i class="fas fa-plus-circle mr-1"></i> Added Title Deeds <span class="tab-count">' + projects.length + '</span></button>' +
@@ -1454,6 +1441,7 @@ function loadTitleDeeds() {
             '</div>' +
             '<div class="projects-grid" id="projectsGrid"></div>';
         } else {
+            // Uploaded documents tab - unchanged
             html += '<div class="flex flex-wrap justify-between items-center gap-3 mb-4">' +
                 '<h2 class="text-xl font-bold"><i class="fas fa-file-upload text-emerald-600 mr-2"></i>Uploaded Documents (' + titleDeedDocuments.length + ')</h2>' +
                 '<div class="flex flex-wrap gap-2">' +
@@ -1476,35 +1464,44 @@ function loadTitleDeeds() {
             var gridHtml = '';
             for (var j = 0; j < projects.length; j++) {
                 var p = projects[j];
-                var isNew = p.sent_from_dept && 
-                           p.sent_from_dept != DEPARTMENT_ID && 
-                           p.sent_to_dept === DEPARTMENT_ID && 
-                           (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) &&
-                           viewedProjectIds.indexOf(p.id) === -1;
+                
+                // ============================================================
+                // CHECK IF SENT - For badge and styling
+                // ============================================================
+                var isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+                var isNew = isSent && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && viewedProjectIds.indexOf(p.id) === -1;
                 var imageUrl = getFullImageUrl(p.image);
                 
                 // ============================================================
-                // HESABU DAILY WORK COUNT KWA PROJECT HII
+                // SENT BADGE
                 // ============================================================
-                var dailyCount = dailyworkData.filter(function(w) {
-                    if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
-                    if (w.project_name && w.project_name === p.name) return true;
-                    return false;
-                }).length;
-                
-                var dailyBadge = '';
-                if (dailyCount > 0) {
-                    dailyBadge = '<span class="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full ml-2"><i class="fas fa-calendar-day mr-1"></i>' + dailyCount + ' records</span>';
+                var sentBadge = '';
+                if (isSent) {
+                    var fromDept = departmentNames[p.sent_from_dept] || 'Unknown';
+                    sentBadge = '<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> From ' + escapeHtml(fromDept) + '</span>';
                 }
                 
-                var sentFrom = '';
-                if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
-                    sentFrom = '<span class="text-[9px] text-purple-600 ml-2"><i class="fas fa-paper-plane mr-1"></i>From ' + escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown') + '</span>';
+                // ============================================================
+                // DAILY WORK COUNT - Only for original projects
+                // ============================================================
+                var dailyCount = 0;
+                if (!isSent) {
+                    dailyCount = dailyworkData.filter(function(w) {
+                        if (w.project_id && parseInt(w.project_id) === parseInt(p.id)) return true;
+                        if (w.project_name && w.project_name === p.name) return true;
+                        return false;
+                    }).length;
+                }
+                
+                var dailyBadge = '';
+                if (dailyCount > 0 && !isSent) {
+                    dailyBadge = '<span class="text-[8px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full ml-1"><i class="fas fa-calendar-day mr-0.5"></i> ' + dailyCount + ' records</span>';
                 }
                 
                 gridHtml += '<div class="project-card" id="proj-card-' + p.id + '" onclick="viewTitleDeed(' + p.id + ')">' +
-                    '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + ' ' + dailyBadge + sentFrom + '</p></div>' +
+                    '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + ' ' + sentBadge + dailyBadge + '</p></div>' +
                     (isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : '') +
+                    (isSent ? '<div style="position:absolute;top:45px;right:10px;background:#f59e0b;color:white;font-size:7px;padding:1px 8px;border-radius:10px;z-index:15;"><i class="fas fa-paper-plane mr-0.5"></i> Received</div>' : '') +
                     '<div class="project-image-wrapper">' +
                         (imageUrl ? '<img src="' + imageUrl + '?t=' + Date.now() + '" class="project-image" onclick="event.stopPropagation(); showFullImage(\'' + imageUrl + '\')" onerror="this.style.display=\'none\'; this.parentElement.querySelector(\'.no-image\').style.display=\'flex\';">' : '') +
                         '<div class="no-image" ' + (imageUrl ? 'style="display:none;"' : '') + '><i class="fas fa-file-image text-3xl"></i><p class="text-xs mt-1">No Image</p></div>' +
@@ -1518,8 +1515,11 @@ function loadTitleDeeds() {
                         '<div class="mt-2"><div class="flex justify-between text-xs"><span>Progress</span><span>' + (p.progress || 0) + '%</span></div><div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-emerald-600 h-1.5 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div></div>' +
                         '<div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">' +
                             '<button onclick="event.stopPropagation(); viewTitleDeed(' + p.id + ')" class="action-btn view"><i class="fas fa-eye"></i>View</button>' +
-                            '<button onclick="event.stopPropagation(); editTitleDeed(' + p.id + ')" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button>' +
-                            '<button onclick="event.stopPropagation(); deleteTitleDeed(' + p.id + ')" class="action-btn delete"><i class="fas fa-trash"></i>Delete</button>' +
+                            (isSent ? 
+                                '<span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>' :
+                                '<button onclick="event.stopPropagation(); editTitleDeed(' + p.id + ')" class="action-btn edit"><i class="fas fa-edit"></i>Edit</button>' +
+                                '<button onclick="event.stopPropagation(); deleteTitleDeed(' + p.id + ')" class="action-btn delete"><i class="fas fa-trash"></i>Delete</button>'
+                            ) +
                         '</div>' +
                         '<div class="user-info">Created by: ' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div>' +
                     '</div>' +
@@ -1528,7 +1528,7 @@ function loadTitleDeeds() {
             document.getElementById("projectsGrid").innerHTML = gridHtml;
             
         } else {
-            // UPLOADED DOCUMENTS - code unchanged
+            // Uploaded documents - unchanged
             if (titleDeedDocuments.length === 0) {
                 document.getElementById("uploadedDocsGrid").innerHTML = '<div class="col-span-3 text-center py-12 text-gray-400">No uploaded documents. Click "Upload Document" to add one.</div>';
                 return;
@@ -1562,6 +1562,7 @@ function loadTitleDeeds() {
         updateProjectBadge();
     });
 }
+
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadTitleDeeds();
@@ -1662,28 +1663,114 @@ function saveProjectRequest(id, name, imagePath) {
     });
 }
 
+// ============================================================
+// DELETE TITLE DEED - FIXED (Universal - Inafanya kazi kwa zote)
+// ============================================================
 function deleteTitleDeed(id) {
-    if (confirm('Delete this title deed?')) {
-        var p = projects.find(function(proj) { return proj.id === id; });
-        if (p) {
-            addToRecycleBin(id, 'project', p.name).then(function() {
-                apiCall('delete_project.php', 'POST', { 
-                    project_id: id, 
-                    department_id: DEPARTMENT_ID, 
-                    is_admin: 0 
-                }).then(function(res) {
-                    if (res.success) {
-                        showToast('Deleted');
-                        loadTitleDeeds();
-                        loadDashboard();
-                    } else {
-                        showToast(res.message || 'Failed', true);
-                    }
-                });
-            });
-        }
+    // Find the project
+    var p = projects.find(function(proj) { return proj.id === id; });
+    if (!p) {
+        showToast('Title deed not found', true);
+        return;
     }
+    
+    // ============================================================
+    // CHECK PROJECT TYPE
+    // ============================================================
+    var isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+    var isOriginal = !isSent && p.source_type === 'original';
+    
+    var confirmMessage = 'Delete this title deed? It will be removed from your dashboard.';
+    if (isSent) {
+        confirmMessage = '⚠️ Delete this title deed copy? This will only remove it from YOUR dashboard. The original title deed will remain with the sender.';
+    } else if (isOriginal) {
+        confirmMessage = '⚠️ Delete this original title deed? This will move it to the recycle bin. Receivers will still have their copies.';
+    }
+    
+    if (!confirm(confirmMessage)) return;
+    
+    // Show loading state on card
+    var card = document.getElementById('proj-card-' + id);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
+    // Add to recycle bin first
+    addToRecycleBin(id, 'project', p.name).then(function() {
+        // Use the correct ID for deletion
+        var deleteId = (p.source_type === 'sent' || p.source_type === 'sent_from') ? 
+                        (p.sent_id || p.id) : p.id;
+        
+        apiCall('delete_project.php', 'POST', { 
+            project_id: parseInt(deleteId), 
+            department_id: DEPARTMENT_ID,
+            deleted_by: CURRENT_USER || 'System'
+        }).then(function(res) {
+            if (res && res.success) {
+                showToast(res.message || 'Title deed deleted successfully');
+                addLog('Title deed deleted: ' + p.name);
+                
+                // Remove from local data
+                projects = projects.filter(function(proj) {
+                    if (proj.id === p.id) return false;
+                    if (proj.sent_id === p.sent_id) return false;
+                    if (proj.original_project_id === p.id && proj.source_type === 'sent') return false;
+                    return true;
+                });
+                
+                // Remove card
+                if (card) {
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        if (card.parentNode) card.remove();
+                    }, 300);
+                }
+                
+                // Refresh data
+                loadTitleDeeds();
+                loadDashboard();
+            } else {
+                // Still remove from UI
+                projects = projects.filter(function(proj) {
+                    if (proj.id === p.id) return false;
+                    if (proj.sent_id === p.sent_id) return false;
+                    return true;
+                });
+                if (card) {
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        if (card.parentNode) card.remove();
+                    }, 300);
+                }
+                showToast(res?.message || 'Title deed removed from view', false);
+                loadTitleDeeds();
+                loadDashboard();
+            }
+        }).catch(function(e) {
+            console.error('Delete error:', e);
+            // Fallback: remove from UI
+            projects = projects.filter(function(proj) {
+                if (proj.id === p.id) return false;
+                if (proj.sent_id === p.sent_id) return false;
+                return true;
+            });
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(function() {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            showToast('Network error: ' + e.message, true);
+            loadTitleDeeds();
+            loadDashboard();
+        });
+    });
 }
+
 async function getCurrentUser() {
     try {
         const res = await apiCall('get_current_user.php');
@@ -1726,13 +1813,32 @@ async function loadUserInfo() {
         console.log('Error loading user info:', e);
     }
 }
-// ==================== SEND TITLE DEED - WITH FORWARD SUPPORT ====================
+// ============================================================
+// SEND TITLE DEED - FIXED (Only Original Projects)
+// ============================================================
 function sendTitleDeedToDept(projectId, toDeptId) {
     var p = projects.find(function(proj) { return proj.id === projectId; });
     if (!p) {
         showToast('Title deed not found', true);
         return;
     }
+    
+    // ============================================================
+    // CHECK IF PROJECT IS SENT (Received from other department)
+    // ============================================================
+    var isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+    
+    if (isSent) {
+        showToast('❌ You cannot send a title deed that was received from another department. Only title deeds created by your department can be sent.', true);
+        return;
+    }
+    
+    // Also check if source_type is 'sent' or 'sent_from'
+    if (p.source_type === 'sent' || p.source_type === 'sent_from') {
+        showToast('❌ You cannot send a title deed copy. Only original title deeds can be sent.', true);
+        return;
+    }
+    
     if (toDeptId == DEPARTMENT_ID) {
         showToast('Cannot send to your own department', true);
         return;
@@ -1749,7 +1855,12 @@ function sendTitleDeedToDept(projectId, toDeptId) {
     }
     
     fetchDailyWork().then(function() {
-        var projectDailyWork = dailyworkData.filter(function(w) { return w.project_id == projectId; });
+        var projectDailyWork = dailyworkData.filter(function(w) { 
+            if (w.project_id && parseInt(w.project_id) === parseInt(projectId)) return true;
+            if (w.project_name && w.project_name === p.name) return true;
+            return false;
+        });
+        
         var totalBudget = 0, totalExpenses = 0;
         for (var i = 0; i < projectDailyWork.length; i++) {
             var w = projectDailyWork[i];
@@ -1788,7 +1899,7 @@ function sendTitleDeedToDept(projectId, toDeptId) {
             sent_by: CURRENT_USER,
             from_department_name: departmentNames[DEPARTMENT_ID] || 'Hatimiliki',
             duplicate_send: true,
-            is_forwarded: p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID ? 1 : 0,
+            is_forwarded: 0,
             project_data: {
                 id: p.id,
                 name: p.name,
@@ -1805,8 +1916,8 @@ function sendTitleDeedToDept(projectId, toDeptId) {
                 created_by: p.created_by || CURRENT_USER,
                 created_at: p.created_at,
                 sent_count: (p.sent_count || 0) + 1,
-                is_forwarded: p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID ? 1 : 0,
-                original_sender: p.sent_from_dept || DEPARTMENT_ID,
+                is_forwarded: 0,
+                original_sender: DEPARTMENT_ID,
                 daily_summary: {
                     total_budget: totalBudget,
                     total_expenses: totalExpenses,
@@ -1819,9 +1930,8 @@ function sendTitleDeedToDept(projectId, toDeptId) {
         
         apiCall('send_project_advanced.php', 'POST', payload).then(function(res) {
             if (res && res.success) {
-                var forwardText = (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) ? ' (Forwarded)' : '';
-                showToast('✅ Title deed "' + p.name + '" sent to ' + deptName + forwardText, false);
-                addLog('Title deed sent: "' + p.name + '" to ' + deptName + forwardText);
+                showToast('✅ Title deed "' + p.name + '" sent to ' + deptName, false);
+                addLog('Title deed sent: "' + p.name + '" to ' + deptName);
                 
                 p.sent_to_dept = toDeptId;
                 p.sent_from_dept = DEPARTMENT_ID;
@@ -1829,9 +1939,8 @@ function sendTitleDeedToDept(projectId, toDeptId) {
                 p.sent_count = (p.sent_count || 0) + 1;
                 p.last_sent_at = new Date().toISOString();
                 p.is_sent = 1;
-                p.is_original = 1;
                 
-                addNotification(toDeptId, 'project', p.id, p.name, 'Title deed sent to your department' + forwardText);
+                addNotification(toDeptId, 'project', p.id, p.name, 'Title deed sent to your department');
                 getUnviewedNotificationsCount();
                 
                 loadTitleDeeds();
@@ -1852,8 +1961,9 @@ function sendTitleDeedToDept(projectId, toDeptId) {
         });
     });
 }
-
-// ==================== VIEW TITLE DEED WITH NOTIFICATION ====================
+// ============================================================
+// VIEW TITLE DEED - FIXED (Sent = View Only, Original = Full)
+// ============================================================
 function viewTitleDeed(id) {
     var p = projects.find(function(proj) { return proj.id === id; });
     if (!p) {
@@ -1862,15 +1972,23 @@ function viewTitleDeed(id) {
     }
     
     console.log('📋 Viewing title deed:', p.name, 'ID:', p.id);
+    console.log('📋 Project source_type:', p.source_type);
     console.log('📋 Project sent_from_dept:', p.sent_from_dept);
-    console.log('📋 Project is_viewed_by_department:', p.is_viewed_by_department);
     
-    if (p.sent_from_dept && p.sent_from_dept !== DEPARTMENT_ID && 
-        (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null)) {
+    // ============================================================
+    // CHECK PROJECT TYPE
+    // ============================================================
+    var isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+    var isOriginal = !isSent && p.source_type === 'original';
+    
+    console.log('📋 isSent:', isSent);
+    console.log('📋 isOriginal:', isOriginal);
+    
+    // Mark as viewed if sent from another department
+    if (isSent && (p.is_viewed_by_department === 0 || p.is_viewed_by_department === null)) {
         markProjectAsViewed(id);
         p.is_viewed_by_department = 1;
         p._is_unviewed = false;
-        // Remove NEW badge
         var card = document.getElementById('proj-card-' + id);
         if (card) {
             var badge = card.querySelector('.new-badge');
@@ -1881,7 +1999,7 @@ function viewTitleDeed(id) {
     currentProjectId = id;
     
     // ============================================================
-    // LOAD DAILY WORK KWA PROJECT HII
+    // GET DAILY WORK - ONLY FOR ORIGINAL PROJECTS
     // ============================================================
     fetchDailyWork().then(function() {
         console.log('📋 Daily work loaded, calling loadDailyWorkForProject...');
@@ -1901,8 +2019,15 @@ function viewTitleDeed(id) {
         if (summary) {
             summary.style.display = 'grid';
         }
+        // ============================================================
+        // HIDE ADD BUTTON FOR SENT PROJECTS
+        // ============================================================
         if (addBtn) {
-            addBtn.style.display = 'inline-flex';
+            if (isSent) {
+                addBtn.style.display = 'none';
+            } else {
+                addBtn.style.display = 'inline-flex';
+            }
         }
         if (excelBtn) {
             excelBtn.style.display = 'inline-flex';
@@ -1911,28 +2036,55 @@ function viewTitleDeed(id) {
             pdfBtn.style.display = 'inline-flex';
         }
         if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+            toggleBtn.innerHTML = isSent ? 
+                '<i class="fas fa-eye mr-1"></i> View Daily Work (Read Only)' : 
+                '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
         }
     });
     
+    // ============================================================
+    // GET IMAGE
+    // ============================================================
     var imageUrl = getFullImageUrl(p.image);
-    var imageHtml = imageUrl ? '<img src="' + imageUrl + '?t=' + Date.now() + '" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage(\'' + imageUrl + '\')" onerror="this.parentElement.innerHTML=\'<div class=\'w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded\'><i class=\'fas fa-image text-3xl text-gray-400\'></i><p class=\'text-sm ml-2\'>Image failed to load</p></div>\'">' : '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded"><i class="fas fa-image text-3xl text-gray-400"></i></div>';
-    
-    var deptOptions = '';
-    allDepartments.forEach(function(d) {
-        deptOptions += '<a onclick="sendTitleDeedToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-    });
-    
-    var sentInfo = '';
-    if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
-        var fromDept = departmentNames[p.sent_from_dept] || 'Unknown';
-        sentInfo = '<p><strong>Received From:</strong> ' + escapeHtml(fromDept) + ' <span class="text-[9px] text-emerald-600">(Sent ' + formatDateTime(p.last_sent_at || p.created_at) + ')</span></p>';
-        if (p.sent_count && p.sent_count > 1) {
-            sentInfo += '<p><strong>Times Sent:</strong> ' + p.sent_count + ' times</p>';
-        }
+    var isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png)$/i));
+    var imageHtml = '';
+    if (imageUrl && isImage) {
+        imageHtml = '<div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;overflow:hidden;cursor:pointer;" onclick="showFullImage(\'' + imageUrl + '\')">' +
+            '<img src="' + imageUrl + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML=\'<div style=\\\'display:flex;align-items:center;justify-content:center;height:100%;\\\'><i class=\\\'fas fa-image text-4xl text-gray-400\\\'></i><p class=\\\'text-sm text-gray-500 ml-2\\\'>Image failed to load</p></div>\'">' +
+            '</div>';
+    } else {
+        imageHtml = '<div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;">' +
+            '<i class="fas fa-image text-4xl text-gray-400"></i>' +
+            '<p class="text-sm text-gray-500 ml-2">No Image Available</p>' +
+            '</div>';
     }
     
-    document.getElementById('viewProjectContent').innerHTML = imageHtml +
+    // ============================================================
+    // SENT BADGE - For received projects
+    // ============================================================
+    var sentBadgeHtml = '';
+    var fromDeptName = '';
+    if (isSent) {
+        fromDeptName = departmentNames[p.sent_from_dept] || 'Unknown';
+        sentBadgeHtml = '<div style="background: #fef3c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">' +
+            '<i class="fas fa-paper-plane text-orange-600 mr-2"></i>' +
+            '<span style="font-weight: 600; color: #d97706;">' +
+            'This title deed was received from <strong>' + escapeHtml(fromDeptName) + '</strong>' +
+            '</span>' +
+            '<br>' +
+            '<span style="font-size: 11px; color: #92400e;">' +
+            '<i class="fas fa-info-circle mr-1"></i>' +
+            'You can view details and export reports. ' +
+            'Daily work records are not available for received title deeds.' +
+            '</span>' +
+            '</div>';
+    }
+    
+    // ============================================================
+    // BUILD DETAILS HTML
+    // ============================================================
+    var detailsHtml = sentBadgeHtml +
+        imageHtml +
         '<div class="space-y-2">' +
             '<p><strong>Reference:</strong> ' + escapeHtml(p.name) + '</p>' +
             '<p><strong>Owner:</strong> ' + escapeHtml(p.client_name || 'N/A') + '</p>' +
@@ -1943,19 +2095,106 @@ function viewTitleDeed(id) {
             '<p><strong>Start:</strong> ' + (p.start_date || 'N/A') + '</p>' +
             '<p><strong>End:</strong> ' + (p.end_date || 'N/A') + '</p>' +
             '<p><strong>Desc:</strong> ' + escapeHtml(p.description || '') + '</p>' +
-            sentInfo +
+            (isSent ? '<p><strong>Received From:</strong> <span class="from-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(fromDeptName) + '</span></p>' : '') +
         '</div>';
     
-    var forwardLabel = (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) ? ' ⤴️ Forward' : '';
+    document.getElementById('viewProjectContent').innerHTML = detailsHtml;
     
-    document.getElementById('viewProjectButtons').innerHTML = 
+    // ============================================================
+    // BUILD BUTTONS - DIFFERENT FOR SENT VS ORIGINAL
+    // ============================================================
+    var buttonsHtml = '';
+    
+    // ============================================================
+    // BASE BUTTONS - Excel, PDF, View Image (For ALL)
+    // ============================================================
+    buttonsHtml += 
         '<button onclick="exportSingleProjectExcel(' + p.id + ')" class="btn-success"><i class="fas fa-file-excel mr-1"></i>Excel</button>' +
-        '<button onclick="exportSingleProjectPDF(' + p.id + ')" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button>' +
-        (imageUrl ? '<button onclick="showFullImage(\'' + imageUrl + '\')" class="btn-primary"><i class="fas fa-image mr-1"></i>Image</button>' : '') +
-        '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projectSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane mr-1"></i>Send' + forwardLabel + '</button><div id="projectSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+        '<button onclick="exportSingleProjectPDF(' + p.id + ')" class="btn-pdf"><i class="fas fa-file-pdf mr-1"></i>PDF</button>';
+    
+    // View Image button - only if image exists
+    if (imageUrl && isImage) {
+        buttonsHtml += '<button onclick="showFullImage(\'' + imageUrl + '\')" class="btn-primary"><i class="fas fa-image mr-1"></i>View Image</button>';
+    }
+    
+    // ============================================================
+    // ORIGINAL PROJECTS - ADD Send, Edit, Delete buttons
+    // ============================================================
+    if (isOriginal) {
+        // Send dropdown
+        var deptOptions = '';
+        allDepartments.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += '<a onclick="sendTitleDeedToDept(' + p.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
+            }
+        });
+        
+        buttonsHtml += 
+            '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'projectSendDropdown-' + p.id + '\')"><i class="fas fa-paper-plane mr-1"></i>Send</button><div id="projectSendDropdown-' + p.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>' +
+            '<button onclick="editTitleDeed(' + p.id + ')" class="btn-warning"><i class="fas fa-edit mr-1"></i>Edit</button>' +
+            '<button onclick="deleteTitleDeed(' + p.id + ')" class="btn-danger"><i class="fas fa-trash mr-1"></i>Delete</button>';
+    } else {
+        // ============================================================
+        // SENT PROJECTS - Show "Cannot Forward" + View Only message
+        // ============================================================
+        buttonsHtml += 
+            '<div style="display: inline-block; position: relative;">' +
+                '<button class="dropdown-trigger" style="background: #9ca3af; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: not-allowed; display: inline-flex; align-items: center; gap: 6px; opacity: 0.6;" title="You cannot send a title deed received from another department">' +
+                    '<i class="fas fa-ban"></i> Cannot Forward' +
+                '</button>' +
+            '</div>' +
+            '<div style="width:100%;text-align:center;margin-top:5px;padding-top:5px;">' +
+                '<span style="font-size:9px;color:#9ca3af;">' +
+                    '<i class="fas fa-info-circle mr-1"></i>' +
+                    'Only title deeds created by your department can be sent' +
+                '</span>' +
+            '</div>';
+    }
+    
+    document.getElementById('viewProjectButtons').innerHTML = buttonsHtml;
+    
+    // ============================================================
+    // UPDATE DAILY WORK SECTION - HIDE FOR SENT PROJECTS
+    // ============================================================
+    var dailyWorkSection = document.querySelector('.daily-work-section');
+    var dailyWorkSummary = document.getElementById('dailyWorkSummary');
+    var dailyWorkContainer = document.getElementById('dailyWorkListContainer');
+    var addBtn = document.getElementById('addDailyWorkBtn');
+    var toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    
+    if (isSent) {
+        // Hide daily work for sent projects
+        if (dailyWorkSummary) dailyWorkSummary.style.display = 'none';
+        if (dailyWorkContainer) dailyWorkContainer.style.display = 'none';
+        if (addBtn) addBtn.style.display = 'none';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-eye mr-1"></i> View Daily Work (Read Only)';
+            toggleBtn.style.display = 'inline-flex';
+        }
+        // Show message that daily work is not available
+        var contentDiv = document.getElementById('viewProjectContent');
+        if (contentDiv) {
+            contentDiv.innerHTML += '<div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #f59e0b;">' +
+                '<i class="fas fa-info-circle text-orange-600 mr-2"></i>' +
+                '<span style="font-weight: 600; color: #d97706;">' +
+                'Daily work records are only visible for title deeds created by your department.' +
+                '</span>' +
+                '</div>';
+        }
+    } else {
+        // Show daily work for original projects
+        if (dailyWorkSummary) dailyWorkSummary.style.display = 'grid';
+        if (dailyWorkContainer) dailyWorkContainer.style.display = 'block';
+        if (addBtn) addBtn.style.display = 'inline-flex';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+            toggleBtn.style.display = 'inline-flex';
+        }
+    }
     
     openModal('viewProjectModal');
 }
+
 function loadDailyWorkForProject(projectId) {
     var project = projects.find(function(p) { return p.id === projectId; });
     if (!project) {

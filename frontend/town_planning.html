@@ -2484,43 +2484,122 @@ async function saveProject() {
 }
 
 // ============================================================
-// DELETE PROJECT - UNIVERSAL (Inafanya kazi kwa departments zote)
+// DELETE PROJECT - FIXED (Inatafuta Original na Sent Projects)
 // ============================================================
 async function deleteProject(id) {
-    // Get department ID from global variable
-    const deptId = window.DEPARTMENT_ID || 1;
-    const currentUser = window.CURRENT_USER || 'System';
-    
     if (!confirm('Delete this project? It will be removed from your dashboard.')) return;
     
-    console.log('🗑️ Deleting project ID:', id, 'Department:', deptId);
+    console.log('🗑️ Deleting project ID:', id);
+    console.log('📋 Current projectsData:', projectsData.length, 'projects');
     
     // ============================================================
-    // FIND PROJECT IN LOCAL DATA
+    // FIND PROJECT - MULTIPLE LOOKUP METHODS
     // ============================================================
     let p = null;
     
-    // Try different lookup methods
-    if (window.projectsData) {
-        p = window.projectsData.find(proj => proj.id === id);
-        if (!p) p = window.projectsData.find(proj => proj.sent_id === id);
-        if (!p) p = window.projectsData.find(proj => proj._display_id === id);
-        if (!p) p = window.projectsData.find(proj => proj.original_project_id === id && proj.source_type === 'sent');
+    // 1. Try by id
+    p = projectsData.find(proj => proj.id === id);
+    
+    // 2. Try by sent_id
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_id === id);
+    }
+    
+    // 3. Try by _display_id
+    if (!p) {
+        p = projectsData.find(proj => proj._display_id === id);
+    }
+    
+    // 4. Try by original_project_id (for sent projects)
+    if (!p) {
+        p = projectsData.find(proj => proj.original_project_id === id && 
+                                   (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 5. Try by to_department_id (for sent projects)
+    if (!p) {
+        p = projectsData.find(proj => proj.to_department_id === DEPARTMENT_ID && 
+                                   proj.original_project_id === id);
+    }
+    
+    // 6. Try by sent_from_dept
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_from_dept === DEPARTMENT_ID && 
+                                   proj.original_project_id === id);
+    }
+    
+    // 7. Try by project_name (if id matches original_project_id in sent projects)
+    if (!p) {
+        // Find any sent project with this original_project_id
+        const sentMatches = projectsData.filter(proj => 
+            proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from')
+        );
+        if (sentMatches.length > 0) {
+            p = sentMatches[0];
+        }
+    }
+    
+    // 8. Last resort: check if any project has this id as a number
+    if (!p) {
+        const idNum = parseInt(id);
+        if (!isNaN(idNum)) {
+            p = projectsData.find(proj => proj.id === idNum);
+            if (!p) {
+                p = projectsData.find(proj => proj.sent_id === idNum);
+            }
+            if (!p) {
+                p = projectsData.find(proj => proj.original_project_id === idNum);
+            }
+        }
+    }
+    
+    // ============================================================
+    // IF PROJECT NOT FOUND, TRY RELOADING DATA
+    // ============================================================
+    if (!p) {
+        console.warn('⚠️ Project not found in local data, refreshing...');
+        showToast('Refreshing project data...', false);
+        
+        await fetchProjects();
+        await loadProjects();
+        
+        // Try again after reload
+        p = projectsData.find(proj => proj.id === id);
+        if (!p) p = projectsData.find(proj => proj.sent_id === id);
+        if (!p) p = projectsData.find(proj => proj._display_id === id);
+        if (!p) p = projectsData.find(proj => proj.original_project_id === id);
     }
     
     if (!p) {
-        showToast('Project not found in local data', true);
+        console.error('❌ Project not found after reload:', id);
+        console.log('📋 Available projects:', projectsData.map(proj => ({
+            id: proj.id,
+            sent_id: proj.sent_id,
+            name: proj.name || proj.project_name,
+            type: proj.source_type
+        })));
+        showToast('❌ Project not found. Please refresh the page.', true);
         return;
     }
+    
+    console.log('✅ Project found:', {
+        id: p.id,
+        sent_id: p.sent_id,
+        name: p.name || p.project_name,
+        source_type: p.source_type,
+        sent_from_dept: p.sent_from_dept,
+        to_department_id: p.to_department_id,
+        department_id: p.department_id
+    });
     
     // ============================================================
     // CHECK PROJECT TYPE
     // ============================================================
-    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(deptId);
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
     const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
-    const isOriginal = p.source_type === 'original' || p.department_id === parseInt(deptId);
+    const isOriginal = p.source_type === 'original' || p.department_id === parseInt(DEPARTMENT_ID);
     
-    // Determine confirm message based on project type
     let confirmMessage = 'Delete this project? It will be removed from your dashboard.';
     if (isReceived || isSentCopy) {
         confirmMessage = '⚠️ Delete this project copy? This will only remove it from YOUR dashboard. The original project will remain with the sender.';
@@ -2533,30 +2612,34 @@ async function deleteProject(id) {
     // ============================================================
     // SHOW LOADING STATE
     // ============================================================
-    const card = document.getElementById(`proj-card-${id}`);
+    const cardId = p.sent_id || p.id;
+    const card = document.getElementById(`proj-card-${cardId}`);
     if (card) {
         card.style.opacity = '0.5';
         card.style.pointerEvents = 'none';
     }
     
-    // Also try to find by sent_id card
-    let cardBySentId = null;
-    if (p.sent_id) {
-        cardBySentId = document.getElementById(`proj-card-${p.sent_id}`);
-        if (cardBySentId) {
-            cardBySentId.style.opacity = '0.5';
-            cardBySentId.style.pointerEvents = 'none';
-        }
+    // Also try by original id
+    const origCard = document.getElementById(`proj-card-${p.id}`);
+    if (origCard && origCard !== card) {
+        origCard.style.opacity = '0.5';
+        origCard.style.pointerEvents = 'none';
     }
     
     try {
         // ============================================================
-        // CALL DELETE API
+        // CALL DELETE API - USE THE CORRECT ID
         // ============================================================
+        // For sent projects, use the sent_id, not original_project_id
+        const deleteId = (p.source_type === 'sent' || p.source_type === 'sent_from') ? 
+                         (p.sent_id || p.id) : p.id;
+        
+        console.log('📤 Sending delete request for ID:', deleteId, 'type:', p.source_type);
+        
         const res = await apiCall('delete_project.php', 'POST', {
-            project_id: parseInt(id),
-            department_id: parseInt(deptId),
-            deleted_by: currentUser || 'System'
+            project_id: parseInt(deleteId),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'System'
         });
         
         console.log('📤 Delete response:', res);
@@ -2570,47 +2653,42 @@ async function deleteProject(id) {
             addLog(`Project deleted: ${p.name || p.project_name || 'ID ' + id}`);
             
             // ============================================================
-            // REMOVE FROM LOCAL DATA COMPLETELY
+            // REMOVE FROM LOCAL DATA
             // ============================================================
-            if (window.projectsData) {
-                window.projectsData = window.projectsData.filter(project => {
-                    // Remove by id
-                    if (project.id === id) return false;
-                    // Remove by sent_id
-                    if (project.sent_id === id) return false;
-                    // Remove by _display_id
-                    if (project._display_id === id) return false;
-                    // Remove by original_project_id if it's a sent project for this department
-                    if (project.original_project_id === id && 
-                        project.to_department_id === parseInt(deptId) && 
-                        project.source_type === 'sent') return false;
-                    return true;
-                });
-            }
+            // Remove by id
+            projectsData = projectsData.filter(project => {
+                if (project.id === p.id) return false;
+                if (project.sent_id === p.sent_id) return false;
+                if (project._display_id === p._display_id) return false;
+                if (project.sent_id === id) return false;
+                if (project.id === id) return false;
+                // Remove by original_project_id if it's a sent project for this department
+                if (project.original_project_id === p.original_project_id && 
+                    project.to_department_id === parseInt(DEPARTMENT_ID) && 
+                    (project.source_type === 'sent' || project.source_type === 'sent_from')) return false;
+                return true;
+            });
             
             // ============================================================
             // REMOVE FROM DOM
             // ============================================================
-            // Remove main card
-            if (card) {
-                card.style.opacity = '0';
-                card.style.transform = 'scale(0.95)';
-                setTimeout(() => {
-                    if (card.parentNode) card.remove();
-                }, 300);
+            // Remove all related cards
+            const cardIds = [p.id, p.sent_id, p._display_id, cardId];
+            for (let cid of cardIds) {
+                if (cid) {
+                    const el = document.getElementById(`proj-card-${cid}`);
+                    if (el) {
+                        el.style.opacity = '0';
+                        el.style.transform = 'scale(0.95)';
+                        setTimeout(() => {
+                            if (el.parentNode) el.remove();
+                        }, 300);
+                    }
+                }
             }
             
-            // Remove sent_id card if exists
-            if (cardBySentId && cardBySentId !== card) {
-                cardBySentId.style.opacity = '0';
-                cardBySentId.style.transform = 'scale(0.95)';
-                setTimeout(() => {
-                    if (cardBySentId.parentNode) cardBySentId.remove();
-                }, 300);
-            }
-            
-            // Remove any other cards with this ID or sent_id
-            document.querySelectorAll(`[data-project-id="${id}"]`).forEach(el => {
+            // Remove any cards with data attributes
+            document.querySelectorAll(`[data-project-id="${p.id}"]`).forEach(el => {
                 el.style.opacity = '0';
                 el.style.transform = 'scale(0.95)';
                 setTimeout(() => {
@@ -2636,32 +2714,26 @@ async function deleteProject(id) {
             await loadDashboard();
             await loadRecycleBinFromDB();
             
-            // Update badges
             if (typeof updateProjectBadge === 'function') {
                 await updateProjectBadge();
             }
             
-            // If project details modal is open, close it
-            if (typeof closeModal === 'function') {
-                closeModal('viewProjectModal');
-                closeModal('viewProjectModal');
-            }
+            // Close modal
+            closeModal('viewProjectModal');
             
         } else {
             // ============================================================
-            // HANDLE API ERROR - Remove from UI anyway
+            // HANDLE API ERROR
             // ============================================================
             showToast('⚠️ ' + (res?.message || 'Project removed from view'), false);
             
             // Remove from local data anyway
-            if (window.projectsData) {
-                window.projectsData = window.projectsData.filter(project => {
-                    if (project.id === id) return false;
-                    if (project.sent_id === id) return false;
-                    if (project._display_id === id) return false;
-                    return true;
-                });
-            }
+            projectsData = projectsData.filter(project => {
+                if (project.id === p.id) return false;
+                if (project.sent_id === p.sent_id) return false;
+                if (project._display_id === p._display_id) return false;
+                return true;
+            });
             
             // Remove cards
             if (card) {
@@ -2669,14 +2741,6 @@ async function deleteProject(id) {
                 card.style.transform = 'scale(0.95)';
                 setTimeout(() => {
                     if (card.parentNode) card.remove();
-                }, 300);
-            }
-            
-            if (cardBySentId) {
-                cardBySentId.style.opacity = '0';
-                cardBySentId.style.transform = 'scale(0.95)';
-                setTimeout(() => {
-                    if (cardBySentId.parentNode) cardBySentId.remove();
                 }, 300);
             }
             
@@ -2689,32 +2753,20 @@ async function deleteProject(id) {
         console.error('Delete project error:', error);
         
         // ============================================================
-        // HANDLE NETWORK ERROR - Remove from UI anyway
+        // HANDLE NETWORK ERROR
         // ============================================================
-        // Remove from local data
-        if (window.projectsData) {
-            window.projectsData = window.projectsData.filter(project => {
-                if (project.id === id) return false;
-                if (project.sent_id === id) return false;
-                if (project._display_id === id) return false;
-                return true;
-            });
-        }
+        projectsData = projectsData.filter(project => {
+            if (project.id === p.id) return false;
+            if (project.sent_id === p.sent_id) return false;
+            if (project._display_id === p._display_id) return false;
+            return true;
+        });
         
-        // Remove cards
         if (card) {
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
             setTimeout(() => {
                 if (card.parentNode) card.remove();
-            }, 300);
-        }
-        
-        if (cardBySentId) {
-            cardBySentId.style.opacity = '0';
-            cardBySentId.style.transform = 'scale(0.95)';
-            setTimeout(() => {
-                if (cardBySentId.parentNode) cardBySentId.remove();
             }, 300);
         }
         
@@ -2725,6 +2777,7 @@ async function deleteProject(id) {
         await loadDashboard();
     }
 }
+
 // ============================================================
 // FORCE REFRESH PROJECTS - WITH CACHE BUSTER
 // ============================================================
@@ -2854,12 +2907,24 @@ function editProject(id) {
 }
 
 // ============================================================
-// VIEW PROJECT DETAILS - BUTTONS 3 TU (Town Planning)
+// VIEW PROJECT DETAILS - KAMILI
 // ============================================================
 async function viewProjectDetails(id) {
     console.log('📋 viewProjectDetails called with ID:', id);
     
-    const p = projectsData.find(proj => proj.id === id);
+    // Tafuta project katika projectsData
+    let p = projectsData.find(proj => proj.id === id);
+    
+    // Kama haipatikani, jaribu kwa sent_id
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_id === id);
+    }
+    
+    // Kama haipatikani, jaribu kwa _display_id
+    if (!p) {
+        p = projectsData.find(proj => proj._display_id === id);
+    }
+    
     if (!p) {
         console.error('❌ Project not found for ID:', id);
         showToast('Project not found', true);
@@ -2872,16 +2937,18 @@ async function viewProjectDetails(id) {
     console.log('📋 DEPARTMENT_ID:', DEPARTMENT_ID);
     
     // ============================================================
-    // CHECK IF PROJECT WAS RECEIVED FROM OTHER DEPARTMENT
+    // CHECK PROJECT TYPE
     // ============================================================
-    const isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
-    const isOriginal = !isReceived && p.source_type === 'original';
+    // Sent project = received from another department
+    const isSent = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+    // Original project = created by this department
+    const isOriginal = !isSent && p.source_type === 'original';
     
-    console.log('📋 isReceived:', isReceived);
+    console.log('📋 isSent:', isSent);
     console.log('📋 isOriginal:', isOriginal);
     
     // Mark as viewed if sent from another department
-    if (isReceived) {
+    if (isSent) {
         await markNotificationViewed('project', id);
         p.is_viewed_by_department = 1;
         p._is_unviewed = false;
@@ -2894,6 +2961,54 @@ async function viewProjectDetails(id) {
     }
     
     currentProjectId = id;
+    
+    // ============================================================
+    // GET DAILY WORK - ONLY FOR ORIGINAL PROJECTS
+    // ============================================================
+    let dailyWork = [];
+    let totalBudget = 0, totalExpenses = 0, remainingBudget = 0;
+    
+    if (isOriginal) {
+        // ORIGINAL PROJECT - Load daily work
+        dailyWork = p.daily_work || [];
+        if (dailyWork.length === 0) {
+            try {
+                const timestamp = new Date().getTime();
+                const projectName = p.name || '';
+                const projectId = p.original_project_id || p.id;
+                
+                let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
+                if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                    dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                    console.log(`✅ Found ${dailyWork.length} daily work records by project_name`);
+                }
+                
+                if (dailyWork.length === 0) {
+                    dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}&_=${timestamp}`);
+                    if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
+                        dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                        console.log(`✅ Found ${dailyWork.length} daily work records by project_id`);
+                    }
+                }
+                
+                p.daily_work = dailyWork;
+                p.daily_work_count = dailyWork.length;
+                p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
+            } catch (e) {
+                console.error('❌ Error fetching daily work:', e);
+            }
+        }
+        
+        const dwSummary = p.daily_work_summary || { total_budget: 0, total_expenses: 0, remaining_budget: 0, records_count: 0 };
+        totalBudget = dwSummary.total_budget || 0;
+        totalExpenses = dwSummary.total_expenses || 0;
+        remainingBudget = totalBudget - totalExpenses;
+        
+        console.log(`📊 Daily work for ${p.name}: ${dailyWork.length} records`);
+    } else {
+        // SENT PROJECT - NO DAILY WORK
+        console.log(`📊 Sent project - No daily work displayed`);
+    }
     
     // ============================================================
     // GET IMAGE URL
@@ -2937,58 +3052,18 @@ async function viewProjectDetails(id) {
     }
     
     // ============================================================
-    // GET DAILY WORK - FORCE REFRESH
-    // ============================================================
-    let dailyWork = p.daily_work || [];
-    if (dailyWork.length === 0) {
-        try {
-            const timestamp = new Date().getTime();
-            const projectName = p.name || '';
-            const projectId = p.original_project_id || p.id;
-            
-            let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}&_=${timestamp}`);
-            if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-                dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                console.log(`✅ Found ${dailyWork.length} daily work records by project_name`);
-            }
-            
-            if (dailyWork.length === 0) {
-                dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}&_=${timestamp}`);
-                if (dwRes.success && dwRes.data && dwRes.data.length > 0) {
-                    dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-                    console.log(`✅ Found ${dailyWork.length} daily work records by project_id`);
-                }
-            }
-            
-            p.daily_work = dailyWork;
-            p.daily_work_count = dailyWork.length;
-            p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
-        } catch (e) {
-            console.error('❌ Error fetching daily work:', e);
-        }
-    }
-    
-    console.log(`📊 Daily work for ${p.name}: ${dailyWork.length} records`);
-    
-    const dwSummary = p.daily_work_summary || { total_budget: 0, total_expenses: 0, remaining_budget: 0, records_count: 0 };
-    const totalBudget = dwSummary.total_budget || 0;
-    const totalExpenses = dwSummary.total_expenses || 0;
-    const remainingBudget = totalBudget - totalExpenses;
-    
-    // ============================================================
-    // BUILD DAILY WORK TABLE - SENT RECORDS HAVE VIEW ONLY
+    // BUILD DAILY WORK TABLE - ONLY FOR ORIGINAL PROJECTS
     // ============================================================
     let dailyWorkHtml = '';
-    if (dailyWork.length > 0) {
+    if (isOriginal && dailyWork.length > 0) {
         let tableRows = '';
         for (let w of dailyWork) {
-            const isSent = w.is_sent === 1 || 
-                          w.source_type === 'sent' || 
-                          w.is_sent_record === 1 ||
-                          (w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID) ||
-                          (w.from_department_id && w.from_department_id != DEPARTMENT_ID);
+            const isSentRecord = w.is_sent === 1 || 
+                                w.source_type === 'sent' || 
+                                w.is_sent_record === 1 ||
+                                (w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID);
             
-            const sentBadge = isSent ? 
+            const sentBadge = isSentRecord ? 
                 `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || w.from_department_name || 'another department'}">
                     <i class="fas fa-paper-plane"></i>
                 </span>` : '';
@@ -3006,7 +3081,7 @@ async function viewProjectDetails(id) {
                               status === 'partial' ? 'Partial' : 'Pending';
             
             let actionsHtml = '';
-            if (isSent) {
+            if (isSentRecord) {
                 actionsHtml = `
                     <button onclick="viewDailyWorkDetails(${w.id || w.original_dailywork_id || w.id})" class="action-btn view" title="View">
                         <i class="fas fa-eye"></i>
@@ -3029,14 +3104,14 @@ async function viewProjectDetails(id) {
                 `;
             }
             
-            const sentFromDisplay = isSent ? 
+            const sentFromDisplay = isSentRecord ? 
                 `<div class="text-[8px] text-purple-500 mt-1">
                     <i class="fas fa-paper-plane mr-1"></i> 
                     Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || w._sent_from || 'Unknown')}
                 </div>` : '';
             
             tableRows += `
-                <tr style="border-bottom: 1px solid #e5e7eb; ${isSent ? 'background: #faf5ff;' : ''}" id="daily-row-${w.id}">
+                <tr style="border-bottom: 1px solid #e5e7eb; ${isSentRecord ? 'background: #faf5ff;' : ''}" id="daily-row-${w.id}">
                     <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
                         ${new Date(recordDate).toLocaleString()}
                         ${sentBadge}
@@ -3098,12 +3173,21 @@ async function viewProjectDetails(id) {
                 </table>
             </div>
         `;
-    } else {
+    } else if (isOriginal) {
         dailyWorkHtml = `
             <div style="text-align: center; padding: 30px; color: #9ca3af;">
                 <i class="fas fa-calendar-day text-4xl mb-3 block"></i>
                 <p>No daily work records found for this project</p>
                 <p class="text-xs text-gray-400 mt-2">Click "Add" to create a new daily work record</p>
+            </div>
+        `;
+    } else {
+        // SENT PROJECT - Hide daily work completely
+        dailyWorkHtml = `
+            <div style="text-align: center; padding: 20px; color: #9ca3af; background: #fef3c7; border-radius: 8px; border: 1px solid #f59e0b;">
+                <i class="fas fa-info-circle text-orange-500 text-2xl mb-2 block"></i>
+                <p style="font-weight: 500; color: #92400e;">Daily work records are only visible for projects created by your department.</p>
+                <p class="text-xs text-gray-500 mt-1">This project was received from another department.</p>
             </div>
         `;
     }
@@ -3113,9 +3197,31 @@ async function viewProjectDetails(id) {
     // ============================================================
     let statusClass = getProjectStatusClass(p.status);
     let statusText = getProjectStatusText(p.status);
-    const fromDeptName = isReceived ? getDepartmentName(p.sent_from_dept) : '';
+    const fromDeptName = isSent ? getDepartmentName(p.sent_from_dept) : '';
+    
+    // ============================================================
+    // SENT BADGE - For received projects
+    // ============================================================
+    let sentBadgeHtml = '';
+    if (isSent) {
+        sentBadgeHtml = `
+            <div style="background: #fef3c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                <i class="fas fa-paper-plane text-orange-600 mr-2"></i>
+                <span style="font-weight: 600; color: #d97706;">
+                    This project was received from <strong>${escapeHtml(fromDeptName)}</strong>
+                </span>
+                <br>
+                <span style="font-size: 11px; color: #92400e;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    You can view project details and export reports. 
+                    Daily work records are not available for received projects.
+                </span>
+            </div>
+        `;
+    }
     
     let detailsHtml = `
+        ${sentBadgeHtml}
         <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 15px;">
             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                 <tr style="border-bottom: 1px solid #e5e7eb;">
@@ -3163,11 +3269,16 @@ async function viewProjectDetails(id) {
                     <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Created By:</td>
                     <td style="padding: 12px 16px;">${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</td>
                 </tr>
+                ${isOriginal ? `
                 <tr style="border-bottom: 1px solid #e5e7eb;">
                     <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Daily Work Records:</td>
                     <td style="padding: 12px 16px;"><strong>${dailyWork.length} records</strong></td>
-                </tr>
-                ${isReceived ? `<tr style="border-bottom: 1px solid #e5e7eb;">
+                </tr>` : `
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Daily Work Records:</td>
+                    <td style="padding: 12px 16px;"><span style="color: #9ca3af;">Not available for received projects</span></td>
+                </tr>`}
+                ${isSent ? `<tr style="border-bottom: 1px solid #e5e7eb;">
                     <td style="padding: 12px 16px; background: #f8fafc; font-weight: 600;">Received From:</td>
                     <td style="padding: 12px 16px;"><span class="from-badge">${escapeHtml(fromDeptName)}</span></td>
                 </tr>` : ''}
@@ -3189,8 +3300,9 @@ async function viewProjectDetails(id) {
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
                         <h4 style="margin: 0; font-size: 15px; font-weight: 700;">
                             <i class="fas fa-calendar-day text-purple-500 mr-2"></i>
-                            Daily Work Records (${dailyWork.length})
-                            ${dailyWork.filter(w => w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID).length > 0 ? 
+                            Daily Work Records
+                            ${isOriginal ? `(${dailyWork.length})` : ''}
+                            ${isOriginal && dailyWork.filter(w => w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID).length > 0 ? 
                                 `<span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-2">
                                     ${dailyWork.filter(w => w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID).length} received
                                 </span>` : ''}
@@ -3216,9 +3328,7 @@ async function viewProjectDetails(id) {
     }
     
     // ============================================================
-    // BUILD BUTTONS - ONLY 3 BUTTONS: Excel, PDF, View Image
-    // ============================================================
-    // NO SEND BUTTON, NO DELETE BUTTON, NO EDIT BUTTON
+    // BUILD BUTTONS
     // ============================================================
     let buttonsHtml = `
         <button onclick="exportSingleProjectExcel(${p.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm" style="background: #10b981; border: none; cursor: pointer; transition: all 0.2s;">
@@ -3244,15 +3354,52 @@ async function viewProjectDetails(id) {
         `;
     }
     
-    // Add note that no other actions are available
-    buttonsHtml += `
-        <div style="width:100%;text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;">
-            <span style="font-size:10px;color:#9ca3af;">
-                <i class="fas fa-info-circle mr-1"></i>
-                View only - You can export reports and view project details
-            </span>
-        </div>
-    `;
+    // ============================================================
+    // ORIGINAL PROJECTS - ADD Send, Edit, Delete buttons
+    // ============================================================
+    if (isOriginal) {
+        // Send dropdown
+        let deptOptions = '';
+        allDepartmentsForSend.forEach(d => {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+            }
+        });
+        
+        buttonsHtml += `
+            <div class="send-dropdown" style="display: inline-block; position: relative;">
+                <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')" 
+                        style="background: #4338ca; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;">
+                    <i class="fas fa-paper-plane"></i> Send Project
+                </button>
+                <div id="projSendDropdown-${p.id}" class="send-dropdown-content" style="display: none; position: absolute; right: 0; top: 100%; background: #1e293b; min-width: 180px; border-radius: 8px; z-index: 100; border: 1px solid #334155; max-height: 300px; overflow-y: auto; margin-top: 5px;">
+                    ${deptOptions}
+                </div>
+            </div>
+            <button onclick="editProject(${p.id})" class="btn-warning text-white px-3 py-1.5 rounded text-sm" style="background: #f59e0b; border: none; cursor: pointer; transition: all 0.2s;">
+                <i class="fas fa-edit"></i> Edit
+            </button>
+            <button onclick="deleteProject(${p.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm" style="background: #ef4444; border: none; cursor: pointer; transition: all 0.2s;">
+                <i class="fas fa-trash"></i> Delete
+            </button>
+        `;
+    } else {
+        // SENT PROJECTS - Show "Cannot Forward" message
+        buttonsHtml += `
+            <div style="display: inline-block; position: relative;">
+                <button class="dropdown-trigger" style="background: #9ca3af; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: not-allowed; display: inline-flex; align-items: center; gap: 6px; opacity: 0.6;" 
+                        title="You cannot send a project received from another department">
+                    <i class="fas fa-ban"></i> Cannot Forward
+                </button>
+            </div>
+            <div style="width:100%;text-align:center;margin-top:5px;padding-top:5px;">
+                <span style="font-size:9px;color:#9ca3af;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    Only projects created by your department can be sent
+                </span>
+            </div>
+        `;
+    }
     
     const buttonsDiv = document.getElementById('viewProjButtons');
     if (buttonsDiv) {

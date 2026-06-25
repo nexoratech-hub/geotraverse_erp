@@ -2627,19 +2627,301 @@ document.getElementById('projImageFile')?.addEventListener('change', function(e)
     } 
 });
 
-async function deleteProject(id) { 
-    if(confirm('Delete this project? It will be moved to recycle bin.')) { 
-        const p = projectsData.find(p => p.id === id);
-        if(p) await addToRecycleBin(id, 'project', p.name);
-        let res = await apiCall('delete_project.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID, is_deleted: 1 }); 
-        if(res.success) { 
-            showToast('Project moved to recycle bin'); 
-            addLog(`Project deleted: ${p?.name}`);
-            await loadProjects(); 
-            await loadDashboard(); 
-        } else { showToast(res.message || 'Failed', true); } 
-    } 
+// ============================================================
+// DELETE PROJECT - FIXED (Inatafuta Original na Sent Projects)
+// ============================================================
+async function deleteProject(id) {
+    if (!confirm('Delete this project? It will be removed from your dashboard.')) return;
+    
+    console.log('🗑️ Deleting project ID:', id);
+    console.log('📋 Current projectsData:', projectsData.length, 'projects');
+    
+    // ============================================================
+    // FIND PROJECT - MULTIPLE LOOKUP METHODS
+    // ============================================================
+    let p = null;
+    
+    // 1. Try by id
+    p = projectsData.find(proj => proj.id === id);
+    
+    // 2. Try by sent_id
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_id === id);
+    }
+    
+    // 3. Try by _display_id
+    if (!p) {
+        p = projectsData.find(proj => proj._display_id === id);
+    }
+    
+    // 4. Try by original_project_id (for sent projects)
+    if (!p) {
+        p = projectsData.find(proj => proj.original_project_id === id && 
+                                   (proj.source_type === 'sent' || proj.source_type === 'sent_from'));
+    }
+    
+    // 5. Try by to_department_id (for sent projects)
+    if (!p) {
+        p = projectsData.find(proj => proj.to_department_id === DEPARTMENT_ID && 
+                                   proj.original_project_id === id);
+    }
+    
+    // 6. Try by sent_from_dept
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_from_dept === DEPARTMENT_ID && 
+                                   proj.original_project_id === id);
+    }
+    
+    // 7. Try by project_name (if id matches original_project_id in sent projects)
+    if (!p) {
+        // Find any sent project with this original_project_id
+        const sentMatches = projectsData.filter(proj => 
+            proj.original_project_id === id && 
+            (proj.source_type === 'sent' || proj.source_type === 'sent_from')
+        );
+        if (sentMatches.length > 0) {
+            p = sentMatches[0];
+        }
+    }
+    
+    // 8. Last resort: check if any project has this id as a number
+    if (!p) {
+        const idNum = parseInt(id);
+        if (!isNaN(idNum)) {
+            p = projectsData.find(proj => proj.id === idNum);
+            if (!p) {
+                p = projectsData.find(proj => proj.sent_id === idNum);
+            }
+            if (!p) {
+                p = projectsData.find(proj => proj.original_project_id === idNum);
+            }
+        }
+    }
+    
+    // ============================================================
+    // IF PROJECT NOT FOUND, TRY RELOADING DATA
+    // ============================================================
+    if (!p) {
+        console.warn('⚠️ Project not found in local data, refreshing...');
+        showToast('Refreshing project data...', false);
+        
+        await fetchProjects();
+        await loadProjects();
+        
+        // Try again after reload
+        p = projectsData.find(proj => proj.id === id);
+        if (!p) p = projectsData.find(proj => proj.sent_id === id);
+        if (!p) p = projectsData.find(proj => proj._display_id === id);
+        if (!p) p = projectsData.find(proj => proj.original_project_id === id);
+    }
+    
+    if (!p) {
+        console.error('❌ Project not found after reload:', id);
+        console.log('📋 Available projects:', projectsData.map(proj => ({
+            id: proj.id,
+            sent_id: proj.sent_id,
+            name: proj.name || proj.project_name,
+            type: proj.source_type
+        })));
+        showToast('❌ Project not found. Please refresh the page.', true);
+        return;
+    }
+    
+    console.log('✅ Project found:', {
+        id: p.id,
+        sent_id: p.sent_id,
+        name: p.name || p.project_name,
+        source_type: p.source_type,
+        sent_from_dept: p.sent_from_dept,
+        to_department_id: p.to_department_id,
+        department_id: p.department_id
+    });
+    
+    // ============================================================
+    // CHECK PROJECT TYPE
+    // ============================================================
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
+    const isOriginal = p.source_type === 'original' || p.department_id === parseInt(DEPARTMENT_ID);
+    
+    let confirmMessage = 'Delete this project? It will be removed from your dashboard.';
+    if (isReceived || isSentCopy) {
+        confirmMessage = '⚠️ Delete this project copy? This will only remove it from YOUR dashboard. The original project will remain with the sender.';
+    } else if (isOriginal) {
+        confirmMessage = '⚠️ Delete this original project? This will move it to the recycle bin. Receivers will still have their copies.';
+    }
+    
+    if (!confirm(confirmMessage)) return;
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    const cardId = p.sent_id || p.id;
+    const card = document.getElementById(`proj-card-${cardId}`);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
+    // Also try by original id
+    const origCard = document.getElementById(`proj-card-${p.id}`);
+    if (origCard && origCard !== card) {
+        origCard.style.opacity = '0.5';
+        origCard.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // ============================================================
+        // CALL DELETE API - USE THE CORRECT ID
+        // ============================================================
+        // For sent projects, use the sent_id, not original_project_id
+        const deleteId = (p.source_type === 'sent' || p.source_type === 'sent_from') ? 
+                         (p.sent_id || p.id) : p.id;
+        
+        console.log('📤 Sending delete request for ID:', deleteId, 'type:', p.source_type);
+        
+        const res = await apiCall('delete_project.php', 'POST', {
+            project_id: parseInt(deleteId),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'System'
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        // ============================================================
+        // HANDLE SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            let message = res.message || 'Project deleted successfully';
+            showToast('✅ ' + message, false);
+            addLog(`Project deleted: ${p.name || p.project_name || 'ID ' + id}`);
+            
+            // ============================================================
+            // REMOVE FROM LOCAL DATA
+            // ============================================================
+            // Remove by id
+            projectsData = projectsData.filter(project => {
+                if (project.id === p.id) return false;
+                if (project.sent_id === p.sent_id) return false;
+                if (project._display_id === p._display_id) return false;
+                if (project.sent_id === id) return false;
+                if (project.id === id) return false;
+                // Remove by original_project_id if it's a sent project for this department
+                if (project.original_project_id === p.original_project_id && 
+                    project.to_department_id === parseInt(DEPARTMENT_ID) && 
+                    (project.source_type === 'sent' || project.source_type === 'sent_from')) return false;
+                return true;
+            });
+            
+            // ============================================================
+            // REMOVE FROM DOM
+            // ============================================================
+            // Remove all related cards
+            const cardIds = [p.id, p.sent_id, p._display_id, cardId];
+            for (let cid of cardIds) {
+                if (cid) {
+                    const el = document.getElementById(`proj-card-${cid}`);
+                    if (el) {
+                        el.style.opacity = '0';
+                        el.style.transform = 'scale(0.95)';
+                        setTimeout(() => {
+                            if (el.parentNode) el.remove();
+                        }, 300);
+                    }
+                }
+            }
+            
+            // Remove any cards with data attributes
+            document.querySelectorAll(`[data-project-id="${p.id}"]`).forEach(el => {
+                el.style.opacity = '0';
+                el.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (el.parentNode) el.remove();
+                }, 300);
+            });
+            
+            if (p.sent_id) {
+                document.querySelectorAll(`[data-project-id="${p.sent_id}"]`).forEach(el => {
+                    el.style.opacity = '0';
+                    el.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        if (el.parentNode) el.remove();
+                    }, 300);
+                });
+            }
+            
+            // ============================================================
+            // REFRESH DATA
+            // ============================================================
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+            await loadRecycleBinFromDB();
+            
+            if (typeof updateProjectBadge === 'function') {
+                await updateProjectBadge();
+            }
+            
+            // Close modal
+            closeModal('viewProjectModal');
+            
+        } else {
+            // ============================================================
+            // HANDLE API ERROR
+            // ============================================================
+            showToast('⚠️ ' + (res?.message || 'Project removed from view'), false);
+            
+            // Remove from local data anyway
+            projectsData = projectsData.filter(project => {
+                if (project.id === p.id) return false;
+                if (project.sent_id === p.sent_id) return false;
+                if (project._display_id === p._display_id) return false;
+                return true;
+            });
+            
+            // Remove cards
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (card.parentNode) card.remove();
+                }, 300);
+            }
+            
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+        }
+        
+    } catch(error) {
+        console.error('Delete project error:', error);
+        
+        // ============================================================
+        // HANDLE NETWORK ERROR
+        // ============================================================
+        projectsData = projectsData.filter(project => {
+            if (project.id === p.id) return false;
+            if (project.sent_id === p.sent_id) return false;
+            if (project._display_id === p._display_id) return false;
+            return true;
+        });
+        
+        if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) card.remove();
+            }, 300);
+        }
+        
+        showToast('⚠️ Project removed from view (refresh may be needed)', false);
+        
+        await fetchProjects();
+        await loadProjects();
+        await loadDashboard();
+    }
 }
+
 
 async function viewProjectDetails(id) {
     // ============================================================
