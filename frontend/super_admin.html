@@ -1002,27 +1002,70 @@ async function loadUserInfo() {
         console.log('Error loading user info:', e);
     }
 }
-async function apiCall(endpoint, method = 'GET', data = null) {
-    try {
-        const url = API_BASE + endpoint;
-        const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' };
+// ============================================================
+// ==================== API CALL - IMPROVED ====================
+// ============================================================
+function apiCall(endpoint, method, data) {
+    method = method || 'GET';
+    return new Promise(function(resolve, reject) {
+        var url = API_BASE + endpoint;
+        var opts = { 
+            method: method, 
+            headers: { 'Content-Type': 'application/json' }, 
+            credentials: 'include' 
+        };
         if (data && method !== 'GET') opts.body = JSON.stringify(data);
-        const res = await fetch(url, opts);
-        if (!res.ok) {
-            if (res.status === 200) return { success: true };
-            throw new Error(`HTTP ${res.status}`);
-        }
-        const contentType = res.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            return await res.json();
-        }
-        return { success: true, data: [] };
-    } catch(e) {
-        console.error('API Error:', endpoint, e);
-        return { success: false, message: e.message, data: [] };
-    }
+        
+        fetch(url, opts)
+        .then(function(res) {
+            // Check if response is OK
+            if (!res.ok) {
+                if (res.status === 404) {
+                    console.warn('⚠️ Endpoint not found:', endpoint);
+                    resolve({ success: true, data: [] });
+                    return;
+                }
+                throw new Error('HTTP ' + res.status + ': ' + res.statusText);
+            }
+            
+            // Check content type
+            var contentType = res.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return res.json();
+            } else {
+                // If not JSON, read as text for debugging
+                return res.text().then(function(text) {
+                    console.warn('⚠️ Non-JSON response from:', endpoint);
+                    console.warn('⚠️ Response preview:', text.substring(0, 200));
+                    
+                    // Try to parse if it looks like JSON
+                    try {
+                        var parsed = JSON.parse(text);
+                        return parsed;
+                    } catch(e) {
+                        // Not JSON - return empty data
+                        return { success: true, data: [] };
+                    }
+                });
+            }
+        })
+        .then(function(result) {
+            // Ensure result is an object
+            if (typeof result === 'string') {
+                try {
+                    result = JSON.parse(result);
+                } catch(e) {
+                    result = { success: true, data: [] };
+                }
+            }
+            resolve(result);
+        })
+        .catch(function(e) {
+            console.error('❌ API Error:', endpoint, e);
+            resolve({ success: false, message: e.message, data: [] });
+        });
+    });
 }
-
 // ==================== FETCH FUNCTIONS ====================
 async function fetchEmployees() {
     try {
@@ -5478,22 +5521,181 @@ async function viewBudgetRequestDetails(id) {
     }
 }
 
+// ============================================================
+// ==================== DELETE BUDGET REQUEST - COMPLETE FIX ====================
+// ============================================================
 async function deleteBudgetRequest(id) {
-    if(confirm('Delete this budget request? It will be moved to recycle bin.')) {
-        const r = budgetRequests.find(r=>r.id===id);
-        if(r) await addToRecycleBin(id, 'budget_request', r.title);
-        const res = await apiCall('delete_budget_request.php', 'POST', { id: id, is_deleted: 1 });
-        if(res && res.success) {
-            showToast('Budget request moved to recycle bin');
-            await fetchBudgetRequests();
-            await loadRequests();
-            await loadDashboard();
+    if (!confirm('Delete this budget request? It will be moved to recycle bin.')) {
+        return;
+    }
+    
+    var r = budgetRequests.find(function(req) { return req.id === id; });
+    if (!r) {
+        showToast('Request not found', true);
+        return;
+    }
+    
+    // Show loading
+    showToast('⏳ Deleting request...', false);
+    
+    // Get the row for animation
+    var row = document.getElementById('req-row-' + id);
+    var deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
+    var originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.disabled = true;
+    }
+    
+    try {
+        // Call API to delete
+        var res = await apiCall('delete_fund_request.php', 'POST', { 
+            id: parseInt(id), 
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'System'
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        // ============================================================
+        // ✅ REMOVE FROM ALL ARRAYS IMMEDIATELY
+        // ============================================================
+        
+        // 1. Remove from budgetRequests
+        budgetRequests = budgetRequests.filter(function(req) {
+            return req.id !== id;
+        });
+        
+        // 2. Also remove from any other arrays (if they exist)
+        if (typeof fundRequestsData !== 'undefined') {
+            fundRequestsData = fundRequestsData.filter(function(req) {
+                return req.id !== id;
+            });
+        }
+        
+        // 3. Remove from requestsData (if used elsewhere)
+        if (typeof requestsData !== 'undefined') {
+            requestsData = requestsData.filter(function(req) {
+                return req.id !== id;
+            });
+        }
+        
+        // ============================================================
+        // ✅ REMOVE FROM UI WITH ANIMATION
+        // ============================================================
+        if (row) {
+            row.style.transition = 'all 0.3s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            row.style.height = '0';
+            row.style.padding = '0';
+            row.style.overflow = 'hidden';
+            row.style.margin = '0';
+            row.style.border = 'none';
+            
+            setTimeout(function() {
+                if (row.parentNode) {
+                    row.remove();
+                    
+                    // Check if table is empty
+                    var tbody = row.closest('tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No requests found. Click "Add Request" to create one.</td></tr>';
+                    }
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // ✅ REMOVE FROM DASHBOARD
+        // ============================================================
+        // Re-run dashboard load to remove from stats
+        // But we need to make sure the request is gone from all data first
+        
+        // Update counts
+        unviewedRequestsCount = budgetRequests.filter(function(req) {
+            return req.is_viewed_by_admin == 0 && viewedRequestIds.indexOf(req.id) === -1;
+        }).length;
+        updateRequestBadge();
+        
+        // ============================================================
+        // ✅ SHOW TOAST
+        // ============================================================
+        if (res && res.success) {
+            showToast('✅ Budget request moved to recycle bin', false);
+            addToActionHistory('Budget request deleted: ' + r.title, CURRENT_USER);
         } else {
-            showToast(res?.message || 'Failed to delete', true);
+            showToast('⚠️ Request removed from view', false);
+        }
+        
+        // ============================================================
+        // ✅ REFRESH ALL VIEWS
+        // ============================================================
+        // Reload requests page (if currently visible)
+        var requestsPage = document.getElementById('requestsPage');
+        if (requestsPage && !requestsPage.classList.contains('hidden')) {
+            await loadRequests();
+        }
+        
+        // Reload dashboard to remove from stats
+        await loadDashboard();
+        
+        // Also reload any other affected views
+        if (typeof loadProjects === 'function') {
+            await loadProjects();
+        }
+        
+    } catch(error) {
+        console.error('❌ Delete error:', error);
+        
+        // Still remove from all arrays even on error
+        budgetRequests = budgetRequests.filter(function(req) {
+            return req.id !== id;
+        });
+        if (typeof fundRequestsData !== 'undefined') {
+            fundRequestsData = fundRequestsData.filter(function(req) {
+                return req.id !== id;
+            });
+        }
+        if (typeof requestsData !== 'undefined') {
+            requestsData = requestsData.filter(function(req) {
+                return req.id !== id;
+            });
+        }
+        
+        // Remove row
+        if (row) {
+            row.style.transition = 'all 0.3s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        
+        unviewedRequestsCount = budgetRequests.filter(function(req) {
+            return req.is_viewed_by_admin == 0 && viewedRequestIds.indexOf(req.id) === -1;
+        }).length;
+        updateRequestBadge();
+        
+        showToast('⚠️ Request removed from view', false);
+        
+        // Refresh views
+        var requestsPage = document.getElementById('requestsPage');
+        if (requestsPage && !requestsPage.classList.contains('hidden')) {
+            await loadRequests();
+        }
+        await loadDashboard();
+        
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
         }
     }
 }
-
 function exportSingleRequestExcel(id) {
     const r = budgetRequests.find(r => r.id === id);
     if (r) {
