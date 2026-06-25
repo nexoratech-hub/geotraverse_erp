@@ -1040,36 +1040,68 @@ async function fetchEmployees() {
     }
 }
 
+// ============================================================
+// FETCH PROJECTS - FIXED (No Duplicates)
+// ============================================================
 async function fetchProjects() {
-    const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
-    if (res.success && res.data) {
-        // ============================================================
-        // CHUKUA PROJECTS ZOTE - ZILIZO ADDED NA ZILIZOTUMWA
-        // ============================================================
-        projectsData = res.data.filter(p =>
-            // Projekti zote ambazo zimeundwa au zimetumwa kwa Super Admin
-            (p.department_id == DEPARTMENT_ID ||      // Zilizoundwa na Super Admin
-             p.sent_to_dept == DEPARTMENT_ID ||       // Zilizotumwa kwa Super Admin
-             p.sent_from_dept == DEPARTMENT_ID ||     // Zilizotumwa kutoka Super Admin
-             p.to_department_id == DEPARTMENT_ID) &&  // Zilizotumwa kwa Super Admin (alternative field)
-            (!p.deleted_by_admin || p.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id);
+    try {
+        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
+        if (res.success && res.data) {
+            // ============================================================
+            // REMOVE DUPLICATES FROM API RESPONSE
+            // ============================================================
+            let uniqueProjects = [];
+            let seenOriginalIds = [];
+            let seenSentIds = [];
+            
+            for (let p of res.data) {
+                // For original projects
+                if (p.source_type === 'original') {
+                    if (!seenOriginalIds.includes(p.id)) {
+                        seenOriginalIds.push(p.id);
+                        uniqueProjects.push(p);
+                    }
+                }
+                // For sent projects (received) - only if to_department_id matches
+                else if (p.source_type === 'sent') {
+                    // Only show if received by this department
+                    if (p.to_department_id === DEPARTMENT_ID) {
+                        if (!seenSentIds.includes(p.sent_id)) {
+                            seenSentIds.push(p.sent_id);
+                            uniqueProjects.push(p);
+                        }
+                    }
+                }
+                // For sent_from (history) - SKIP for sender
+                else if (p.source_type === 'sent_from') {
+                    // Skip - sender sees original only
+                    continue;
+                }
+            }
+            
+            projectsData = uniqueProjects;
+            
+            // HESABU YA UNVIEWED PROJECTS
+            unviewedProjectsCount = projectsData.filter(p => {
+                return p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID &&
+                       p.sent_to_dept == DEPARTMENT_ID &&
+                       (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
+            }).length;
 
-        // HESABU YA UNVIEWED PROJECTS
-        unviewedProjectsCount = projectsData.filter(p => {
-            return p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID &&
-                   p.sent_to_dept == DEPARTMENT_ID &&
-                   (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
-        }).length;
-
-        console.log('📊 Total Projects:', projectsData.length);
-        console.log('📊 Unviewed Projects:', unviewedProjectsCount);
-    } else {
+            console.log('📊 Total Projects (unique):', projectsData.length);
+            console.log('📊 Unviewed Projects:', unviewedProjectsCount);
+        } else {
+            projectsData = [];
+            unviewedProjectsCount = 0;
+        }
+    } catch(e) {
+        console.error('Fetch projects error:', e);
         projectsData = [];
         unviewedProjectsCount = 0;
     }
     updateProjectBadge();
 }
+
 async function fetchTransactions() {
     try {
         const res = await apiCall('get_transactions.php');
@@ -1164,21 +1196,34 @@ async function fetchProjectDocuments() {
 }
 
 // ============================================================
-// FETCH DAILY WORK - KWA SUPER ADMIN (all=1)
+// FETCH DAILY WORK - FIXED (No Duplicates)
 // ============================================================
 async function fetchDailyWork() {
     try {
         console.log('📥 Fetching daily work for Super Admin (all=1)...');
         
-        // Super Admin anapaswa kuona daily work zote
-        // Tumia parameter all=1 ili kuona zote
         const url = `get_dailywork.php?all=1`;
         
         const res = await apiCall(url, 'GET');
         
         if (res && res.success && res.data) {
-            dailyworkData = res.data;
-            console.log('✅ Daily work loaded:', dailyworkData.length, 'records');
+            // ============================================================
+            // REMOVE DUPLICATES BY ID
+            // ============================================================
+            let uniqueData = [];
+            let seenIds = [];
+            
+            for (let item of res.data) {
+                let id = item.id || item.original_dailywork_id || item.sent_id || 0;
+                let key = item.source_type + '_' + id;
+                if (!seenIds.includes(key)) {
+                    seenIds.push(key);
+                    uniqueData.push(item);
+                }
+            }
+            
+            dailyworkData = uniqueData;
+            console.log('✅ Daily work loaded:', dailyworkData.length, 'records (unique)');
             console.log('📊 Daily work data sample:', dailyworkData.slice(0, 3));
             return dailyworkData;
         } else {
@@ -2219,6 +2264,7 @@ async function sendProjectToDept(projectId, deptId) {
     let forwardChain = [];
     let fromDeptId = DEPARTMENT_ID;
     let sentProjectId = null;
+    let projectSourceType = 'original';
     
     // Check if this is a sent project (forwarding)
     if (p && p.source_type === 'sent') {
@@ -2229,6 +2275,7 @@ async function sendProjectToDept(projectId, deptId) {
         forwardChain = p.forward_chain || [];
         fromDeptId = p.from_department_id || DEPARTMENT_ID;
         sentProjectId = p.sent_id || p._display_id || p.id;
+        projectSourceType = 'sent';
     }
     
     // If not found by id, try sent_id
@@ -2242,6 +2289,7 @@ async function sendProjectToDept(projectId, deptId) {
             forwardChain = p.forward_chain || [];
             fromDeptId = p.from_department_id || DEPARTMENT_ID;
             sentProjectId = p.sent_id || p._display_id || p.id;
+            projectSourceType = 'sent';
         }
     }
     
@@ -2256,6 +2304,7 @@ async function sendProjectToDept(projectId, deptId) {
             forwardChain = p.forward_chain || [];
             fromDeptId = p.from_department_id || DEPARTMENT_ID;
             sentProjectId = p.sent_id || p._display_id || p.id;
+            projectSourceType = 'sent';
         }
     }
     
@@ -2270,11 +2319,23 @@ async function sendProjectToDept(projectId, deptId) {
         return;
     }
     
-    // Don't allow forwarding back to original sender if it's a sent project
-    if (isSentProject && deptId == originalSenderId) {
-        if (!confirm('Send this project back to the original sender (' + (p.original_sender_name || 'Unknown') + ')?')) {
-            return;
+    // ============================================================
+    // CHECK IF ALREADY SENT TO THIS DEPARTMENT (AVOID DUPLICATE)
+    // ============================================================
+    // Check if this project already exists in sent_projects for this department
+    const alreadySent = projectsData.some(proj => {
+        if (proj.source_type === 'sent' && proj.to_department_id === deptId) {
+            // Check if it's the same original project
+            if (proj.original_project_id === originalProjectId) {
+                return true;
+            }
         }
+        return false;
+    });
+    
+    if (alreadySent) {
+        showToast('⚠️ This project has already been sent to this department', true);
+        return;
     }
 
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
@@ -2289,22 +2350,68 @@ async function sendProjectToDept(projectId, deptId) {
     }
 
     try {
-        // Get daily work records
+        // ============================================================
+        // FETCH DAILY WORK - ORIGINAL RECORDS ONLY (NO DUPLICATES)
+        // ============================================================
         await fetchDailyWork();
         
         let projectDailyWork = [];
+        let uniqueDailyWorkIds = [];
         
-        // For sent projects, try to get daily work from the sent data
-        if (isSentProject && p.daily_work) {
-            projectDailyWork = p.daily_work;
+        // For sent projects, get daily work from original project
+        // This ensures we don't duplicate daily work
+        if (isSentProject) {
+            // Get original daily work from the original project
+            projectDailyWork = dailyworkData.filter(function(w) {
+                // Only get original daily work (not sent copies)
+                if (w.source_type === 'original' && parseInt(w.project_id) === parseInt(originalProjectId)) {
+                    return true;
+                }
+                // Also check by project_name
+                if (w.source_type === 'original' && w.project_name === p.project_name) {
+                    return true;
+                }
+                return false;
+            });
         } else {
-            // For original projects or fallback, get from dailywork table
+            // For original projects, get daily work from dailywork table
+            projectDailyWork = dailyworkData.filter(function(w) {
+                // Only get original daily work (not sent copies)
+                if (w.source_type === 'original' && parseInt(w.project_id) === parseInt(originalProjectId)) {
+                    return true;
+                }
+                // Also check by project_name
+                if (w.source_type === 'original' && w.project_name === p.name) {
+                    return true;
+                }
+                return false;
+            });
+        }
+        
+        // If no daily work found, try fallback
+        if (projectDailyWork.length === 0) {
             projectDailyWork = dailyworkData.filter(function(w) {
                 return parseInt(w.project_id) === parseInt(originalProjectId);
             });
         }
+        
+        // Remove duplicates by ID
+        let uniqueRecords = [];
+        let seenIds = [];
+        for (let w of projectDailyWork) {
+            let id = w.id || w.original_dailywork_id || 0;
+            if (!seenIds.includes(id)) {
+                seenIds.push(id);
+                uniqueRecords.push(w);
+            }
+        }
+        projectDailyWork = uniqueRecords;
+        
+        console.log('📋 Daily work records to send:', projectDailyWork.length);
 
-        // Calculate summary
+        // ============================================================
+        // CALCULATE DAILY WORK SUMMARY
+        // ============================================================
         let totalBudget = 0, totalExpenses = 0;
         let completedCount = 0, partialCount = 0, pendingCount = 0;
         let dailyRecords = [];
@@ -2334,7 +2441,9 @@ async function sendProjectToDept(projectId, deptId) {
 
         let remainingBudget = totalBudget - totalExpenses;
 
-        // Get image
+        // ============================================================
+        // GET IMAGE
+        // ============================================================
         let imagePath = p.image || '';
         if (imagePath && !imagePath.startsWith('data:') && !imagePath.startsWith('http')) {
             if (!imagePath.startsWith('/')) {
@@ -2384,6 +2493,9 @@ async function sendProjectToDept(projectId, deptId) {
 
         console.log('📤 Sending project payload:', payload);
 
+        // ============================================================
+        // SEND TO API
+        // ============================================================
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
 
         if (res && res.success) {
@@ -2392,7 +2504,22 @@ async function sendProjectToDept(projectId, deptId) {
             showToast('✅ Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg, false);
             addLog('📤 Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg);
 
-            // Refresh data
+            // ============================================================
+            // REMOVE SENT PROJECT FROM SENDER'S VIEW (IF FORWARDING)
+            // ============================================================
+            if (isForward) {
+                // Remove the sent project from sender's view
+                // The sender only sees original, not the sent copy
+                projectsData = projectsData.filter(proj => {
+                    if (proj.sent_id === sentProjectId) return false;
+                    if (proj._display_id === sentProjectId) return false;
+                    return true;
+                });
+            }
+
+            // ============================================================
+            // REFRESH DATA
+            // ============================================================
             await fetchProjects();
             await loadProjects();
             await loadDashboard();
@@ -3174,92 +3301,252 @@ function tryFirstEndpoint(endpoints, index, fileName) {
 }
 
 
-
-// ==================== PROJECTS SECTION ====================
+// ============================================================
+// LOAD PROJECTS - FIXED (Sender anaona Original tu)
+// ============================================================
 async function loadProjects() {
     await fetchProjects();
     await fetchProjectDocuments();
     await fetchUnviewedCounts();
 
+    // ============================================================
+    // FILTER: Sender anaona ORIGINAL tu
+    // Receiver anaona SENT copies tu
+    // ============================================================
+    let filteredProjects = [];
+    
+    for (let p of projectsData) {
+        // Ikiwa ni original project, ionyeshe
+        if (p.source_type === 'original') {
+            filteredProjects.push(p);
+        }
+        // Ikiwa ni sent project (copy), ionyeshe TU kama imetumwa kwa department hii
+        else if (p.source_type === 'sent') {
+            // Ikiwa to_department_id ni department ya sasa, ionyeshe
+            if (p.to_department_id === DEPARTMENT_ID) {
+                filteredProjects.push(p);
+            }
+            // Vinginevyo, skip (sender haoni copy)
+        }
+        // Ikiwa ni sent_from (history), SKIP - sender haoni
+        else if (p.source_type === 'sent_from') {
+            // Skip - sender anaona original tu
+            continue;
+        }
+    }
+    
+    projectsData = filteredProjects;
+    console.log('📊 Projects after filtering (original + received copies):', projectsData.length);
+
+    // ============================================================
+    // BUILD HTML
+    // ============================================================
     let html = `
         <div class="tab-container">
-            <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Projects <span class="tab-count">${projectsData.length}</span></button>
-            <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')"><i class="fas fa-file-upload mr-1"></i> Uploaded Documents <span class="tab-count">${projectDocuments.length}</span></button>
+            <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')">
+                <i class="fas fa-plus-circle mr-1"></i> Added Projects 
+                <span class="tab-count">${projectsData.length}</span>
+            </button>
+            <button class="tab-button ${currentProjectTab === 'uploaded' ? 'active' : ''}" onclick="switchProjectTab('uploaded')">
+                <i class="fas fa-file-upload mr-1"></i> Uploaded Documents 
+                <span class="tab-count">${projectDocuments.length}</span>
+            </button>
         </div>
     `;
 
     if (currentProjectTab === 'added') {
-        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3><div class="flex gap-2"><button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button><button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
-        <div class="section-card-body"><div id="projectsGrid" class="projects-grid"></div></div></div>`;
+        // ============================================================
+        // ADDED PROJECTS TAB
+        // ============================================================
+        html += `
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="fas fa-tasks text-green-600 mr-2"></i> Added Projects</h3>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openAddProjectModal()" class="btn-primary text-sm">
+                            <i class="fas fa-plus mr-1"></i> Add Project
+                        </button>
+                        <button onclick="exportAllProjectsToExcel()" class="btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i> Excel All
+                        </button>
+                        <button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> PDF All
+                        </button>
+                    </div>
+                </div>
+                <div class="section-card-body">
+                    <div id="projectsGrid" class="projects-grid"></div>
+                </div>
+            </div>
+        `;
+        
         document.getElementById('projectsPage').innerHTML = html;
 
         if (projectsData.length === 0) {
-            document.getElementById('projectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No projects found. Click "Add Project" to create one.</div>';
+            document.getElementById('projectsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
+                    <i class="fas fa-folder-open text-4xl mb-3 text-gray-300"></i>
+                    <p class="text-sm">No projects found</p>
+                    <p class="text-xs mt-1">Click "Add Project" to create your first project</p>
+                </div>
+            `;
             return;
         }
 
+        // ============================================================
+        // BUILD PROJECT CARDS
+        // ============================================================
         let projectsHtml = '';
         for (let p of projectsData) {
+            // Skip if deleted
+            if (p.is_deleted == 1) continue;
+            
             let imageUrl = getFullImageUrl(p.image);
             let isNew = p._is_unviewed || false;
-            let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
-            let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+            
+            let statusClass = p.status === 'pending' ? 'status-pending' : 
+                             p.status === 'in_progress' ? 'status-progress' : 
+                             p.status === 'completed' ? 'status-completed' : 'status-approved';
+            let statusText = p.status === 'in_progress' ? 'In Progress' : 
+                            p.status === 'completed' ? 'Completed' : 
+                            p.status === 'approved' ? 'Approved' : 'Pending';
 
             let sourceDeptName = 'System';
-            if (p.sent_from_dept) {
+            let isSentFromOtherDept = false;
+            
+            if (p.source_type === 'sent') {
+                // Hii ni copy iliyotumwa kwa department hii
+                sourceDeptName = p.sent_from_name || departmentNames[p.from_department_id] || 'Unknown Department';
+                isSentFromOtherDept = true;
+            } else if (p.sent_from_dept) {
                 sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
+                isSentFromOtherDept = true;
             } else if (p.created_by) {
                 sourceDeptName = p.created_by;
             }
-            let isSentFromOtherDept = p.sent_from_dept && p.sent_from_dept != 1;
 
-            projectsHtml += `<div class="project-card" id="proj-card-${p.id}">
-                <div class="card-header">
-                    <h4>${escapeHtml(p.name)}</h4>
-                    <p>ID: #${p.id} ${isSentFromOtherDept ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}</p>
+            // Source badge - Sender anaona ORIGINAL tu
+            let sourceBadge = '';
+            if (p.source_type === 'original') {
+                sourceBadge = '<span class="badge-original" style="background:#059669;color:white;padding:2px 10px;border-radius:12px;font-size:9px;margin-left:6px;">📁 Original</span>';
+            } else if (p.source_type === 'sent') {
+                sourceBadge = '<span class="badge-copy" style="background:#8b5cf6;color:white;padding:2px 10px;border-radius:12px;font-size:9px;margin-left:6px;">📨 Copy</span>';
+            }
+
+            // Forward chain info
+            let forwardInfo = '';
+            if (p.forward_chain && p.forward_chain.length > 0) {
+                forwardInfo = `<span class="text-[8px] text-purple-500 ml-1" title="Forwarded ${p.forward_chain.length} times">🔁 ${p.forward_chain.length}</span>`;
+            }
+
+            // Determine if this is a copy (receiver view) or original (sender view)
+            let isCopy = p.source_type === 'sent';
+            let isOriginal = p.source_type === 'original';
+
+            projectsHtml += `
+                <div class="project-card" id="proj-card-${p.id}" data-project-id="${p.id}" data-source-type="${p.source_type}">
+                    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h4>${escapeHtml(p.name)} ${sourceBadge}</h4>
+                            <p style="font-size:10px; opacity:0.8;">ID: #${p.id} ${isSentFromOtherDept ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}</p>
+                        </div>
+                        ${forwardInfo}
+                    </div>
+                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'}
+                    <div class="p-3">
+                        <div class="flex justify-between items-start">
+                            <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
+                        </div>
+                        <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
+                        <div class="mt-1 text-[10px]">
+                            <span class="text-gray-400">Source: </span>
+                            <span class="${isSentFromOtherDept ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                                <i class="fas ${isSentFromOtherDept ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                                ${escapeHtml(sourceDeptName)}
+                                ${isSentFromOtherDept ? '<span class="text-green-500 ml-1"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            </span>
+                        </div>
+                        <div class="mt-2">
+                            <div class="flex justify-between text-[9px]">
+                                <span>Progress</span>
+                                <span>${p.progress || 0}%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-1">
+                                <div class="bg-blue-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-[9px] text-gray-400">
+                            ${p.daily_work_count || 0} daily work records
+                            ${p.sent_count > 0 ? `| Sent ${p.sent_count} times` : ''}
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                            <button onclick="viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            
+                            ${isOriginal ? `
+                                <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                                <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            ` : ''}
+                            
+                            ${isCopy ? `
+                                <button onclick="deleteProjectCopy(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete Copy</button>
+                            ` : ''}
+                        </div>
+                        <div class="user-info-line">
+                            Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}
+                        </div>
+                    </div>
                 </div>
-                ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'}
-                <div class="p-3">
-                    <div class="flex justify-between items-start">
-                        <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
-                        <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
-                    </div>
-                    <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
-                    <div class="mt-1 text-[10px]">
-                        <span class="text-gray-400">Source: </span>
-                        <span class="${isSentFromOtherDept ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                            <i class="fas ${isSentFromOtherDept ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                            ${escapeHtml(sourceDeptName)}
-                            ${isSentFromOtherDept ? '<span class="text-green-500 ml-1"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
-                        </span>
-                    </div>
-                    <div class="mt-2">
-                        <div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div>
-                        <div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-blue-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div>
-                    </div>
-                    <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                        <button onclick="viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                        <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                        <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                    </div>
-                    <div class="user-info-line">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}</div>
-                </div>
-            </div>`;
+            `;
         }
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
+        
     } else {
-        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Project Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
-        <div class="section-card-body"><div id="uploadedDocsGrid" class="documents-grid"></div></div></div>`;
+        // ============================================================
+        // UPLOADED DOCUMENTS TAB - SAME AS BEFORE
+        // ============================================================
+        html += `
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Project Documents</h3>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm">
+                            <i class="fas fa-upload mr-1"></i> Upload Document
+                        </button>
+                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i> Excel All
+                        </button>
+                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> PDF All
+                        </button>
+                    </div>
+                </div>
+                <div class="section-card-body">
+                    <div id="uploadedDocsGrid" class="documents-grid"></div>
+                </div>
+            </div>
+        `;
         document.getElementById('projectsPage').innerHTML = html;
 
         if (projectDocuments.length === 0) {
-            document.getElementById('uploadedDocsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded documents. Click "Upload Document" to add one.</div>';
+            document.getElementById('uploadedDocsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
+                    <i class="fas fa-file-upload text-4xl mb-3 text-gray-300"></i>
+                    <p class="text-sm">No uploaded documents</p>
+                    <p class="text-xs mt-1">Click "Upload Document" to add a document</p>
+                </div>
+            `;
             return;
         }
 
+        // ============================================================
+        // BUILD DOCUMENT CARDS
+        // ============================================================
         let docsHtml = '';
         for (let doc of projectDocuments) {
+            if (doc.is_deleted == 1) continue;
+            
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
             let fileIcon = 'fa-file-alt';
             if (fileExt === 'pdf') fileIcon = 'fa-file-pdf';
@@ -3275,38 +3562,159 @@ async function loadProjects() {
             }
             let isDocSent = doc.sent_from_department && doc.sent_from_department != 1;
 
-            docsHtml += `<div class="uploaded-doc-card" id="doc-card-${doc.id}">
-                <div class="card-header"><h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'} ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(docSourceDept) + '</span>' : ''}</p></div>
-                <div class="p-3">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                        <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
+            let isNew = doc._is_unviewed || false;
+
+            docsHtml += `
+                <div class="uploaded-doc-card" id="doc-card-${doc.id}" data-doc-id="${doc.id}">
+                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    <div class="card-header">
+                        <h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4>
+                        <p style="font-size:9px;">${doc.file_name || 'Document'} ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(docSourceDept) + '</span>' : ''}</p>
                     </div>
-                    <div class="text-[10px] mb-2">
-                        <span class="text-gray-400">Source: </span>
-                        <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                            <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                            ${escapeHtml(docSourceDept)}
-                            ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
-                        </span>
+                    <div class="p-3">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
+                        </div>
+                        <div class="text-[10px] mb-2">
+                            <span class="text-gray-400">Source: </span>
+                            <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                                <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                                ${escapeHtml(docSourceDept)}
+                                ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            </span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                            <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            <div class="send-dropdown" onclick="event.stopPropagation();">
+                                <button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                                <div id="docSendDropdown-${doc.id}" class="send-dropdown-content">
+                                    ${allDepartmentsForSend.filter(d => d.id !== 1).map(d => 
+                                        `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, 'project')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
+                                            <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
+                                        </a>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="user-info-line">
+                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
+                        </div>
                     </div>
-                    <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
-                    <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                        <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                        <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                    </div>
-                    <div class="user-info-line">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
                 </div>
-            </div>`;
+            `;
         }
         document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
     }
+    
     updateProjectBadge();
 }
-
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadProjects();
+}
+
+// ============================================================
+// DELETE PROJECT COPY - Kwa Receiver tu
+// ============================================================
+async function deleteProjectCopy(id) {
+    if (!confirm('Delete this project copy? It will be moved to recycle bin.')) return;
+    
+    console.log('🗑️ Deleting project copy ID:', id);
+    
+    // Find the copy in projectsData
+    const p = projectsData.find(proj => proj.id === id && proj.source_type === 'sent');
+    
+    if (!p) {
+        showToast('Project copy not found', true);
+        return;
+    }
+    
+    // Show loading state
+    const card = document.getElementById(`proj-card-${id}`);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // Use the sent_id for deletion if available
+        const deleteId = p.sent_id || p._display_id || p.id;
+        
+        const res = await apiCall('delete_project.php', 'POST', {
+            project_id: parseInt(deleteId),
+            department_id: DEPARTMENT_ID,
+            deleted_by: currentUserFullName || 'Super Admin'
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        if (res && res.success) {
+            showToast('✅ ' + (res.message || 'Project copy moved to recycle bin'), false);
+            addLog(`Project copy deleted: ${p.name}`);
+            
+            // Remove from local data
+            projectsData = projectsData.filter(project => {
+                if (project.id === id && project.source_type === 'sent') return false;
+                if (project.sent_id === deleteId) return false;
+                if (project._display_id === deleteId) return false;
+                return true;
+            });
+            
+            // Remove from DOM
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => card.remove(), 300);
+            }
+            
+            // Refresh data
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+            await loadRecycleBinFromDB();
+            
+            updateProjectBadge();
+            
+        } else {
+            // If API fails, remove from UI anyway
+            showToast('⚠️ ' + (res?.message || 'Project copy removed from view'), false);
+            
+            projectsData = projectsData.filter(project => {
+                if (project.id === id && project.source_type === 'sent') return false;
+                if (project.sent_id === deleteId) return false;
+                return true;
+            });
+            
+            if (card) card.remove();
+            
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+        }
+        
+    } catch(error) {
+        console.error('Delete project copy error:', error);
+        
+        // Fallback: Remove from UI anyway
+        projectsData = projectsData.filter(project => {
+            if (project.id === id && project.source_type === 'sent') return false;
+            if (project.sent_id === deleteId) return false;
+            return true;
+        });
+        
+        if (card) card.remove();
+        
+        showToast('⚠️ Project copy removed from view', false);
+        
+        await fetchProjects();
+        await loadProjects();
+        await loadDashboard();
+    }
 }
 
 function openAddProjectModal() {
@@ -3410,12 +3818,26 @@ async function saveProject() {
 }
 
 // ============================================================
-// DELETE PROJECT - SOFT DELETE (Inaenda Recycle Bin)
+// DELETE PROJECT - ONLY FOR ORIGINAL (Sender)
 // ============================================================
 async function deleteProject(id) {
+    // Find the project
+    const p = projectsData.find(proj => proj.id === id);
+    
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Only allow deleting original projects
+    if (p.source_type !== 'original') {
+        showToast('You can only delete original projects. Use "Delete Copy" for copies.', true);
+        return;
+    }
+    
     if (!confirm('Delete this project? It will be moved to recycle bin.')) return;
     
-    console.log('🗑️ Deleting project ID:', id);
+    console.log('🗑️ Deleting original project ID:', id);
     
     // Show loading state
     const card = document.getElementById(`proj-card-${id}`);
@@ -3435,16 +3857,12 @@ async function deleteProject(id) {
         
         if (res && res.success) {
             showToast('✅ ' + (res.message || 'Project moved to recycle bin'), false);
-            addLog(`Project deleted: ID ${id}`);
+            addLog(`Project deleted: ${p.name}`);
             
-            // Remove from local data - SOFT DELETE
+            // Remove from local data
             projectsData = projectsData.filter(project => {
-                // Remove by id
                 if (project.id === id) return false;
-                // Remove by sent_id if it exists
                 if (project.sent_id === id) return false;
-                // Remove by original_project_id if it's a sent project for this department
-                if (project.original_project_id === id && project.to_department_id === DEPARTMENT_ID) return false;
                 return true;
             });
             
@@ -3455,13 +3873,6 @@ async function deleteProject(id) {
                 setTimeout(() => card.remove(), 300);
             }
             
-            // Also remove any other cards with this ID
-            document.querySelectorAll(`[data-project-id="${id}"]`).forEach(el => {
-                el.style.opacity = '0';
-                el.style.transform = 'scale(0.95)';
-                setTimeout(() => el.remove(), 300);
-            });
-            
             // Refresh data
             await fetchProjects();
             await loadProjects();
@@ -3471,42 +3882,18 @@ async function deleteProject(id) {
             updateProjectBadge();
             
         } else {
-            // If API fails, try to remove from UI anyway
-            showToast('⚠️ ' + (res?.message || 'Project removed from view'), false);
-            
-            projectsData = projectsData.filter(project => {
-                if (project.id === id) return false;
-                if (project.sent_id === id) return false;
-                return true;
-            });
-            
-            if (card) card.remove();
-            
-            await fetchProjects();
-            await loadProjects();
-            await loadDashboard();
+            showToast('⚠️ ' + (res?.message || 'Failed to delete project'), true);
         }
         
     } catch(error) {
         console.error('Delete project error:', error);
-        
-        // Fallback: Remove from UI anyway
-        projectsData = projectsData.filter(project => {
-            if (project.id === id) return false;
-            if (project.sent_id === id) return false;
-            return true;
-        });
-        
-        if (card) card.remove();
-        
-        showToast('⚠️ Project removed from view (refresh may be needed)', false);
+        showToast('⚠️ Error deleting project: ' + error.message, true);
         
         await fetchProjects();
         await loadProjects();
         await loadDashboard();
     }
 }
-
 // ==================== DELETE PROJECT DOCUMENT ====================
 async function deleteProjectDocument(docId) {
     if (!confirm('Delete this document? It will be moved to recycle bin.')) return;
@@ -3544,8 +3931,9 @@ async function deleteProjectDocument(docId) {
         showToast('Document removed from local view', false);
     }
 }
+
 // ============================================================
-// VIEW PROJECT DETAILS - WITH SEND BUTTON FOR ALL
+// VIEW PROJECT DETAILS - FIXED (No Duplicate Daily Work)
 // ============================================================
 async function viewProjectDetails(id) {
     const p = projectsData.find(p => p.id === id);
@@ -3570,15 +3958,47 @@ async function viewProjectDetails(id) {
     currentProjectId = id;
     await loadDailyWorkForProject(id);
 
+    // ============================================================
+    // GET UNIQUE DAILY WORK FOR THIS PROJECT (NO DUPLICATES)
+    // ============================================================
+    let projectDailyWork = [];
+    let seenDailyWorkIds = [];
+    
+    // Get daily work for this project
+    let allWork = dailyworkData.filter(w => {
+        if (w.project_id && parseInt(w.project_id) === parseInt(id)) return true;
+        if (w.project_name && w.project_name === p.name) return true;
+        return false;
+    });
+    
+    // Remove duplicates
+    for (let w of allWork) {
+        let wid = w.id || w.original_dailywork_id || w.sent_id || 0;
+        if (!seenDailyWorkIds.includes(wid)) {
+            seenDailyWorkIds.push(wid);
+            projectDailyWork.push(w);
+        }
+    }
+    
+    console.log('📋 Daily work for project (unique):', projectDailyWork.length);
+
+    // ============================================================
+    // BUILD IMAGE HTML
+    // ============================================================
     let imageUrl = getFullImageUrl(p.image);
     let imageHtml = imageUrl ? 
         `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : 
         '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded-lg"><i class="fas fa-image text-3xl text-gray-400"></i><p class="text-sm ml-2">No Image</p></div>';
 
+    // ============================================================
+    // GET SOURCE DEPARTMENT INFO
+    // ============================================================
     let sourceDeptName = 'System';
     let isSent = false;
     let isForwarded = false;
     let forwardChain = p.forward_chain || [];
+    let originalSenderName = 'Unknown';
+    let originalSenderId = 1;
     
     if (p.sent_from_name) {
         sourceDeptName = p.sent_from_name;
@@ -3596,10 +4016,18 @@ async function viewProjectDetails(id) {
     }
 
     // Get original sender info
-    let originalSenderName = p.original_sender_name || departmentNames[p.original_sender_id] || 'Unknown';
-    let originalSenderId = p.original_sender_id || p.department_id || 1;
+    if (p.original_sender_name) {
+        originalSenderName = p.original_sender_name;
+    } else if (p.original_sender_id) {
+        originalSenderName = departmentNames[p.original_sender_id] || 'Unknown';
+    } else if (p.department_id) {
+        originalSenderName = departmentNames[p.department_id] || 'Unknown';
+        originalSenderId = p.department_id;
+    }
 
-    // Build forward chain display
+    // ============================================================
+    // BUILD FORWARD CHAIN DISPLAY
+    // ============================================================
     let forwardChainHtml = '';
     if (forwardChain.length > 0) {
         forwardChainHtml = `
@@ -3615,51 +4043,140 @@ async function viewProjectDetails(id) {
         `;
     }
 
-    // Daily work summary
-    const projectWork = dailyworkData.filter(w => 
-        parseInt(w.project_id) === parseInt(id) || w.project_name === p.name
-    );
+    // ============================================================
+    // CALCULATE DAILY WORK TOTALS
+    // ============================================================
     let totalBudget = 0, totalExpenses = 0;
-    for (let w of projectWork) {
-        totalBudget += parseFloat(w.budget) || 0;
-        totalExpenses += parseFloat(w.amount) || 0;
+    let completedCount = 0, partialCount = 0, pendingCount = 0;
+    
+    for (let w of projectDailyWork) {
+        let budget = parseFloat(w.budget || w.dailywork_budget || 0);
+        let expenses = parseFloat(w.amount || w.dailywork_amount || 0);
+        let status = w.status || w.dailywork_status || 'pending';
+        
+        totalBudget += budget;
+        totalExpenses += expenses;
+        
+        if (status === 'completed') completedCount++;
+        else if (status === 'partial') partialCount++;
+        else pendingCount++;
     }
+    
     let remainingBudget = totalBudget - totalExpenses;
     let remainingColor = remainingBudget >= 0 ? '#059669' : '#dc2626';
+
+    // ============================================================
+    // BUILD PROJECT DETAILS HTML
+    // ============================================================
+    let statusClass = p.status === 'pending' ? 'status-pending' : 
+                     p.status === 'in_progress' ? 'status-progress' : 
+                     p.status === 'completed' ? 'status-completed' : 'status-approved';
+    let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
 
     document.getElementById('viewProjContent').innerHTML = `
         ${imageHtml}
         ${forwardChainHtml}
         <div class="space-y-2 text-sm">
             <div class="grid grid-cols-2 gap-2">
-                <div><strong>Name:</strong></div><div>${escapeHtml(p.name)}</div>
-                <div><strong>Client:</strong></div><div>${escapeHtml(p.client_name || 'N/A')}</div>
-                <div><strong>Amount:</strong></div><div><span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></div>
-                <div><strong>Status:</strong></div><div><span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></div>
-                <div><strong>Progress:</strong></div><div>${p.progress || 0}%</div>
-                <div><strong>Location:</strong></div><div>${escapeHtml(p.location || 'N/A')}</div>
-                <div><strong>Source:</strong></div><div><i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i> ${escapeHtml(sourceDeptName)} ${isSent ? '<span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}</div>
+                <div><strong>Project Name:</strong></div>
+                <div class="font-semibold">${escapeHtml(p.name)}</div>
+                
+                <div><strong>Client:</strong></div>
+                <div>${escapeHtml(p.client_name || 'N/A')}</div>
+                
+                <div><strong>Amount:</strong></div>
+                <div><span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></div>
+                
+                <div><strong>Status:</strong></div>
+                <div><span class="status-badge ${statusClass}">${statusText}</span></div>
+                
+                <div><strong>Progress:</strong></div>
+                <div>
+                    ${p.progress || 0}%
+                    <div class="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                        <div class="bg-blue-600 h-1.5 rounded-full" style="width:${p.progress || 0}%"></div>
+                    </div>
+                </div>
+                
+                <div><strong>Location:</strong></div>
+                <div>${escapeHtml(p.location || 'N/A')}</div>
+                
+                ${p.start_date ? `<div><strong>Start Date:</strong></div><div>${p.start_date}</div>` : ''}
+                ${p.end_date ? `<div><strong>End Date:</strong></div><div>${p.end_date}</div>` : ''}
+                
+                <div><strong>Source:</strong></div>
+                <div>
+                    <i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i> 
+                    ${escapeHtml(sourceDeptName)} 
+                    ${isSent ? '<span class="text-green-500 ml-1"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                </div>
+                
                 ${isForwarded ? `<div><strong>Original Sender:</strong></div><div>${escapeHtml(originalSenderName)}</div>` : ''}
                 ${isForwarded ? `<div><strong>Forward Count:</strong></div><div>${forwardChain.length}</div>` : ''}
-                <div><strong>Daily Work Records:</strong></div><div>${projectWork.length}</div>
-                <div><strong>Total Budget:</strong></div><div class="text-blue-600 font-bold">${formatMoney(totalBudget)}</div>
-                <div><strong>Total Expenses:</strong></div><div class="text-orange-600 font-bold">${formatMoney(totalExpenses)}</div>
-                <div><strong>Remaining Budget:</strong></div><div style="color: ${remainingColor}; font-weight: bold;">${formatMoney(remainingBudget)}</div>
+                
+                <div class="col-span-2"><strong>Description:</strong></div>
+                <div class="col-span-2 text-gray-600">${escapeHtml(p.description || 'No description')}</div>
             </div>
-            <div class="user-info-line mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}</div>
+            
+            <div class="user-info-line mt-2">
+                Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}
+                ${p.updated_by ? ` | Updated by: ${escapeHtml(p.updated_by)} on ${formatDateTimeFull(p.updated_at)}` : ''}
+            </div>
         </div>
     `;
+
+    // ============================================================
+    // BUILD ACTION HISTORY
+    // ============================================================
+    let actionHtml = '';
+    if (p.created_by) {
+        actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(p.created_by)} | ${formatDateTimeFull(p.created_at)}</div>`;
+    }
+    if (p.updated_by && p.updated_by !== p.created_by) {
+        actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(p.updated_by)} | ${formatDateTimeFull(p.updated_at)}</div>`;
+    }
+    if (p.sent_from_dept) {
+        let sentFromName = departmentNames[p.sent_from_dept] || 'Unknown';
+        actionHtml += `<div><i class="fas fa-paper-plane text-xs mr-1"></i> Sent from: ${escapeHtml(sentFromName)} on ${formatDateTimeFull(p.sent_at)}</div>`;
+    }
+    if (p.sent_to_dept) {
+        let sentToName = departmentNames[p.sent_to_dept] || 'Unknown';
+        actionHtml += `<div><i class="fas fa-inbox text-xs mr-1"></i> Sent to: ${escapeHtml(sentToName)} on ${formatDateTimeFull(p.last_sent_at)}</div>`;
+    }
+    if (p.sent_count > 0) {
+        actionHtml += `<div><i class="fas fa-envelope text-xs mr-1"></i> Sent count: ${p.sent_count} times</div>`;
+    }
+    
+    document.getElementById('projActionHistory').innerHTML = actionHtml || '<div class="text-gray-400 text-xs">No history available</div>';
 
     // ============================================================
     // SEND BUTTON - SHOW FOR ALL USERS (including Super Admin)
     // ============================================================
     let deptOptions = '';
+    
     // Show send button for ALL departments
-    // Super Admin can send, Manager can forward, everyone can send
     allDepartmentsForSend.forEach(d => {
         // Don't send to self
         if (d.id !== DEPARTMENT_ID) {
-            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+            // Check if already sent to this department (avoid duplicate)
+            const alreadySent = projectsData.some(proj => {
+                if (proj.source_type === 'sent' && proj.to_department_id === d.id) {
+                    if (proj.original_project_id === p.original_project_id || proj.original_project_id === p.id) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            
+            if (!alreadySent) {
+                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
+                    <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
+                </a>`;
+            } else {
+                deptOptions += `<a class="block px-3 py-1.5 text-gray-400 cursor-not-allowed border-b border-gray-700 last:border-b-0 text-xs" title="Already sent to this department">
+                    <i class="fas fa-check-circle mr-1 text-green-500"></i> ${escapeHtml(d.name)} (Sent)
+                </a>`;
+            }
         }
     });
 
@@ -3667,28 +4184,59 @@ async function viewProjectDetails(id) {
     if (isForwarded && originalSenderId && originalSenderId !== DEPARTMENT_ID) {
         const origDept = allDepartmentsForSend.find(d => d.id === originalSenderId);
         if (origDept) {
-            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${origDept.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs" style="background: #8b5cf6;"><i class="fas fa-undo mr-1"></i> Return to ${escapeHtml(origDept.name)}</a>`;
+            const alreadySentBack = projectsData.some(proj => {
+                if (proj.source_type === 'sent' && proj.to_department_id === originalSenderId) {
+                    if (proj.original_project_id === p.original_project_id || proj.original_project_id === p.id) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            
+            if (!alreadySentBack) {
+                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${origDept.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs" style="background: #8b5cf6;">
+                    <i class="fas fa-undo mr-1"></i> Return to ${escapeHtml(origDept.name)}
+                </a>`;
+            }
         }
     }
 
+    // If no departments available to send to
+    if (!deptOptions) {
+        deptOptions = `<a class="block px-3 py-1.5 text-gray-400 cursor-not-allowed text-xs">No departments available to send to</a>`;
+    }
+
     document.getElementById('viewProjButtons').innerHTML = `
-        <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-        <button onclick="exportProjectToPDFNewWindow(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> Full PDF Report</button>
-        ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="small-btn small-btn-primary"><i class="fas fa-image"></i> View Image</button>` : ''}
+        <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success">
+            <i class="fas fa-file-excel"></i> Excel
+        </button>
+        <button onclick="exportProjectToPDFNewWindow(${p.id})" class="small-btn small-btn-danger">
+            <i class="fas fa-file-pdf"></i> Full PDF Report
+        </button>
+        ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="small-btn small-btn-primary">
+            <i class="fas fa-image"></i> View Image
+        </button>` : ''}
         <div class="send-dropdown">
             <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')">
                 <i class="fas fa-paper-plane"></i> ${isForwarded ? 'Forward Project' : 'Send Project'}
             </button>
             <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
         </div>
+        <button onclick="closeModal('viewProjModal')" class="small-btn small-btn-primary">
+            <i class="fas fa-times"></i> Close
+        </button>
     `;
 
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
     openModal('viewProjModal');
 }
+
+// ============================================================
+// LOAD DAILY WORK FOR PROJECT - FIXED (No Duplicates)
+// ============================================================
 async function loadDailyWorkForProject(projectId) {
-    // ============================================================
-    // HAKIKISHA DAILY WORK IMELOAD
-    // ============================================================
     await fetchDailyWork();
 
     const project = projectsData.find(p => p.id === projectId);
@@ -3698,27 +4246,33 @@ async function loadDailyWorkForProject(projectId) {
     }
 
     console.log('📋 Loading daily work for project:', project.name, 'ID:', projectId);
-    console.log('📋 Total dailyworkData:', dailyworkData.length);
 
     // ============================================================
-    // TAFUTA DAILY WORK KWA PROJECT HII
+    // GET UNIQUE DAILY WORK FOR THIS PROJECT
     // ============================================================
-    const projectDailyWork = dailyworkData.filter(w => {
-        // Tafuta kwa project_id
-        if (w.project_id && parseInt(w.project_id) === parseInt(projectId)) {
-            return true;
-        }
-        // Tafuta kwa project_name
-        if (w.project_name && w.project_name === project.name) {
-            return true;
-        }
+    let projectDailyWork = [];
+    let seenIds = [];
+    
+    // Filter daily work for this project
+    let allWork = dailyworkData.filter(w => {
+        if (w.project_id && parseInt(w.project_id) === parseInt(projectId)) return true;
+        if (w.project_name && w.project_name === project.name) return true;
         return false;
     });
+    
+    // Remove duplicates by ID
+    for (let w of allWork) {
+        let id = w.id || w.original_dailywork_id || w.sent_id || 0;
+        if (!seenIds.includes(id)) {
+            seenIds.push(id);
+            projectDailyWork.push(w);
+        }
+    }
 
-    console.log('📋 Found', projectDailyWork.length, 'daily work records for project:', project.name);
+    console.log('📋 Found', projectDailyWork.length, 'unique daily work records for project:', project.name);
 
     // ============================================================
-    // HESABU TOTALS KWA AJILI YA SUMMARY
+    // CALCULATE TOTALS
     // ============================================================
     let totalBudget = 0, totalExpenses = 0;
     for (let w of projectDailyWork) {
@@ -3736,6 +4290,9 @@ async function loadDailyWorkForProject(projectId) {
         return;
     }
 
+    // ============================================================
+    // BUILD TABLE ROWS
+    // ============================================================
     let html = '';
     for (let w of projectDailyWork) {
         let budget = parseFloat(w.budget) || 0;
@@ -3750,19 +4307,29 @@ async function loadDailyWorkForProject(projectId) {
         let formattedDescription = description.replace(/\n/g, '<br>');
         let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
 
+        // Add source badge to show where this record came from
+        let sourceBadge = '';
+        if (w.source_type === 'sent' || w.source_type === 'sent_from') {
+            sourceBadge = '<span class="text-[8px] bg-purple-100 text-purple-600 px-1 rounded ml-1">📨 Copy</span>';
+        } else {
+            sourceBadge = '<span class="text-[8px] bg-green-100 text-green-600 px-1 rounded ml-1">📁 Original</span>';
+        }
+
         html += `
-            <tr id="daily-row-${w.id}" class="border-b hover:bg-gray-50 transition" style="vertical-align: middle;">
+            <tr id="daily-row-${w.id || w.sent_id}" class="border-b hover:bg-gray-50 transition" style="vertical-align: middle;">
                 <td class="px-4 py-3 text-sm whitespace-nowrap" style="white-space: nowrap;">${recordDate}</td>
-                <td class="px-4 py-3 text-sm" style="white-space: normal; word-wrap: break-word; word-break: break-word; line-height: 1.5; max-width: 300px;">${escapeHtml(formattedDescription)}</td>
+                <td class="px-4 py-3 text-sm" style="white-space: normal; word-wrap: break-word; word-break: break-word; line-height: 1.5; max-width: 300px;">
+                    ${escapeHtml(formattedDescription)} ${sourceBadge}
+                </td>
                 <td class="px-4 py-3 text-sm text-right whitespace-nowrap font-mono font-semibold text-blue-600">${formatMoney(budget)}</td>
                 <td class="px-4 py-3 text-sm text-right whitespace-nowrap font-mono font-semibold text-orange-600">${formatMoney(expenses)}</td>
                 <td class="px-4 py-3 text-center whitespace-nowrap"><span class="status-badge ${statusClass} px-2 py-1 rounded-full text-xs">${statusText}</span></td>
                 <td class="px-4 py-3 text-center whitespace-nowrap text-sm">${escapeHtml(w.created_by || 'System')}</td>
                 <td class="px-4 py-3 text-center whitespace-nowrap">
                     <div class="flex gap-2 justify-center">
-                        <button onclick="viewDailyWork(${w.id})" class="action-btn view p-1.5 rounded" title="View"><i class="fas fa-eye text-xs"></i></button>
-                        <button onclick="editDailyWork(${w.id})" class="action-btn edit p-1.5 rounded" title="Edit"><i class="fas fa-edit text-xs"></i></button>
-                        <button onclick="deleteDailyWork(${w.id})" class="action-btn delete p-1.5 rounded" title="Delete"><i class="fas fa-trash text-xs"></i></button>
+                        <button onclick="viewDailyWork(${w.id || w.sent_id})" class="action-btn view p-1.5 rounded" title="View"><i class="fas fa-eye text-xs"></i></button>
+                        ${w.source_type === 'original' ? `<button onclick="editDailyWork(${w.id})" class="action-btn edit p-1.5 rounded" title="Edit"><i class="fas fa-edit text-xs"></i></button>` : ''}
+                        ${w.source_type === 'original' ? `<button onclick="deleteDailyWork(${w.id})" class="action-btn delete p-1.5 rounded" title="Delete"><i class="fas fa-trash text-xs"></i></button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -3770,12 +4337,8 @@ async function loadDailyWorkForProject(projectId) {
     }
     tbody.innerHTML = html;
     
-    // ============================================================
-    // UPDATE SUMMARY BAADA YA KUWEKA DATA
-    // ============================================================
     updateDailyWorkSummary();
 }
-
 function updateDailyWorkSummary() {
     const project = projectsData.find(p => p.id === currentProjectId);
     if(!project) {

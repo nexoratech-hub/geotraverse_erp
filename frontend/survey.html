@@ -811,59 +811,76 @@ async function emptyRecycleBin() {
 }
 
 // ============================================================
-// FETCH FUNCTIONS
+// FETCH PROJECTS - FIXED (No Duplicates from API)
 // ============================================================
 async function fetchProjects() {
     try {
         const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
         
         if (res.success && res.data) {
-            projectsData = res.data.filter(p =>
-                (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) &&
+            // Filter projects
+            const rawData = res.data.filter(p =>
+                (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID || p.to_department_id === DEPARTMENT_ID) &&
                 (!p.deleted_by_department || p.deleted_by_department != 1) &&
                 (!p.deleted_by_admin || p.deleted_by_admin != 1)
-            ).sort((a, b) => b.id - a.id);
+            );
             
-            console.log(`📋 Found ${projectsData.length} projects`);
+            // ============================================================
+            // DEDUPLICATE - Remove duplicates from API response
+            // ============================================================
+            const uniqueProjects = [];
+            const seenIds = new Set();
+            const seenSentIds = new Set();
+            
+            for (let p of rawData) {
+                let key;
+                if (p.source_type === 'sent' || p.source_type === 'sent_from') {
+                    key = `sent_${p.sent_id || p._display_id}`;
+                    if (!seenSentIds.has(key)) {
+                        seenSentIds.add(key);
+                        uniqueProjects.push(p);
+                    }
+                } else {
+                    key = `orig_${p.id}`;
+                    if (!seenIds.has(key)) {
+                        seenIds.add(key);
+                        uniqueProjects.push(p);
+                    }
+                }
+            }
+            
+            projectsData = uniqueProjects.sort((a, b) => b.id - a.id);
+            
+            console.log(`📋 Found ${projectsData.length} unique projects (from ${rawData.length} raw)`);
             
             // Process each project to extract daily work data
             for (let p of projectsData) {
-                // Check for daily_work_records
-                if (p.daily_work_records) {
-                    if (typeof p.daily_work_records === 'string') {
-                        try {
-                            p._daily_work_records = JSON.parse(p.daily_work_records);
-                            console.log(`📋 Project ${p.id}: parsed ${p._daily_work_records.length} daily_work_records`);
-                        } catch(e) {
-                            p._daily_work_records = [];
-                        }
-                    } else if (Array.isArray(p.daily_work_records)) {
-                        p._daily_work_records = p.daily_work_records;
-                        console.log(`📋 Project ${p.id}: ${p._daily_work_records.length} daily_work_records`);
-                    }
-                }
-                
-                // Check for daily_work_summary
-                if (p.daily_work_summary) {
-                    if (typeof p.daily_work_summary === 'string') {
-                        try {
-                            p._daily_summary = JSON.parse(p.daily_work_summary);
-                        } catch(e) {
-                            p._daily_summary = null;
-                        }
-                    } else if (typeof p.daily_work_summary === 'object') {
-                        p._daily_summary = p.daily_work_summary;
-                    }
-                }
-                
-                // Check for daily_work_count
-                if (p.daily_work_count) {
-                    p._daily_work_count = parseInt(p.daily_work_count) || 0;
-                }
-                
-                // Initialize daily_work array
                 p.daily_work = [];
                 p.daily_work_count = 0;
+                
+                // Extract daily work from project data
+                if (p.daily_work_records) {
+                    let records = p.daily_work_records;
+                    if (typeof records === 'string') {
+                        try {
+                            records = JSON.parse(records);
+                        } catch(e) {
+                            records = [];
+                        }
+                    }
+                    if (Array.isArray(records) && records.length > 0) {
+                        p.daily_work = records;
+                        p.daily_work_count = records.length;
+                    }
+                }
+                
+                // Also check for _daily_work_records
+                if (p._daily_work_records && Array.isArray(p._daily_work_records) && p._daily_work_records.length > 0) {
+                    if (p.daily_work.length === 0) {
+                        p.daily_work = p._daily_work_records;
+                        p.daily_work_count = p._daily_work_records.length;
+                    }
+                }
             }
         } else {
             projectsData = [];
@@ -880,7 +897,6 @@ async function fetchProjects() {
         console.log('⚠️ Could not update badge:', e);
     }
 }
-
 async function fetchProjectDocuments() { 
     const res = await apiCall(`get_project_documents.php?department_id=${DEPARTMENT_ID}`); 
     projectDocuments = (res.success && res.data) ? res.data : []; 
@@ -1056,6 +1072,9 @@ function getFullImageUrl(imagePath) {
     
     // If it already has the full path structure
     if (cleanPath.includes('assets/uploads/projects/')) {
+        if (cleanPath.startsWith('/')) {
+            return cleanPath;
+        }
         return '/' + cleanPath;
     }
     
@@ -1066,12 +1085,13 @@ function getFullImageUrl(imagePath) {
     
     // Otherwise, just get the filename and construct path
     let fileName = cleanPath.split('/').pop();
-    if (fileName) {
+    if (fileName && fileName !== '') {
         return '/geotraverse/frontend/assets/uploads/projects/' + fileName;
     }
     
     return null;
 }
+
 function getCleanFileUrl(filePath, type) {
     if (!filePath || filePath === '' || filePath === 'null' || filePath === 'undefined') {
         return null;
@@ -1218,6 +1238,9 @@ async function fetchDailyWork() {
     }
 }
 
+// ============================================================
+// LOAD DAILY WORK FOR PROJECT - FIXED (No Duplicate Summary)
+// ============================================================
 async function loadDailyWorkForProject(projectId) {
     try {
         console.log(`📊 Loading daily work for project ${projectId}...`);
@@ -1229,6 +1252,8 @@ async function loadDailyWorkForProject(projectId) {
         }
         
         let allRecords = [];
+        const seenIds = new Set();
+        const seenKeys = new Set();
         
         // ============================================================
         // METHOD 1: Check if project has daily_work records embedded
@@ -1236,84 +1261,109 @@ async function loadDailyWorkForProject(projectId) {
         if (p.daily_work_records && Array.isArray(p.daily_work_records) && p.daily_work_records.length > 0) {
             console.log(`📋 Project has ${p.daily_work_records.length} daily_work_records`);
             for (let w of p.daily_work_records) {
-                const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-                allRecords.push({
-                    id: w.id || 'dw-' + Date.now(),
-                    date: w.date || w.created_at || new Date().toISOString(),
-                    project_id: parseInt(projectId),
-                    project_name: w.project_name || p.name,
-                    work_description: w.work_description || w.description || 'Daily work record',
-                    budget: parseFloat(w.budget) || 0,
-                    amount: parseFloat(w.amount) || parseFloat(w.expenses) || 0,
-                    status: w.status || 'pending',
-                    created_by: w.created_by || w.sent_by || 'System',
-                    created_at: w.created_at || new Date().toISOString(),
-                    is_sent_record: isSent ? 1 : 0,
-                    source: isSent ? 'sent' : 'local',
-                    sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
-                    sent_from_dept: w.sent_from_dept || null
-                });
+                // Create unique key
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                const id = w.id || w.original_dailywork_id || 0;
+                
+                if (!seenIds.has(id) && !seenKeys.has(key)) {
+                    seenIds.add(id);
+                    seenKeys.add(key);
+                    
+                    const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                    allRecords.push({
+                        id: id,
+                        date: w.date || w.created_at || new Date().toISOString(),
+                        project_id: parseInt(projectId),
+                        project_name: w.project_name || p.name,
+                        work_description: w.work_description || w.description || 'Daily work record',
+                        budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                        amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                        status: w.status || w.dailywork_status || 'pending',
+                        created_by: w.created_by || w.sent_by || 'System',
+                        created_at: w.created_at || w.sent_at || new Date().toISOString(),
+                        is_sent_record: isSent ? 1 : 0,
+                        source: isSent ? 'sent' : 'local',
+                        sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
+                        sent_from_dept: w.sent_from_dept || null,
+                        original_dailywork_id: w.original_dailywork_id || w.id || 0
+                    });
+                }
             }
         }
         
         // ============================================================
         // METHOD 2: Check if project has _daily_work_records
         // ============================================================
-        if (allRecords.length === 0 && p._daily_work_records && p._daily_work_records.length > 0) {
+        if (p._daily_work_records && Array.isArray(p._daily_work_records) && p._daily_work_records.length > 0) {
             console.log(`📋 Project has ${p._daily_work_records.length} _daily_work_records`);
             for (let w of p._daily_work_records) {
-                const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-                allRecords.push({
-                    id: w.id || 'dw-' + Date.now(),
-                    date: w.date || w.created_at || new Date().toISOString(),
-                    project_id: parseInt(projectId),
-                    project_name: w.project_name || p.name,
-                    work_description: w.work_description || w.description || 'Daily work record',
-                    budget: parseFloat(w.budget) || 0,
-                    amount: parseFloat(w.amount) || parseFloat(w.expenses) || 0,
-                    status: w.status || 'pending',
-                    created_by: w.created_by || w.sent_by || 'System',
-                    created_at: w.created_at || new Date().toISOString(),
-                    is_sent_record: isSent ? 1 : 0,
-                    source: isSent ? 'sent' : 'embedded',
-                    sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
-                    sent_from_dept: w.sent_from_dept || null
-                });
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                const id = w.id || w.original_dailywork_id || 0;
+                
+                if (!seenIds.has(id) && !seenKeys.has(key)) {
+                    seenIds.add(id);
+                    seenKeys.add(key);
+                    
+                    const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                    allRecords.push({
+                        id: id,
+                        date: w.date || w.created_at || new Date().toISOString(),
+                        project_id: parseInt(projectId),
+                        project_name: w.project_name || p.name,
+                        work_description: w.work_description || w.description || 'Daily work record',
+                        budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                        amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                        status: w.status || w.dailywork_status || 'pending',
+                        created_by: w.created_by || w.sent_by || 'System',
+                        created_at: w.created_at || w.sent_at || new Date().toISOString(),
+                        is_sent_record: isSent ? 1 : 0,
+                        source: isSent ? 'sent' : 'embedded',
+                        sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
+                        sent_from_dept: w.sent_from_dept || null,
+                        original_dailywork_id: w.original_dailywork_id || w.id || 0
+                    });
+                }
             }
         }
         
         // ============================================================
         // METHOD 3: Fetch from get_dailywork.php with project_id
         // ============================================================
-        if (allRecords.length === 0) {
-            console.log(`📋 Fetching daily work from API for project ${projectId}`);
-            try {
-                const res = await apiCall(`get_dailywork.php?project_id=${projectId}&department_id=${DEPARTMENT_ID}`);
-                if (res.success && res.data && res.data.length > 0) {
-                    console.log(`📋 Found ${res.data.length} records from API`);
-                    for (let w of res.data) {
+        try {
+            const res = await apiCall(`get_dailywork.php?project_id=${projectId}&department_id=${DEPARTMENT_ID}`);
+            if (res.success && res.data && res.data.length > 0) {
+                console.log(`📋 Found ${res.data.length} records from API`);
+                for (let w of res.data) {
+                    const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                    const id = w.id || w.original_dailywork_id || 0;
+                    
+                    if (!seenIds.has(id) && !seenKeys.has(key)) {
+                        seenIds.add(id);
+                        seenKeys.add(key);
+                        
                         const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
                         allRecords.push({
-                            id: w.id,
+                            id: id,
                             date: w.date || w.created_at || new Date().toISOString(),
                             project_id: parseInt(w.project_id || projectId),
                             project_name: w.project_name || p.name,
                             work_description: w.work_description || '-',
-                            budget: parseFloat(w.budget || 0),
-                            amount: parseFloat(w.amount || 0),
-                            status: w.status || 'pending',
+                            budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                            amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                            status: w.status || w.dailywork_status || 'pending',
                             created_by: w.created_by || 'System',
                             created_at: w.created_at || new Date().toISOString(),
                             is_sent_record: isSent ? 1 : 0,
                             source: isSent ? 'sent' : 'local',
                             sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
-                            sent_from_dept: w.sent_from_dept || null
+                            sent_from_dept: w.sent_from_dept || null,
+                            original_dailywork_id: w.original_dailywork_id || w.id || 0
                         });
                     }
                 }
-            } catch(e) {
-                console.log('⚠️ Error fetching daily work:', e);
             }
+        } catch(e) {
+            console.log('⚠️ Error fetching daily work:', e);
         }
         
         // ============================================================
@@ -1326,23 +1376,32 @@ async function loadDailyWorkForProject(projectId) {
                 if (nameRes.success && nameRes.data && nameRes.data.length > 0) {
                     console.log(`📋 Found ${nameRes.data.length} records by project_name`);
                     for (let w of nameRes.data) {
-                        const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-                        allRecords.push({
-                            id: w.id,
-                            date: w.date || w.created_at || new Date().toISOString(),
-                            project_id: parseInt(w.project_id || projectId),
-                            project_name: w.project_name || p.name,
-                            work_description: w.work_description || '-',
-                            budget: parseFloat(w.budget || 0),
-                            amount: parseFloat(w.amount || 0),
-                            status: w.status || 'pending',
-                            created_by: w.created_by || 'System',
-                            created_at: w.created_at || new Date().toISOString(),
-                            is_sent_record: isSent ? 1 : 0,
-                            source: isSent ? 'sent' : 'local',
-                            sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
-                            sent_from_dept: w.sent_from_dept || null
-                        });
+                        const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                        const id = w.id || w.original_dailywork_id || 0;
+                        
+                        if (!seenIds.has(id) && !seenKeys.has(key)) {
+                            seenIds.add(id);
+                            seenKeys.add(key);
+                            
+                            const isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                            allRecords.push({
+                                id: id,
+                                date: w.date || w.created_at || new Date().toISOString(),
+                                project_id: parseInt(w.project_id || projectId),
+                                project_name: w.project_name || p.name,
+                                work_description: w.work_description || '-',
+                                budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                                amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                                status: w.status || w.dailywork_status || 'pending',
+                                created_by: w.created_by || 'System',
+                                created_at: w.created_at || new Date().toISOString(),
+                                is_sent_record: isSent ? 1 : 0,
+                                source: isSent ? 'sent' : 'local',
+                                sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
+                                sent_from_dept: w.sent_from_dept || null,
+                                original_dailywork_id: w.original_dailywork_id || w.id || 0
+                            });
+                        }
                     }
                 }
             } catch(e) {
@@ -1351,7 +1410,42 @@ async function loadDailyWorkForProject(projectId) {
         }
         
         // ============================================================
-        // METHOD 5: Create from daily_work_summary if available
+        // METHOD 5: Check if project has daily_work array
+        // ============================================================
+        if (allRecords.length === 0 && p.daily_work && Array.isArray(p.daily_work) && p.daily_work.length > 0) {
+            console.log(`📋 Using p.daily_work: ${p.daily_work.length} records`);
+            for (let w of p.daily_work) {
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                const id = w.id || w.original_dailywork_id || 0;
+                
+                if (!seenIds.has(id) && !seenKeys.has(key)) {
+                    seenIds.add(id);
+                    seenKeys.add(key);
+                    
+                    const isSent = w.is_sent_record === 1 || (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID));
+                    allRecords.push({
+                        id: id,
+                        date: w.date || w.created_at || new Date().toISOString(),
+                        project_id: parseInt(w.project_id || projectId),
+                        project_name: w.project_name || p.name,
+                        work_description: w.work_description || '-',
+                        budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                        amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                        status: w.status || w.dailywork_status || 'pending',
+                        created_by: w.created_by || 'System',
+                        created_at: w.created_at || new Date().toISOString(),
+                        is_sent_record: isSent ? 1 : 0,
+                        source: isSent ? 'sent' : 'local',
+                        sent_from_name: isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null,
+                        sent_from_dept: w.sent_from_dept || null,
+                        original_dailywork_id: w.original_dailywork_id || w.id || 0
+                    });
+                }
+            }
+        }
+        
+        // ============================================================
+        // METHOD 6: Create from daily_work_summary if available
         // ============================================================
         if (allRecords.length === 0 && p._daily_summary && p._daily_summary.total_records > 0) {
             console.log(`📋 Creating records from daily_work_summary: ${p._daily_summary.total_records} records`);
@@ -1363,73 +1457,49 @@ async function loadDailyWorkForProject(projectId) {
             const totalExpenses = parseFloat(p._daily_summary.total_expenses) || 0;
             
             for (let i = 0; i < totalRecords; i++) {
-                allRecords.push({
-                    id: 'summary-' + i + '-' + Date.now(),
-                    date: new Date().toISOString(),
-                    project_id: parseInt(projectId),
-                    project_name: p.name,
-                    work_description: 'Daily work record ' + (i + 1),
-                    budget: totalBudget / totalRecords,
-                    amount: totalExpenses / totalRecords,
-                    status: 'pending',
-                    created_by: sentFromName || 'System',
-                    created_at: new Date().toISOString(),
-                    is_sent_record: isSent ? 1 : 0,
-                    source: 'summary',
-                    sent_from_name: sentFromName,
-                    sent_from_dept: p.sent_from_dept || null
-                });
+                const key = 'summary-' + i + '-' + Date.now();
+                if (!seenKeys.has(key)) {
+                    seenKeys.add(key);
+                    allRecords.push({
+                        id: 'summary-' + i + '-' + Date.now(),
+                        date: new Date().toISOString(),
+                        project_id: parseInt(projectId),
+                        project_name: p.name,
+                        work_description: 'Daily work record ' + (i + 1),
+                        budget: totalRecords > 0 ? totalBudget / totalRecords : 0,
+                        amount: totalRecords > 0 ? totalExpenses / totalRecords : 0,
+                        status: 'pending',
+                        created_by: sentFromName || 'System',
+                        created_at: new Date().toISOString(),
+                        is_sent_record: isSent ? 1 : 0,
+                        source: 'summary',
+                        sent_from_name: sentFromName,
+                        sent_from_dept: p.sent_from_dept || null,
+                        original_dailywork_id: 0
+                    });
+                }
             }
         }
         
         // ============================================================
-        // METHOD 6: Create from daily_work_count
-        // ============================================================
-        if (allRecords.length === 0 && p._daily_work_count > 0) {
-            console.log(`📋 Creating records from daily_work_count: ${p._daily_work_count}`);
-            const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-            const sentFromName = isSent ? (departmentNames[p.sent_from_dept] || 'Unknown') : null;
-            const totalBudget = parseFloat(p.amount || 0) / p._daily_work_count;
-            
-            for (let i = 0; i < p._daily_work_count; i++) {
-                allRecords.push({
-                    id: 'count-' + i + '-' + Date.now(),
-                    date: new Date().toISOString(),
-                    project_id: parseInt(projectId),
-                    project_name: p.name,
-                    work_description: 'Daily work record ' + (i + 1),
-                    budget: totalBudget,
-                    amount: 0,
-                    status: 'pending',
-                    created_by: sentFromName || 'System',
-                    created_at: new Date().toISOString(),
-                    is_sent_record: isSent ? 1 : 0,
-                    source: 'count',
-                    sent_from_name: sentFromName,
-                    sent_from_dept: p.sent_from_dept || null
-                });
-            }
-        }
-        
-        // ============================================================
-        // 7. SORT BY DATE (NEWEST FIRST)
+        // SORT BY DATE (NEWEST FIRST)
         // ============================================================
         allRecords.sort((a, b) => {
             return new Date(b.date || b.created_at) - new Date(a.date || a.created_at);
         });
         
-        console.log(`📋 Total daily work records: ${allRecords.length}`);
+        console.log(`📋 Total unique daily work records: ${allRecords.length}`);
         if (allRecords.length > 0) {
             console.log('📋 Sample record:', allRecords[0]);
         }
         
         // ============================================================
-        // 8. UPDATE PROJECT DATA
+        // UPDATE PROJECT DATA
         // ============================================================
         p.daily_work = allRecords;
         p.daily_work_count = allRecords.length;
         
-        // Calculate summary
+        // Calculate summary - FIXED: Use unique records only
         let totalBudget = 0, totalExpenses = 0;
         let completed = 0, partial = 0, pending = 0;
         let sentCount = 0;
@@ -1457,8 +1527,10 @@ async function loadDailyWorkForProject(projectId) {
             pending: pending
         };
         
+        console.log('📊 Daily Work Summary:', p.daily_work_summary);
+        
         // ============================================================
-        // 9. RENDER TABLE
+        // RENDER TABLE
         // ============================================================
         renderDailyWorkTable(projectId);
         updateDailyWorkSummary(projectId);
@@ -1472,7 +1544,7 @@ async function loadDailyWorkForProject(projectId) {
 }
 
 // ============================================================
-// RENDER DAILY WORK TABLE - NO SEND BUTTON
+// RENDER DAILY WORK TABLE - FIXED (Disable Actions for Received)
 // ============================================================
 function renderDailyWorkTable(projectId) {
     const p = projectsData.find(proj => proj.id === projectId);
@@ -1481,6 +1553,11 @@ function renderDailyWorkTable(projectId) {
     const tbody = document.getElementById('dailyWorkTableBody');
     if (!tbody) return;
     
+    // Check if project was received
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const canEdit = !isReceived;
+    
+    // Use unique records from p.daily_work
     const records = p.daily_work || [];
     
     if (records.length === 0) {
@@ -1489,6 +1566,7 @@ function renderDailyWorkTable(projectId) {
                 <td colspan="6" class="text-center py-8 text-gray-400">
                     <i class="fas fa-calendar-day text-xl block mb-2 opacity-50"></i>
                     No daily work records found for this project
+                    ${isReceived ? '<br><span class="text-xs text-orange-500">You cannot add daily work to received projects</span>' : ''}
                 </td>
             </tr>
         `;
@@ -1497,8 +1575,14 @@ function renderDailyWorkTable(projectId) {
     
     let html = '';
     let totalBudget = 0, totalExpenses = 0;
+    const seenRowIds = new Set();
     
     for (let w of records) {
+        // Create unique row key
+        const rowKey = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+        if (seenRowIds.has(rowKey)) continue;
+        seenRowIds.add(rowKey);
+        
         const budget = parseFloat(w.budget) || 0;
         const amount = parseFloat(w.amount) || 0;
         totalBudget += budget;
@@ -1512,8 +1596,11 @@ function renderDailyWorkTable(projectId) {
         const isSent = w.is_sent_record === 1 || w.source === 'sent' || w.source === 'embedded';
         const sentFrom = w.sent_from_name || (w.sent_from_dept ? departmentNames[w.sent_from_dept] : null);
         
-        // Check if record is sent from other department - disable edit/delete
+        // Check if record is sent from other department
         const isFromOtherDept = w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+        
+        // Determine if actions should be disabled
+        const disableActions = isReceived || isFromOtherDept || w.source === 'summary';
         
         html += `
             <tr id="daily-row-${w.id}" class="${isSent ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}">
@@ -1521,6 +1608,8 @@ function renderDailyWorkTable(projectId) {
                 <td>
                     ${escapeHtml(w.work_description || '-')}
                     ${isSent && sentFrom ? `<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> Sent from ${escapeHtml(sentFrom)}</span>` : ''}
+                    ${w.source === 'summary' ? `<span class="text-[8px] bg-gray-100 px-1.5 py-0.5 rounded ml-1">Summary</span>` : ''}
+                    ${isReceived ? `<span class="text-[8px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded ml-1"><i class="fas fa-eye mr-1"></i> View Only</span>` : ''}
                 </td>
                 <td class="text-right font-mono font-semibold text-teal-600">${formatCurrency(budget)}</td>
                 <td class="text-right font-mono font-semibold text-orange-600">${formatCurrency(amount)}</td>
@@ -1532,23 +1621,27 @@ function renderDailyWorkTable(projectId) {
                             <i class="fas fa-eye"></i>
                         </button>
                         
-                        <!-- EDIT BUTTON - Only for local records (not sent from other dept) -->
-                        ${!isFromOtherDept ? `
+                        ${!disableActions ? `
+                        <!-- EDIT BUTTON - Only for local records -->
                         <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important;">
                             <i class="fas fa-edit"></i>
-                        </button>` : `
-                        <button class="action-btn edit" title="Cannot edit - sent from other department" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important; opacity:0.5; cursor:not-allowed; background:#9ca3af; color:white;">
-                            <i class="fas fa-edit"></i>
-                        </button>`}
+                        </button>
                         
-                        <!-- DELETE BUTTON - Only for local records (not sent from other dept) -->
-                        ${!isFromOtherDept ? `
+                        <!-- DELETE BUTTON - Only for local records -->
                         <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important;">
                             <i class="fas fa-trash"></i>
-                        </button>` : `
-                        <button class="action-btn delete" title="Cannot delete - sent from other department" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important; opacity:0.5; cursor:not-allowed; background:#9ca3af; color:white;">
+                        </button>
+                        ` : `
+                        <!-- Disabled EDIT button -->
+                        <button class="action-btn edit" title="Cannot edit - ${isReceived ? 'project received from other department' : 'record sent from other department'}" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important; opacity:0.5; cursor:not-allowed; background:#9ca3af; color:white;">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        
+                        <!-- Disabled DELETE button -->
+                        <button class="action-btn delete" title="Cannot delete - ${isReceived ? 'project received from other department' : 'record sent from other department'}" style="padding:4px 8px !important; font-size:10px !important; border-radius:4px !important; height:28px !important; min-width:28px !important; opacity:0.5; cursor:not-allowed; background:#9ca3af; color:white;">
                             <i class="fas fa-trash"></i>
-                        </button>`}
+                        </button>
+                        `}
                     </div>
                 </td>
             </tr>
@@ -1561,18 +1654,26 @@ function renderDailyWorkTable(projectId) {
     updateDailyWorkSummary(projectId);
 }
 // ============================================================
-// UPDATE DAILY WORK SUMMARY
+// UPDATE DAILY WORK SUMMARY - FIXED (No Duplicate)
 // ============================================================
 function updateDailyWorkSummary(projectId) {
     const p = projectsData.find(proj => proj.id === projectId);
     if (!p) return;
     
+    // Use unique records from p.daily_work
     const records = p.daily_work || [];
     let totalBudget = 0, totalExpenses = 0;
+    const seenIds = new Set();
+    
     for (let w of records) {
+        const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+        if (seenIds.has(key)) continue;
+        seenIds.add(key);
+        
         totalBudget += parseFloat(w.budget) || 0;
         totalExpenses += parseFloat(w.amount) || 0;
     }
+    
     const remaining = totalBudget - totalExpenses;
     
     const totalBudgetSpan = document.getElementById('totalBudget');
@@ -1592,16 +1693,18 @@ function updateDailyWorkSummary(projectId) {
         remainingSpan.innerHTML = formatCurrency(remaining);
         if (remaining < 0) {
             remainingSpan.className = 'value negative';
+            if (remainingCard) remainingCard.className = 'dailywork-summary-card remaining negative';
         } else if (remaining === 0) {
             remainingSpan.className = 'value zero';
+            if (remainingCard) remainingCard.className = 'dailywork-summary-card remaining zero';
         } else {
             remainingSpan.className = 'value remaining';
+            if (remainingCard) remainingCard.className = 'dailywork-summary-card remaining';
         }
     }
 }
-
 // ============================================================
-// TOGGLE DAILY WORK TABLE
+// TOGGLE DAILY WORK TABLE - FIXED
 // ============================================================
 function toggleDailyWorkTable() {
     const container = document.getElementById('dailyWorkListContainer');
@@ -1612,13 +1715,31 @@ function toggleDailyWorkTable() {
     const toggleBtn = document.getElementById('toggleDailyWorkBtn');
     if (!container) return;
     
+    // Get current project
+    const p = projectsData.find(proj => proj.id === currentProjectId);
+    const isReceived = p && p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    
     if (container.style.display === 'none' || container.style.display === '') {
         container.style.display = 'block';
         if (summary) summary.style.display = 'grid';
-        if (addBtn) addBtn.style.display = 'inline-flex';
+        
+        // Only show Add button if not received
+        if (addBtn) {
+            if (isReceived) {
+                addBtn.style.display = 'none';
+            } else {
+                addBtn.style.display = 'inline-flex';
+            }
+        }
+        
         if (excelBtn) excelBtn.style.display = 'inline-flex';
         if (pdfBtn) pdfBtn.style.display = 'inline-flex';
-        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        
+        if (toggleBtn) {
+            toggleBtn.innerHTML = isReceived ? 
+                '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work (Read Only)' : 
+                '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        }
     } else {
         container.style.display = 'none';
         if (summary) summary.style.display = 'none';
@@ -1628,14 +1749,29 @@ function toggleDailyWorkTable() {
         if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-table mr-1"></i> Show Daily Work';
     }
 }
-
 // ============================================================
-// OPEN DAILY WORK MODAL
+// OPEN DAILY WORK MODAL - CHECK PERMISSIONS
 // ============================================================
 function openDailyWorkModalForProject(projectId) {
     const p = projectsData.find(proj => proj.id === projectId);
     if (!p) {
         showToast('Project not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // CHECK IF PROJECT WAS RECEIVED
+    // ============================================================
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    
+    if (isReceived) {
+        showToast('❌ You cannot add daily work to a project received from another department', true);
+        return;
+    }
+    
+    // Also check if this is a sent copy
+    if (p.source_type === 'sent' || p.source_type === 'sent_from') {
+        showToast('❌ You cannot add daily work to a sent project copy', true);
         return;
     }
     
@@ -1650,6 +1786,103 @@ function openDailyWorkModalForProject(projectId) {
     openModal('dailyworkModal');
 }
 
+// ============================================================
+// EDIT DAILY WORK - CHECK PERMISSIONS
+// ============================================================
+function editDailyWork(id) {
+    const w = dailyworkData.find(w => w.id === id);
+    if (!w) {
+        showToast('Daily work record not found', true);
+        return;
+    }
+    
+    // Find the project
+    const p = projectsData.find(proj => proj.id === w.project_id);
+    
+    // Check if project was received
+    if (p && p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
+        showToast('❌ Cannot edit daily work for a project received from another department', true);
+        return;
+    }
+    
+    // Check if this is a sent record
+    if (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
+        showToast('❌ Cannot edit a daily work record that was sent from another department', true);
+        return;
+    }
+    
+    // Check if this is a summary record
+    if (w.source === 'summary') {
+        showToast('❌ Cannot edit a summary record', true);
+        return;
+    }
+    
+    document.getElementById('dailyworkId').value = w.id;
+    document.getElementById('dailyworkProjectId').value = w.project_id;
+    document.getElementById('dailyworkProjectName').value = w.project_name || '';
+    document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0, 16) : new Date().toISOString().slice(0, 16);
+    document.getElementById('dailyworkDesc').value = w.work_description || '';
+    document.getElementById('dailyworkBudget').value = formatNumberWithCommas(w.budget || 0);
+    document.getElementById('dailyworkAmount').value = formatNumberWithCommas(w.amount || 0);
+    document.getElementById('dailyworkStatus').value = w.status || 'pending';
+    openModal('dailyworkModal');
+}
+
+// ============================================================
+// DELETE DAILY WORK - CHECK PERMISSIONS
+// ============================================================
+async function deleteDailyWork(id) {
+    if (!confirm('Delete this daily work record?')) return;
+    
+    const w = dailyworkData.find(w => w.id === id);
+    if (!w) {
+        showToast('Daily work record not found', true);
+        return;
+    }
+    
+    // Find the project
+    const p = projectsData.find(proj => proj.id === w.project_id);
+    
+    // Check if project was received
+    if (p && p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
+        showToast('❌ Cannot delete daily work for a project received from another department', true);
+        return;
+    }
+    
+    // Check if this is a sent record
+    if (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
+        showToast('❌ Cannot delete a daily work record that was sent from another department', true);
+        return;
+    }
+    
+    // Check if this is a summary record
+    if (w.source === 'summary') {
+        showToast('❌ Cannot delete a summary record', true);
+        return;
+    }
+    
+    try {
+        const res = await apiCall('delete_dailywork.php', 'POST', { 
+            id: parseInt(id), 
+            is_deleted: 1 
+        });
+        
+        if (res && res.success) {
+            showToast('Daily work deleted successfully');
+            dailyworkData = dailyworkData.filter(w => w.id !== id);
+            
+            if (currentProjectId) {
+                await loadDailyWorkForProject(currentProjectId);
+                await viewProject(currentProjectId);
+            }
+            await loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to delete', true);
+        }
+    } catch(e) {
+        showToast('Network error: ' + e.message, true);
+    }
+}
 function openDailyWorkModal() {
     const p = projectsData.find(proj => proj.id === currentProjectId);
     if (!p) {
@@ -1784,67 +2017,7 @@ async function viewDailyWork(id) {
     openModal('viewDailyworkModal');
 }
 
-// ============================================================
-// EDIT DAILY WORK
-// ============================================================
-function editDailyWork(id) {
-    const w = dailyworkData.find(w => w.id === id);
-    if (!w) {
-        showToast('Daily work record not found', true);
-        return;
-    }
-    
-    // Check if it's a sent record - don't allow editing
-    if (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
-        showToast('❌ Cannot edit a daily work record that was sent from another department', true);
-        return;
-    }
-    
-    document.getElementById('dailyworkId').value = w.id;
-    document.getElementById('dailyworkProjectId').value = w.project_id;
-    document.getElementById('dailyworkProjectName').value = w.project_name || '';
-    document.getElementById('dailyworkDateTime').value = w.date ? w.date.slice(0, 16) : new Date().toISOString().slice(0, 16);
-    document.getElementById('dailyworkDesc').value = w.work_description || '';
-    document.getElementById('dailyworkBudget').value = formatNumberWithCommas(w.budget || 0);
-    document.getElementById('dailyworkAmount').value = formatNumberWithCommas(w.amount || 0);
-    document.getElementById('dailyworkStatus').value = w.status || 'pending';
-    openModal('dailyworkModal');
-}
 
-// ============================================================
-// DELETE DAILY WORK
-// ============================================================
-async function deleteDailyWork(id) {
-    if (!confirm('Delete this daily work record?')) return;
-    
-    const w = dailyworkData.find(w => w.id === id);
-    if (w && w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
-        showToast('❌ Cannot delete a daily work record that was sent from another department', true);
-        return;
-    }
-    
-    try {
-        const res = await apiCall('delete_dailywork.php', 'POST', { 
-            id: parseInt(id), 
-            is_deleted: 1 
-        });
-        
-        if (res && res.success) {
-            showToast('Daily work deleted successfully');
-            dailyworkData = dailyworkData.filter(w => w.id !== id);
-            
-            if (currentProjectId) {
-                await loadDailyWorkForProject(currentProjectId);
-                await viewProjectDetails(currentProjectId);
-            }
-            await loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to delete', true);
-        }
-    } catch(e) {
-        showToast('Network error: ' + e.message, true);
-    }
-}
 
 // ============================================================
 // EXPORT DAILY WORK TO EXCEL
@@ -2443,38 +2616,113 @@ async function deleteProject(id) {
 }
 
 // ============================================================
-// VIEW PROJECT - FULL FUNCTION
+// VIEW PROJECT - FIXED (Detect if Received)
 // ============================================================
 async function viewProject(id) {
-    const p = projectsData.find(proj => proj.id === id);
-    if(!p) {
+    // Find project - try multiple lookup methods
+    let p = projectsData.find(proj => proj.id === id);
+    
+    // If not found, try by sent_id
+    if (!p) {
+        p = projectsData.find(proj => proj.sent_id === id);
+    }
+    
+    // If not found, try by _display_id
+    if (!p) {
+        p = projectsData.find(proj => proj._display_id === id);
+    }
+    
+    // If still not found, try by original_project_id for sent projects
+    if (!p) {
+        p = projectsData.find(proj => proj.original_project_id === id && proj.source_type === 'sent');
+    }
+    
+    if (!p) {
         showToast('Project not found', true);
         return;
     }
     
+    // ============================================================
+    // CHECK IF PROJECT WAS RECEIVED FROM OTHER DEPARTMENT
+    // ============================================================
+    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isOriginal = p.source_type === 'original' || p.department_id === DEPARTMENT_ID;
+    const canEditDailyWork = !isReceived && isOriginal;
+    
+    // Store in global for daily work functions
+    window._currentProjectReceived = isReceived;
+    window._currentProjectCanEditDailyWork = canEditDailyWork;
+    
+    console.log('📋 Project status:', {
+        isReceived,
+        isOriginal,
+        canEditDailyWork,
+        sourceType: p.source_type,
+        sentFrom: p.sent_from_dept,
+        departmentId: DEPARTMENT_ID
+    });
+    
+    // Mark as viewed
     if (p._is_unviewed) {
-        markProjectViewed(id);
-        await apiCall('mark_project_viewed.php', 'POST', { project_id: id, department_id: DEPARTMENT_ID });
+        await markProjectViewed(id);
+        p._is_unviewed = false;
+        const card = document.getElementById(`proj-card-${id}`);
+        if (card) {
+            const badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+            card.classList.remove('unviewed');
+        }
+        await apiCall('mark_project_viewed.php', 'POST', { 
+            project_id: p.id, 
+            department_id: DEPARTMENT_ID 
+        });
     }
     
-    currentProjectId = id;
-    await loadDailyWorkForProject(id);
+    currentProjectId = p.id;
+    await loadDailyWorkForProject(p.id);
     
-    // Get image with proper URL
-    let imageUrl = getFullImageUrl(p.image);
-    console.log('📷 Project image URL:', imageUrl);
+    // ============================================================
+    // GET PROJECT IMAGE
+    // ============================================================
+    let imageUrl = null;
     
-    // Check if image exists and is valid
+    // Try multiple sources for image
+    if (p.image) {
+        imageUrl = getFullImageUrl(p.image);
+    }
+    if (!imageUrl && p.project_data) {
+        let data = p.project_data;
+        if (typeof data === 'string') {
+            try {
+                data = JSON.parse(data);
+            } catch(e) {}
+        }
+        if (data && data.image) {
+            imageUrl = getFullImageUrl(data.image);
+        }
+    }
+    if (!imageUrl && p.original_project_id) {
+        const origProj = projectsData.find(proj => proj.id === p.original_project_id);
+        if (origProj && origProj.image) {
+            imageUrl = getFullImageUrl(origProj.image);
+        }
+    }
+    if (!imageUrl && p.image_path) {
+        imageUrl = getFullImageUrl(p.image_path);
+    }
+    
+    console.log('📷 Final image URL:', imageUrl);
+    
     let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || imageUrl.startsWith('data:image/'));
     
     let imageHtml = '';
     if (imageUrl && isImage) {
         imageHtml = `
-            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;position:relative;">
                 <img src="${imageUrl}?t=${Date.now()}" 
                      style="width:100%;height:100%;object-fit:cover;cursor:pointer;" 
                      onclick="showFullImage('${imageUrl}')" 
-                     onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;\\'><i class=\\'fas fa-image text-4xl text-gray-400\\'></i><p class=\\'text-sm text-gray-500 ml-2\\'>Image failed to load</p></div>'">
+                     onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;\\'><i class=\\'fas fa-image text-4xl text-gray-400\\'></i><p class=\\'text-sm text-gray-500 mt-2\\'>Image not available</p></div>'">
             </div>`;
     } else if (imageUrl && !isImage) {
         imageHtml = `
@@ -2485,17 +2733,70 @@ async function viewProject(id) {
             </div>`;
     } else {
         imageHtml = `
-            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;">
+            <div style="width:100%;height:200px;margin-bottom:15px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;flex-direction:column;">
                 <i class="fas fa-image text-4xl text-gray-400"></i>
-                <p class="text-sm text-gray-500 ml-2">No Image Available</p>
+                <p class="text-sm text-gray-500 mt-2">No Image Available</p>
+                ${isReceived ? '<p class="text-xs text-gray-400">Image may not have been included when sent</p>' : ''}
             </div>`;
     }
     
-    // Check if project was sent from another department
-    const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-    const sentFromName = isSent ? (departmentNames[p.sent_from_dept] || 'Unknown') : null;
+    // ============================================================
+    // CHECK SOURCE
+    // ============================================================
+    let sentFromName = isReceived ? (departmentNames[p.sent_from_dept] || 'Unknown') : null;
     
+    let isForwarded = p.is_forward === 1 || (p.forward_count && p.forward_count > 0) || (p.forward_chain && p.forward_chain.length > 0);
+    let originalSenderName = p.original_sender_name || departmentNames[p.original_sender_id] || 'Unknown';
+    
+    // Build forward chain display
+    let forwardChainHtml = '';
+    if (p.forward_chain && p.forward_chain.length > 0) {
+        forwardChainHtml = `
+            <div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #f59e0b;">
+                <strong><i class="fas fa-route mr-1"></i> Forward Chain:</strong>
+                <div style="font-size: 11px; margin-top: 5px;">
+                    ${p.forward_chain.map((f, i) => 
+                        `<span>${i + 1}. ${escapeHtml(f.from_department_name || 'Unknown')} → ${escapeHtml(f.to_department_name || 'Unknown')}</span>`
+                    ).join(' → ')}
+                    ${isForwarded ? `<br><span style="color: #6b7280; font-size: 9px;">Total forwards: ${p.forward_chain.length} | Original sender: ${escapeHtml(originalSenderName)}</span>` : ''}
+                </div>
+            </div>
+        `;
+    }
+    
+    // ============================================================
+    // GET DAILY WORK COUNT
+    // ============================================================
+    const dailyCount = (p.daily_work || []).length;
+    const sentCount = (p.daily_work || []).filter(w => w.is_sent_record === 1).length;
+    
+    // ============================================================
+    // BUILD RECEIVED BADGE
+    // ============================================================
+    let receivedBadge = '';
+    if (isReceived) {
+        receivedBadge = `
+            <div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                <i class="fas fa-paper-plane text-orange-600 mr-2"></i>
+                <span style="font-weight: 600; color: #d97706;">
+                    This project was received from <strong>${escapeHtml(sentFromName)}</strong>
+                </span>
+                ${isForwarded ? `<br><span style="font-size: 11px; color: #92400e;">(Forwarded ${p.forward_chain ? p.forward_chain.length : 0} times)</span>` : ''}
+                <br><span style="font-size: 10px; color: #92400e;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    You can view daily work records but cannot add, edit, or delete them
+                </span>
+            </div>
+        `;
+    }
+    
+    // ============================================================
+    // BUILD DETAILS HTML
+    // ============================================================
     let detailsHtml = `
+        ${receivedBadge}
+        ${imageHtml}
+        ${forwardChainHtml}
         <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
             <tr style="border-bottom:1px solid #e5e7eb;">
                 <td style="padding:14px 16px;font-weight:600;width:35%;background:#f8fafc;border-right:1px solid #e5e7eb;">
@@ -2579,7 +2880,7 @@ async function viewProject(id) {
                     <span style="color:#6b7280;font-size:11px;">on ${formatDateTime(p.updated_at)}</span>
                 </td>
             </tr>` : ''}
-            ${isSent && sentFromName ? `
+            ${isReceived && sentFromName ? `
             <tr style="border-bottom:1px solid #e5e7eb;">
                 <td style="padding:14px 16px;font-weight:600;background:#f8fafc;border-right:1px solid #e5e7eb;">
                     <i class="fas fa-paper-plane text-teal-500 mr-2"></i> Received From:
@@ -2590,34 +2891,58 @@ async function viewProject(id) {
                     </span>
                 </td>
             </tr>` : ''}
+            ${isForwarded ? `
+            <tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:14px 16px;font-weight:600;background:#f8fafc;border-right:1px solid #e5e7eb;">
+                    <i class="fas fa-route text-teal-500 mr-2"></i> Original Sender:
+                </td>
+                <td style="padding:14px 16px;">
+                    <span style="color:#7c3aed;font-weight:600;">${escapeHtml(originalSenderName)}</span>
+                    <span style="color:#6b7280;font-size:11px;">(Forwarded ${p.forward_chain ? p.forward_chain.length : 0} times)</span>
+                </td>
+            </tr>` : ''}
         </table>
-    `;
-    
-    // Get daily work count
-    const dailyCount = (p.daily_work || []).length;
-    const sentCount = (p.daily_work || []).filter(w => w.is_sent_record === 1).length;
-    
-    document.getElementById('viewProjectContent').innerHTML = `
-        ${imageHtml}
-        ${detailsHtml}
         <div class="mt-3 text-xs text-gray-500">
             <i class="fas fa-calendar-day mr-1"></i> 
             Daily Work Records: <strong>${dailyCount}</strong> 
             ${sentCount > 0 ? `(<span class="text-purple-600">${sentCount} sent from other departments</span>)` : ''}
+            ${isReceived ? `<br><span class="text-orange-600"><i class="fas fa-info-circle mr-1"></i> View only - You cannot add, edit, or delete daily work for received projects</span>` : ''}
         </div>
     `;
     
-    // Build department options for sending
+    document.getElementById('viewProjectContent').innerHTML = detailsHtml;
+    
+    // ============================================================
+    // BUILD ACTION BUTTONS
+    // ============================================================
     let deptOptions = ''; 
     allDepartmentsForSend.forEach(d => { 
         if (d.id !== DEPARTMENT_ID) {
+            const alreadySent = projectsData.some(proj => 
+                proj.original_project_id === p.original_project_id && 
+                proj.to_department_id === d.id &&
+                proj.source_type === 'sent'
+            );
+            const label = alreadySent ? ' (Resend)' : '';
             deptOptions += `
                 <a onclick="sendProjectToDept(${p.id}, ${d.id})" 
                    class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
-                    <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
-                </a>`;
+                    <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}${label}
+                </a>`; 
         }
     });
+    
+    if (isForwarded && p.original_sender_id && p.original_sender_id !== DEPARTMENT_ID) {
+        const origDept = allDepartmentsForSend.find(d => d.id === p.original_sender_id);
+        if (origDept) {
+            deptOptions += `
+                <a onclick="sendProjectToDept(${p.id}, ${origDept.id})" 
+                   class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs" 
+                   style="background: #8b5cf6;">
+                    <i class="fas fa-undo mr-1"></i> Return to ${escapeHtml(origDept.name)}
+                </a>`;
+        }
+    }
     
     document.getElementById('viewProjButtons').innerHTML = `
         <button onclick="exportSingleProjectExcel(${p.id})" class="btn-success">
@@ -2636,7 +2961,7 @@ async function viewProject(id) {
         </button>` : ''}
         <div class="send-dropdown">
             <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')">
-                <i class="fas fa-paper-plane"></i> Send Project
+                <i class="fas fa-paper-plane"></i> ${isReceived ? 'Forward Project' : 'Send Project'}
             </button>
             <div id="projSendDropdown-${p.id}" class="send-dropdown-content">
                 ${deptOptions}
@@ -2644,103 +2969,299 @@ async function viewProject(id) {
         </div>
     `;
     
-    openModal('viewProjectModal');
-    loadProjects();
-}
-
-
-// ============================================================
-// SEND PROJECT TO DEPARTMENT
-// ============================================================
-async function sendProjectToDept(projectId, deptId) { 
-    const p = projectsData.find(p=>p.id===projectId); 
-    if(!p) { showToast('Project not found', true); return; }
-    if(deptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    // ============================================================
+    // UPDATE DAILY WORK BUTTONS - BASED ON RECEIVED STATUS
+    // ============================================================
+    // Store for daily work functions
+    window._currentProjectReceived = isReceived;
+    window._currentProjectCanEditDailyWork = canEditDailyWork;
     
-    // Check if project was sent from another department - ALLOW FORWARDING but show warning
-    const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
-    if (isReceived) {
-        const sentFromName = departmentNames[p.sent_from_dept] || 'Unknown';
-        if (!confirm(`⚠️ This project was received from "${sentFromName}". Are you sure you want to forward it to another department?`)) {
-            return;
+    // Update Add Daily Work button
+    const addDailyWorkBtn = document.getElementById('addDailyWorkBtn');
+    if (addDailyWorkBtn) {
+        if (isReceived || !canEditDailyWork) {
+            addDailyWorkBtn.style.display = 'none';
+        } else {
+            addDailyWorkBtn.style.display = 'inline-flex';
         }
     }
     
-    const dept = allDepartmentsForSend.find(d=>d.id==deptId);
-    const deptName = dept ? dept.name : 'Department';
+    // Update Daily Work table header
+    const dailyWorkTableHead = document.querySelector('#dailyWorkListContainer thead');
+    if (dailyWorkTableHead) {
+        // Add a "View Only" badge to the table header if received
+        const existingBadge = dailyWorkTableHead.querySelector('.view-only-badge');
+        if (isReceived || !canEditDailyWork) {
+            if (!existingBadge) {
+                const headerRow = dailyWorkTableHead.querySelector('tr');
+                if (headerRow) {
+                    const th = document.createElement('th');
+                    th.className = 'view-only-badge';
+                    th.setAttribute('colspan', '6');
+                    th.style.textAlign = 'center';
+                    th.style.padding = '8px';
+                    th.style.background = '#fef3c7';
+                    th.style.color = '#d97706';
+                    th.style.fontSize = '11px';
+                    th.innerHTML = '<i class="fas fa-eye mr-1"></i> View Only - You cannot add, edit, or delete daily work for this project';
+                    headerRow.parentNode.insertBefore(th, headerRow.nextSibling);
+                }
+            }
+        } else {
+            if (existingBadge) {
+                existingBadge.remove();
+            }
+        }
+    }
     
+    // Update the toggle button text
+    const toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    if (toggleBtn && isReceived) {
+        toggleBtn.innerHTML = '<i class="fas fa-eye mr-1"></i> View Daily Work (Read Only)';
+    }
+    
+    openModal('viewProjectModal');
+}
+
+// ============================================================
+// SEND PROJECT TO DEPARTMENT - FIXED (No Duplicates)
+// ============================================================
+async function sendProjectToDept(projectId, deptId) {
+    // Find project in data
+    let p = projectsData.find(p => p.id === projectId);
+    let isSentProject = false;
+    let originalProjectId = projectId;
+    let originalSenderId = DEPARTMENT_ID;
+    let isForward = false;
+    let forwardChain = [];
+    let fromDeptId = DEPARTMENT_ID;
+    let sentProjectId = null;
+    let isDuplicate = false;
+    
+    // Check if this is a sent project (forwarding)
+    if (p && p.source_type === 'sent') {
+        isSentProject = true;
+        originalProjectId = p.original_project_id || projectId;
+        originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+        isForward = true;
+        forwardChain = p.forward_chain || [];
+        fromDeptId = p.from_department_id || DEPARTMENT_ID;
+        sentProjectId = p.sent_id || p._display_id || p.id;
+    }
+    
+    // If not found by id, try sent_id
+    if (!p) {
+        p = projectsData.find(p => p.sent_id === projectId);
+        if (p) {
+            isSentProject = true;
+            originalProjectId = p.original_project_id || projectId;
+            originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+            isForward = true;
+            forwardChain = p.forward_chain || [];
+            fromDeptId = p.from_department_id || DEPARTMENT_ID;
+            sentProjectId = p.sent_id || p._display_id || p.id;
+        }
+    }
+    
+    // If still not found, try by _display_id
+    if (!p) {
+        p = projectsData.find(p => p._display_id === projectId);
+        if (p) {
+            isSentProject = true;
+            originalProjectId = p.original_project_id || projectId;
+            originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+            isForward = true;
+            forwardChain = p.forward_chain || [];
+            fromDeptId = p.from_department_id || DEPARTMENT_ID;
+            sentProjectId = p.sent_id || p._display_id || p.id;
+        }
+    }
+    
+    if (!p) {
+        showToast('Project not found', true);
+        return;
+    }
+    
+    // Don't allow sending to self
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to your own department', true);
+        return;
+    }
+    
+    // ============================================================
+    // CHECK FOR DUPLICATE - Prevent sending to same department twice
+    // ============================================================
+    // Check if this project was already sent to this department
+    const alreadySent = projectsData.some(proj => 
+        proj.original_project_id === originalProjectId && 
+        proj.to_department_id === deptId &&
+        proj.source_type === 'sent' &&
+        proj.is_deleted !== 1
+    );
+    
+    // Also check in sent_projects via API if needed (we'll check in backend too)
+    
+    if (alreadySent && !isForward) {
+        if (!confirm(`⚠️ This project has already been sent to ${departmentNames[deptId] || 'this department'}. Do you want to send it again?`)) {
+            return;
+        }
+        isDuplicate = true;
+    }
+    
+    // If forwarding, check if already forwarded to this department
+    if (isForward) {
+        // Check if already forwarded to this department
+        const alreadyForwarded = projectsData.some(proj => 
+            proj.original_project_id === originalProjectId && 
+            proj.to_department_id === deptId &&
+            proj.source_type === 'sent' &&
+            proj.sent_from_dept === DEPARTMENT_ID
+        );
+        
+        if (alreadyForwarded) {
+            if (!confirm(`⚠️ You already forwarded this project to ${departmentNames[deptId] || 'this department'}. Do you want to forward it again?`)) {
+                return;
+            }
+            isDuplicate = true;
+        }
+    }
+    
+    // Don't allow forwarding back to original sender (unless confirmed)
+    if (isForward && deptId == originalSenderId) {
+        if (!confirm(`⚠️ This project was originally from ${departmentNames[originalSenderId] || 'Unknown'}. Sending it back will create a duplicate. Are you sure?`)) {
+            return;
+        }
+    }
+
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+
+    // Show loading
     const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
         btn.disabled = true;
     }
-    
+
     try {
         // Get daily work records for this project
         await fetchDailyWork();
-        const projectDailyWork = dailyworkData.filter(w => parseInt(w.project_id) === parseInt(projectId));
         
-        // Also get any daily work from project.daily_work
-        const projectDailyRecords = p.daily_work || [];
+        // ============================================================
+        // GET DAILY WORK - FROM MULTIPLE SOURCES
+        // ============================================================
+        let projectDailyWork = [];
         
-        // Combine records, avoid duplicates
-        const allRecords = [];
-        const seenIds = new Set();
+        // First, try to get from project.daily_work (already loaded)
+        if (p.daily_work && p.daily_work.length > 0) {
+            projectDailyWork = p.daily_work;
+            console.log('📋 Using daily_work from project:', projectDailyWork.length);
+        }
+        
+        // If empty, try to get from dailyworkData
+        if (projectDailyWork.length === 0) {
+            projectDailyWork = dailyworkData.filter(function(w) {
+                return parseInt(w.project_id) === parseInt(originalProjectId) ||
+                       w.project_name === p.name;
+            });
+            console.log('📋 Using dailyworkData:', projectDailyWork.length);
+        }
+        
+        // If still empty, try to get from p._daily_work_records
+        if (projectDailyWork.length === 0 && p._daily_work_records && p._daily_work_records.length > 0) {
+            projectDailyWork = p._daily_work_records;
+            console.log('📋 Using _daily_work_records:', projectDailyWork.length);
+        }
+        
+        // If still empty, try to get from p.daily_work_records
+        if (projectDailyWork.length === 0 && p.daily_work_records && p.daily_work_records.length > 0) {
+            projectDailyWork = p.daily_work_records;
+            console.log('📋 Using daily_work_records:', projectDailyWork.length);
+        }
+        
+        // If still empty, try to fetch from API
+        if (projectDailyWork.length === 0) {
+            try {
+                const apiRes = await apiCall(`get_dailywork.php?project_id=${originalProjectId}&department_id=${DEPARTMENT_ID}`);
+                if (apiRes.success && apiRes.data && apiRes.data.length > 0) {
+                    projectDailyWork = apiRes.data;
+                    console.log('📋 Fetched from API:', projectDailyWork.length);
+                }
+            } catch(e) {
+                console.log('⚠️ API fetch failed:', e);
+            }
+        }
+        
+        // If still empty, try by project name
+        if (projectDailyWork.length === 0) {
+            try {
+                const apiRes = await apiCall(`get_dailywork.php?project_name=${encodeURIComponent(p.name)}&department_id=${DEPARTMENT_ID}`);
+                if (apiRes.success && apiRes.data && apiRes.data.length > 0) {
+                    projectDailyWork = apiRes.data;
+                    console.log('📋 Fetched by project_name:', projectDailyWork.length);
+                }
+            } catch(e) {
+                console.log('⚠️ API fetch by name failed:', e);
+            }
+        }
+        
+        // ============================================================
+        // DEDUPLICATE DAILY WORK RECORDS
+        // ============================================================
+        const uniqueDailyWork = [];
+        const seenDailyIds = new Set();
         
         for (let w of projectDailyWork) {
-            const id = w.id || 'dw-' + Date.now() + '-' + Math.random();
-            if (!seenIds.has(id)) {
-                seenIds.add(id);
-                allRecords.push({
-                    id: w.id || id,
-                    date: w.date || new Date().toISOString(),
-                    project_id: w.project_id || projectId,
+            // Use a combination of fields to identify unique records
+            const id = w.id || w.original_dailywork_id || w.sent_id || 
+                      (w.date ? new Date(w.date).getTime() : 0) + '_' + (w.work_description || '');
+            const key = typeof id === 'number' ? id.toString() : id;
+            
+            if (!seenDailyIds.has(key) && key && key !== '0_') {
+                seenDailyIds.add(key);
+                uniqueDailyWork.push({
+                    id: w.id || w.original_dailywork_id || 0,
+                    date: w.date || w.dailywork_date || w.created_at || new Date().toISOString(),
+                    project_id: w.project_id || originalProjectId,
                     project_name: w.project_name || p.name,
-                    work_description: w.work_description || 'Daily work record',
-                    budget: parseFloat(w.budget) || 0,
-                    amount: parseFloat(w.amount) || 0,
-                    status: w.status || 'pending',
-                    created_by: w.created_by || 'System',
-                    created_at: w.created_at || new Date().toISOString(),
-                    is_sent_record: w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID) ? 1 : 0,
-                    sent_from_dept: w.sent_from_dept || null
+                    work_description: w.work_description || w.description || 'Daily work record',
+                    budget: parseFloat(w.budget || w.dailywork_budget || 0),
+                    amount: parseFloat(w.amount || w.dailywork_amount || 0),
+                    status: w.status || w.dailywork_status || 'pending',
+                    created_by: w.created_by || w.sent_by || 'System',
+                    created_at: w.created_at || w.sent_at || new Date().toISOString(),
+                    sent_from_dept: w.sent_from_dept || null,
+                    is_sent_record: (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) ? 1 : 0
                 });
             }
         }
         
-        for (let w of projectDailyRecords) {
-            const id = w.id || 'dw-' + Date.now() + '-' + Math.random();
-            if (!seenIds.has(id)) {
-                seenIds.add(id);
-                allRecords.push({
-                    id: w.id || id,
-                    date: w.date || new Date().toISOString(),
-                    project_id: w.project_id || projectId,
-                    project_name: w.project_name || p.name,
-                    work_description: w.work_description || 'Daily work record',
-                    budget: parseFloat(w.budget) || 0,
-                    amount: parseFloat(w.amount) || 0,
-                    status: w.status || 'pending',
-                    created_by: w.created_by || 'System',
-                    created_at: w.created_at || new Date().toISOString(),
-                    is_sent_record: w.is_sent_record || (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) ? 1 : 0,
-                    sent_from_dept: w.sent_from_dept || null
-                });
-            }
+        console.log('📋 Unique daily work records:', uniqueDailyWork.length);
+        
+        // ============================================================
+        // CALCULATE DAILY WORK SUMMARY
+        // ============================================================
+        let totalBudget = 0, totalExpenses = 0;
+        let completedCount = 0, partialCount = 0, pendingCount = 0;
+        
+        for (let w of uniqueDailyWork) {
+            const budget = parseFloat(w.budget) || 0;
+            const amount = parseFloat(w.amount) || 0;
+            totalBudget += budget;
+            totalExpenses += amount;
+            
+            const status = w.status || 'pending';
+            if (status === 'completed') completedCount++;
+            else if (status === 'partial') partialCount++;
+            else pendingCount++;
         }
         
-        let totalBudget = 0, totalExpenses = 0, completed = 0, partial = 0, pending = 0;
-        for (let w of allRecords) {
-            totalBudget += parseFloat(w.budget) || 0;
-            totalExpenses += parseFloat(w.amount) || 0;
-            if (w.status === 'completed') completed++;
-            else if (w.status === 'partial') partial++;
-            else pending++;
-        }
         let remainingBudget = totalBudget - totalExpenses;
         
-        // Get image path
+        // ============================================================
+        // GET IMAGE PATH
+        // ============================================================
         let imagePath = p.image || '';
         if (imagePath && !imagePath.startsWith('data:') && !imagePath.startsWith('http')) {
             if (!imagePath.startsWith('/')) {
@@ -2748,82 +3269,207 @@ async function sendProjectToDept(projectId, deptId) {
             }
         }
         
+        // ============================================================
+        // BUILD FORWARD CHAIN
+        // ============================================================
+        let newForwardChain = forwardChain || [];
+        if (isForward || isSentProject) {
+            // Add current forward step
+            newForwardChain.push({
+                from_department_id: DEPARTMENT_ID,
+                from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
+                to_department_id: deptId,
+                to_department_name: deptName,
+                forwarded_at: new Date().toISOString(),
+                forwarded_by: CURRENT_USER || 'Survey Manager'
+            });
+        }
+        
+        // ============================================================
+        // BUILD PAYLOAD
+        // ============================================================
         const payload = {
-            project_id: parseInt(projectId),
+            project_id: isSentProject ? (p.sent_id || p.id) : parseInt(projectId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
-            project_name: p.name,
-            client_name: p.client_name || '',
-            amount: parseFloat(p.amount) || 0,
-            status: p.status,
-            progress: p.progress || 0,
-            location: p.location || '',
-            description: p.description || '',
-            image: imagePath,
-            start_date: p.start_date || '',
-            end_date: p.end_date || '',
-            daily_summary: {
-                total_budget: totalBudget,
-                total_expenses: totalExpenses,
-                remaining_budget: remainingBudget,
-                records_count: allRecords.length,
-                completed_count: completed,
-                partial_count: partial,
-                pending_count: pending
-            },
-            daily_work_records: allRecords.map(w => ({
-                date: w.date,
-                project_id: w.project_id,
-                project_name: w.project_name,
-                work_description: w.work_description,
-                budget: w.budget,
-                amount: w.amount,
-                status: w.status,
-                created_by: w.created_by,
-                created_at: w.created_at,
-                sent_from_dept: w.sent_from_dept || null
-            })),
             sent_by: CURRENT_USER || 'Survey Manager',
-            duplicate_send: true,
-            is_forward: isReceived ? 1 : 0,
-            original_sender: p.sent_from_dept || null
+            is_forward: isForward ? 1 : 0,
+            original_sender_id: originalSenderId,
+            duplicate_send: isDuplicate ? 1 : 0,
+            project_data: {
+                name: p.name || p.project_name,
+                client_name: p.client_name || '',
+                amount: parseFloat(p.amount) || 0,
+                status: p.status || 'pending',
+                progress: p.progress || 0,
+                location: p.location || '',
+                description: p.description || '',
+                image: imagePath,
+                image_path: p.image_path || '',
+                project_type: p.project_type || 'general',
+                created_by: p.created_by || p.sent_by || 'System',
+                created_at: p.created_at || p.sent_at || new Date().toISOString(),
+                original_project_id: originalProjectId,
+                original_sender_id: originalSenderId,
+                original_sender_name: p.original_sender_name || departmentNames[originalSenderId] || 'Unknown',
+                forward_chain: newForwardChain,
+                forward_count: newForwardChain.length,
+                daily_work_records: uniqueDailyWork,
+                daily_work_summary: {
+                    total_records: uniqueDailyWork.length,
+                    total_budget: totalBudget,
+                    total_expenses: totalExpenses,
+                    remaining_budget: remainingBudget,
+                    completed_count: completedCount,
+                    partial_count: partialCount,
+                    pending_count: pendingCount
+                }
+            }
         };
-        
+
+        console.log('📤 Sending project payload:', payload);
+
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
-        
+
         if (res && res.success) {
-            const forwardMsg = isReceived ? ' (forwarded)' : '';
-            showToast(`✅ Project "${p.name}" sent to ${deptName} with ${allRecords.length} daily work records${forwardMsg}`, false);
-            addLog(`Project "${p.name}" sent to ${deptName}${forwardMsg} with ${allRecords.length} daily records`);
+            let forwardMsg = isForward ? ' (Forwarded)' : '';
+            let recordMsg = uniqueDailyWork.length > 0 ? ' with ' + uniqueDailyWork.length + ' daily work records' : '';
+            showToast('✅ Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg, false);
+            addLog('📤 Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg);
+
+            // ============================================================
+            // UPDATE LOCAL DATA - REMOVE ANY DUPLICATES
+            // ============================================================
+            // Remove any existing sent copy for this department (prevent duplicates)
+            if (!isDuplicate) {
+                const existingSent = projectsData.filter(proj => 
+                    proj.original_project_id === originalProjectId && 
+                    proj.to_department_id === deptId &&
+                    proj.source_type === 'sent'
+                );
+                
+                if (existingSent.length > 0) {
+                    console.log('🗑️ Removing existing sent copies:', existingSent.length);
+                    projectsData = projectsData.filter(proj => 
+                        !(proj.original_project_id === originalProjectId && 
+                          proj.to_department_id === deptId &&
+                          proj.source_type === 'sent')
+                    );
+                }
+            }
             
-            p.sent_to_dept = parseInt(deptId);
-            p.sent_from_dept = DEPARTMENT_ID;
-            p.is_viewed_by_department = 0;
-            p.is_sent = 1;
-            p.sent_count = (p.sent_count || 0) + 1;
-            p.last_sent_at = new Date().toISOString();
-            p._is_unviewed = true;
+            // ============================================================
+            // UPDATE ORIGINAL PROJECT - ONLY IF SENDER IS ORIGINAL OWNER
+            // ============================================================
+            // Only update original project if the sender is the original owner
+            // This prevents receivers from updating the original project when forwarding
+            if (!isSentProject && !isForward) {
+                const originalProj = projectsData.find(proj => proj.id === originalProjectId);
+                if (originalProj) {
+                    originalProj.sent_to_dept = parseInt(deptId);
+                    originalProj.sent_from_dept = DEPARTMENT_ID;
+                    originalProj.is_viewed_by_department = 0;
+                    originalProj.is_sent = 1;
+                    originalProj.sent_count = (originalProj.sent_count || 0) + 1;
+                    originalProj.last_sent_at = new Date().toISOString();
+                    originalProj._is_unviewed = true;
+                }
+            }
             
-            await addNotification(deptId, 'project', p.id, p.name, 
-                `Project "${p.name}" sent from Survey Department${forwardMsg} with ${allRecords.length} daily work records`);
+            // ============================================================
+            // ADD SENT PROJECT TO LOCAL DATA (WITHOUT DUPLICATES)
+            // ============================================================
+            // Create a sent project entry in local data
+            const sentProject = {
+                id: originalProjectId,
+                sent_id: res.sent_project_id || Date.now(),
+                original_project_id: originalProjectId,
+                name: p.name || p.project_name,
+                project_name: p.name || p.project_name,
+                amount: parseFloat(p.amount) || 0,
+                status: p.status || 'pending',
+                progress: p.progress || 0,
+                location: p.location || '',
+                description: p.description || '',
+                image: imagePath,
+                image_path: p.image_path || '',
+                project_type: p.project_type || 'general',
+                client_name: p.client_name || '',
+                source_type: 'sent',
+                is_sent: 1,
+                is_received: 1,
+                is_sent_copy: 1,
+                is_original: 0,
+                sent_from_dept: DEPARTMENT_ID,
+                sent_from_name: departmentNames[DEPARTMENT_ID] || 'Survey',
+                sent_to_dept: parseInt(deptId),
+                sent_to_name: deptName,
+                to_department_id: parseInt(deptId),
+                from_department_id: DEPARTMENT_ID,
+                original_sender_id: originalSenderId,
+                original_sender_name: p.original_sender_name || departmentNames[originalSenderId] || 'Unknown',
+                forward_chain: newForwardChain,
+                forward_count: newForwardChain.length,
+                is_forward: isForward ? 1 : 0,
+                sent_by: CURRENT_USER || 'Survey Manager',
+                sent_at: new Date().toISOString(),
+                _is_unviewed: true,
+                created_by: p.created_by || p.sent_by || 'System',
+                created_at: p.created_at || p.sent_at || new Date().toISOString(),
+                daily_work: uniqueDailyWork,
+                daily_work_count: uniqueDailyWork.length,
+                daily_work_summary: {
+                    total_records: uniqueDailyWork.length,
+                    total_budget: totalBudget,
+                    total_expenses: totalExpenses,
+                    remaining_budget: remainingBudget
+                },
+                _display_id: res.sent_project_id || Date.now()
+            };
             
-            await updateProjectBadge();
+            // Check if this sent project already exists in local data
+            const existing = projectsData.find(proj => 
+                proj.sent_id === sentProject.sent_id || 
+                (proj.original_project_id === originalProjectId && 
+                 proj.to_department_id === deptId &&
+                 proj.source_type === 'sent')
+            );
+            
+            if (!existing) {
+                projectsData.push(sentProject);
+                console.log('✅ Added sent project to local data:', sentProject.sent_id);
+            } else {
+                // Update existing
+                Object.assign(existing, sentProject);
+                console.log('✅ Updated existing sent project:', existing.sent_id);
+            }
+
+            // Refresh data
+            await fetchProjects();
             await loadProjects();
             await loadDashboard();
+            await fetchUnviewedCounts();
+            
+            updateProjectBadge();
+
+            closeModal('viewProjectModal');
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+            toggleSendDropdown('projSendDropdown-' + projectId);
+
         } else {
-            showToast(res?.message || 'Failed to send project', true);
+            showToast(res?.message || 'Failed to send project. Please try again.', true);
         }
     } catch(e) {
-        console.error('Send project error:', e);
+        console.error('❌ Send project error:', e);
         showToast('Network error: ' + e.message, true);
     } finally {
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown(`projSendDropdown-${projectId}`);
-        closeModal('viewProjectModal');
     }
 }
 
@@ -3583,12 +4229,48 @@ function exportProjectToPDF(projectId) {
 }
 
 // ============================================================
-// LOAD PROJECTS SECTION
+// LOAD PROJECTS - FIXED (No Duplicates)
 // ============================================================
 async function loadProjects() {
     await fetchProjects();
     await fetchProjectDocuments();
     
+    // ============================================================
+    // DEDUPLICATE PROJECTS - Remove duplicates from local data
+    // ============================================================
+    const uniqueProjects = [];
+    const seenProjectIds = new Set();
+    const seenSentIds = new Set();
+    
+    for (let p of projectsData) {
+        // Use sent_id for sent projects, id for original
+        const key = p.source_type === 'sent' ? `sent_${p.sent_id}` : `orig_${p.id}`;
+        
+        // For original projects, check if we already have one
+        if (p.source_type === 'original') {
+            if (!seenProjectIds.has(p.id)) {
+                seenProjectIds.add(p.id);
+                uniqueProjects.push(p);
+            }
+        } else {
+            // For sent projects, check by sent_id
+            if (p.sent_id && !seenSentIds.has(p.sent_id)) {
+                seenSentIds.add(p.sent_id);
+                uniqueProjects.push(p);
+            } else if (!p.sent_id && !seenProjectIds.has(p.id)) {
+                // Fallback
+                seenProjectIds.add(p.id);
+                uniqueProjects.push(p);
+            }
+        }
+    }
+    
+    projectsData = uniqueProjects;
+    console.log('📋 Unique projects after deduplication:', projectsData.length);
+    
+    // ============================================================
+    // BUILD HTML
+    // ============================================================
     let html = `
         <div class="tab-container">
             <button class="tab-button ${currentProjectTab === 'added' ? 'active' : ''}" onclick="switchProjectTab('added')">
@@ -3605,10 +4287,11 @@ async function loadProjects() {
             <div class="section-card">
                 <div class="section-card-header">
                     <h3><i class="fas fa-tasks text-teal-600 mr-2"></i> Added Projects</h3>
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 flex-wrap">
                         <button onclick="openAddProjectModal()" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button>
                         <button onclick="exportAllProjectsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
                         <button onclick="exportAllProjectsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                        <button onclick="loadProjects()" class="btn-cyan text-sm"><i class="fas fa-sync mr-1"></i> Refresh</button>
                     </div>
                 </div>
                 <div class="section-card-body">
@@ -3623,34 +4306,71 @@ async function loadProjects() {
             return;
         }
         
+        // ============================================================
+        // RENDER PROJECT CARDS
+        // ============================================================
         let projectsHtml = '';
         for (let p of projectsData) {
+            // Skip if project is deleted
+            if (p.is_deleted === 1) continue;
+            
+            // Check if unviewed
             let isNew = p._is_unviewed || false;
+            
+            // Get image
             let imageUrl = getFullImageUrl(p.image);
+            let isImage = imageUrl && (imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || imageUrl.startsWith('data:image/'));
+            
+            // Get status
             let statusClass = getProjectStatusClass(p.status);
             let statusText = getProjectStatusText(p.status);
             
             // Check if project was sent from another department
             let fromDept = '';
+            let isSent = false;
+            let sentFromName = '';
+            
             if (p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
-                let deptName = departmentNames[p.sent_from_dept] || 'Unknown';
-                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+                isSent = true;
+                sentFromName = departmentNames[p.sent_from_dept] || 'Unknown';
+                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${escapeHtml(sentFromName)}</span>`;
             }
+            
+            // Check if forwarded
+            let isForwarded = p.is_forward === 1 || (p.forward_count && p.forward_count > 0) || (p.forward_chain && p.forward_chain.length > 0);
+            let forwardBadge = isForwarded ? `<span class="text-[8px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-route mr-1"></i> Forwarded</span>` : '';
             
             // Get daily work count
             const dailyCount = p.daily_work_count || 0;
             const hasDailyWork = dailyCount > 0;
             
+            // Get source type badge
+            let sourceBadge = '';
+            if (p.source_type === 'original') {
+                sourceBadge = `<span class="text-[8px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-check-circle mr-1"></i> Original</span>`;
+            } else if (p.source_type === 'sent') {
+                sourceBadge = `<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-copy mr-1"></i> Copy</span>`;
+            } else if (p.source_type === 'sent_from') {
+                sourceBadge = `<span class="text-[8px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Sent</span>`;
+            }
+            
+            // Build card
             projectsHtml += `
-                <div class="project-card ${isNew ? 'unviewed' : ''}" id="proj-card-${p.id}" onclick="viewProject(${p.id})" style="position:relative;">
+                <div class="project-card ${isNew ? 'unviewed' : ''}" id="proj-card-${p.id}" onclick="viewProject(${p.id})" style="position:relative;cursor:pointer;">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     <div class="card-header">
                         <h4>${escapeHtml(p.name)}</h4>
-                        <p>ID: #${p.id} ${fromDept} ${hasDailyWork ? '<span class="text-[8px] bg-white/20 px-2 py-0.5 rounded-full"><i class="fas fa-calendar-day mr-1"></i>' + dailyCount + '</span>' : ''}</p>
+                        <p>
+                            ID: #${p.id} 
+                            ${fromDept} 
+                            ${forwardBadge} 
+                            ${sourceBadge}
+                            ${hasDailyWork ? '<span class="text-[8px] bg-white/20 px-2 py-0.5 rounded-full"><i class="fas fa-calendar-day mr-1"></i>' + dailyCount + '</span>' : ''}
+                        </p>
                     </div>
                     <div style="width:100%;height:180px;background:#f3f4f6;position:relative;overflow:hidden;">
-                        ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation(); viewProject(${p.id})" onerror="this.style.display='none';this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
-                        <div class="no-image" ${imageUrl ? 'style="display:none;"' : 'style="display:flex;width:100%;height:100%;flex-direction:column;align-items:center;justify-content:center;"'}>
+                        ${imageUrl && isImage ? `<img src="${imageUrl}?t=${Date.now()}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation(); viewProject(${p.id})" onerror="this.style.display='none';this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
+                        <div class="no-image" ${imageUrl && isImage ? 'style="display:none;width:100%;height:100%;flex-direction:column;align-items:center;justify-content:center;"' : 'style="display:flex;width:100%;height:100%;flex-direction:column;align-items:center;justify-content:center;"'}>
                             <i class="fas fa-image text-4xl text-gray-400"></i>
                             <p class="text-xs text-gray-500 mt-2">No Image</p>
                         </div>
@@ -3665,25 +4385,32 @@ async function loadProjects() {
                             <div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div>
                             <div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-teal-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div>
                         </div>
-                        <div class="flex gap-2 mt-3 pt-2 border-t">
+                        <div class="flex gap-2 mt-3 pt-2 border-t flex-wrap">
                             <button onclick="event.stopPropagation(); viewProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                             <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
                             <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                            ${isSent ? `<span class="text-[8px] text-purple-600 flex items-center"><i class="fas fa-paper-plane mr-1"></i> Received from ${escapeHtml(sentFromName)}</span>` : ''}
+                            ${isForwarded ? `<span class="text-[8px] text-yellow-600 flex items-center"><i class="fas fa-route mr-1"></i> Forwarded ${p.forward_count || 0} times</span>` : ''}
                         </div>
                         <div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
                     </div>
                 </div>`;
         }
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
+        
     } else {
+        // ============================================================
+        // UPLOADED DOCUMENTS TAB
+        // ============================================================
         html += `
             <div class="section-card">
                 <div class="section-card-header">
                     <h3><i class="fas fa-file-upload text-teal-600 mr-2"></i> Uploaded Documents</h3>
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 flex-wrap">
                         <button onclick="openUploadProjectDocModal()" class="btn-primary text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button>
                         <button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
                         <button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                        <button onclick="loadProjects()" class="btn-cyan text-sm"><i class="fas fa-sync mr-1"></i> Refresh</button>
                     </div>
                 </div>
                 <div class="section-card-body">
@@ -3698,24 +4425,46 @@ async function loadProjects() {
             return;
         }
         
+        // ============================================================
+        // RENDER DOCUMENT CARDS
+        // ============================================================
         let docsHtml = '';
         for (let doc of projectDocuments) {
+            // Skip if deleted
+            if (doc.is_deleted === 1) continue;
+            
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
-            let fileIcon = fileExt === 'pdf' ? 'fa-file-pdf' : (fileExt === 'doc' || fileExt === 'docx' ? 'fa-file-word' : (fileExt === 'xls' || fileExt === 'xlsx' ? 'fa-file-excel' : (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' ? 'fa-file-image' : 'fa-file-alt')));
+            let fileIcon = fileExt === 'pdf' ? 'fa-file-pdf' : 
+                          (fileExt === 'doc' || fileExt === 'docx' ? 'fa-file-word' : 
+                          (fileExt === 'xls' || fileExt === 'xlsx' ? 'fa-file-excel' : 
+                          (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' || fileExt === 'gif' ? 'fa-file-image' : 'fa-file-alt')));
+            
             let isNew = doc._is_unviewed || false;
             
+            // Check if document was sent from another department
+            let fromDept = '';
+            if (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) {
+                let deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                fromDept = `<span class="from-badge text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> From ${escapeHtml(deptName)}</span>`;
+            }
+            
             docsHtml += `
-                <div class="document-card ${isNew ? 'unviewed' : ''}" id="doc-card-${doc.id}" style="position:relative;">
+                <div class="document-card ${isNew ? 'unviewed' : ''}" id="doc-card-${doc.id}" style="position:relative;cursor:pointer;" onclick="viewUploadedDocument(${doc.id})">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     <div class="card-header">
                         <h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4>
-                        <p>${doc.file_name || 'Document'}</p>
+                        <p>${doc.file_name || 'Document'} ${fromDept}</p>
                     </div>
                     <div class="p-3">
                         <p class="text-xs text-gray-500 mb-2">${escapeHtml(doc.description || 'No description')}</p>
-                        <div class="flex gap-2 mt-3 pt-2 border-t">
-                            <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                        <div class="text-[9px] text-gray-400 mb-2">
+                            <span>Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                            <span class="ml-2">Size: ${doc.file_size ? (doc.file_size / 1024).toFixed(2) + ' KB' : 'Unknown'}</span>
+                        </div>
+                        <div class="flex gap-2 mt-2 pt-1 border-t flex-wrap">
+                            <button onclick="event.stopPropagation(); viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); downloadDocumentFile(${doc.id}, 'project_document')" class="action-btn download"><i class="fas fa-download"></i> Download</button>
+                            <button onclick="event.stopPropagation(); deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
                         </div>
                         <div class="user-info mt-2">Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}</div>
                     </div>
@@ -3723,9 +4472,12 @@ async function loadProjects() {
         }
         document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
     }
+    
+    // ============================================================
+    // UPDATE BADGE
+    // ============================================================
     updateProjectBadge();
 }
-
 function switchProjectTab(tab) { 
     currentProjectTab = tab; 
     loadProjects(); 
@@ -5154,37 +5906,153 @@ async function generateAndSaveReport() {
 }
 
 // ============================================================
-// DASHBOARD
+// LOAD DASHBOARD - FIXED (No Duplicate Daily Work)
 // ============================================================
 async function loadDashboard() {
-    await Promise.all([fetchProjects(), fetchRequests(), fetchReports(), fetchUploadedReports(), fetchDailyWork()]);
+    // Show loading state
+    document.getElementById("dashboardSection").innerHTML = `
+        <div class="flex justify-center items-center h-64">
+            <div class="loading-spinner"></div>
+            <span class="ml-3 text-gray-500">Loading dashboard...</span>
+        </div>
+    `;
+
+    await Promise.all([
+        fetchProjects(), 
+        fetchRequests(), 
+        fetchReports(), 
+        fetchUploadedReports(), 
+        fetchDailyWork()
+    ]);
     
+    // ============================================================
+    // CALCULATE DAILY WORK TOTALS - FIXED (No Duplicate)
+    // ============================================================
+    let totalBudget = 0, totalSpent = 0;
+    let completedCount = 0, partialCount = 0, pendingCount = 0;
+    const seenDailyIds = new Set();
+    
+    // 1. From dailyworkData
+    for (let w of dailyworkData) {
+        // Skip if deleted
+        if (w.is_deleted === 1) continue;
+        
+        // Create unique key
+        const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+        if (seenDailyIds.has(key)) continue;
+        seenDailyIds.add(key);
+        
+        totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
+        totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
+        
+        const status = w.status || w.dailywork_status || 'pending';
+        if (status === 'completed' || status === 'Completed') completedCount++;
+        else if (status === 'partial' || status === 'Partial') partialCount++;
+        else pendingCount++;
+    }
+    
+    // 2. Also check projects data for daily work
+    for (let p of projectsData) {
+        if (p.is_deleted === 1) continue;
+        
+        // Check p.daily_work
+        if (p.daily_work && Array.isArray(p.daily_work) && p.daily_work.length > 0) {
+            for (let w of p.daily_work) {
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                if (!seenDailyIds.has(key)) {
+                    seenDailyIds.add(key);
+                    totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
+                    totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
+                    const status = w.status || w.dailywork_status || 'pending';
+                    if (status === 'completed' || status === 'Completed') completedCount++;
+                    else if (status === 'partial' || status === 'Partial') partialCount++;
+                    else pendingCount++;
+                }
+            }
+        }
+        
+        // Check p._daily_work_records
+        if (p._daily_work_records && Array.isArray(p._daily_work_records) && p._daily_work_records.length > 0) {
+            for (let w of p._daily_work_records) {
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                if (!seenDailyIds.has(key)) {
+                    seenDailyIds.add(key);
+                    totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
+                    totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
+                    const status = w.status || w.dailywork_status || 'pending';
+                    if (status === 'completed' || status === 'Completed') completedCount++;
+                    else if (status === 'partial' || status === 'Partial') partialCount++;
+                    else pendingCount++;
+                }
+            }
+        }
+        
+        // Check p.daily_work_records
+        if (p.daily_work_records && Array.isArray(p.daily_work_records) && p.daily_work_records.length > 0) {
+            for (let w of p.daily_work_records) {
+                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
+                if (!seenDailyIds.has(key)) {
+                    seenDailyIds.add(key);
+                    totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
+                    totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
+                    const status = w.status || w.dailywork_status || 'pending';
+                    if (status === 'completed' || status === 'Completed') completedCount++;
+                    else if (status === 'partial' || status === 'Partial') partialCount++;
+                    else pendingCount++;
+                }
+            }
+        }
+    }
+    
+    const remainingBudget = totalBudget - totalSpent;
+    const totalDailyRecords = seenDailyIds.size;
+    
+    console.log('📊 Daily Work Summary (Unique):', {
+        totalRecords: totalDailyRecords,
+        totalBudget: formatCurrency(totalBudget),
+        totalSpent: formatCurrency(totalSpent),
+        remainingBudget: formatCurrency(remainingBudget),
+        completedCount,
+        partialCount,
+        pendingCount
+    });
+    
+    // ============================================================
+    // CALCULATE OTHER TOTALS
+    // ============================================================
     let totalIncome = 0, totalExpense = 0;
     requestsData.forEach(t => { 
         if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; 
         if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0; 
     });
-    let pending = projectsData.filter(p => p.status === 'pending').length;
-    let inProgress = projectsData.filter(p => p.status === 'in_progress').length;
-    let completed = projectsData.filter(p => p.status === 'completed').length;
-    let approved = projectsData.filter(p => p.status === 'approved').length;
-    let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
+    
+    let pending = projectsData.filter(p => p.status === 'pending' && p.is_deleted !== 1).length;
+    let inProgress = projectsData.filter(p => p.status === 'in_progress' && p.is_deleted !== 1).length;
+    let completed = projectsData.filter(p => p.status === 'completed' && p.is_deleted !== 1).length;
+    let approved = projectsData.filter(p => p.status === 'approved' && p.is_deleted !== 1).length;
+    
+    let pendingRequests = requestsData.filter(r => r.status === 'pending' && r.is_deleted !== 1).length;
     let totalRequestsAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     
-    let totalProjects = projectsData.length;
-    let totalDocuments = projectDocuments.length;
+    let totalProjects = projectsData.filter(p => p.is_deleted !== 1).length;
+    let totalDocuments = projectDocuments.filter(d => d.is_deleted !== 1).length;
     let totalProjectsDocs = totalProjects + totalDocuments;
-    let totalAddedReports = reportsData.length;
-    let totalUploadedReports = uploadedReportsData.length;
+    let totalAddedReports = reportsData.filter(r => r.is_deleted !== 1).length;
+    let totalUploadedReports = uploadedReportsData.filter(d => d.is_deleted !== 1).length;
     let totalReports = totalAddedReports + totalUploadedReports;
-    let totalRequests = requestsData.length;
-    let totalDailyWork = dailyworkData.length;
-    let totalBudget = dailyworkData.reduce((sum, w) => sum + (parseFloat(w.budget) || 0), 0);
-    let totalSpent = dailyworkData.reduce((sum, w) => sum + (parseFloat(w.amount) || 0), 0);
-    let remainingBudget = totalBudget - totalSpent;
+    let totalRequests = requestsData.filter(r => r.is_deleted !== 1).length;
     
-    let html = `<div class="mb-4"><h2 class="text-xl font-bold text-gray-800">Survey Dashboard</h2><p class="text-xs text-gray-500">Project & Financial Management</p></div>
+    // ============================================================
+    // BUILD HTML
+    // ============================================================
+    let html = `
+        <div class="mb-4">
+            <h2 class="text-xl font-bold text-gray-800 dark:text-white">Survey Dashboard</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Project & Financial Management</p>
+        </div>
+        
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <!-- CARD 1: Projects & Documents -->
             <div class="stat-card cursor-pointer" style="border-top: 4px solid #0d9488;" onclick="showSection('projects')">
                 <div class="flex items-center justify-between mb-2">
                     <div class="stat-icon bg-teal-100 text-teal-600" style="margin:0;"><i class="fas fa-tasks text-lg"></i></div>
@@ -5199,6 +6067,8 @@ async function loadDashboard() {
                     </div>
                 </div>
             </div>
+            
+            <!-- CARD 2: All Reports -->
             <div class="stat-card cursor-pointer" style="border-top: 4px solid #8b5cf6;" onclick="showSection('reports')">
                 <div class="flex items-center justify-between mb-2">
                     <div class="stat-icon bg-purple-100 text-purple-600" style="margin:0;"><i class="fas fa-chart-line text-lg"></i></div>
@@ -5213,6 +6083,8 @@ async function loadDashboard() {
                     </div>
                 </div>
             </div>
+            
+            <!-- CARD 3: Fund Requests -->
             <div class="stat-card cursor-pointer" style="border-top: 4px solid #f59e0b;" onclick="showSection('requests')">
                 <div class="flex items-center justify-between mb-2">
                     <div class="stat-icon bg-orange-100 text-orange-600" style="margin:0;"><i class="fas fa-hand-holding-usd text-lg"></i></div>
@@ -5222,53 +6094,166 @@ async function loadDashboard() {
                 <div class="flex items-end justify-between mt-1">
                     <p class="stat-number text-orange-600" style="font-size:28px; margin:0;">${totalRequests}</p>
                     <div class="text-right">
-                        <p class="text-[10px] text-green-600">Approved: ${requestsData.filter(r => r.status === 'approved').length}</p>
-                        <p class="text-[10px] text-yellow-600">Pending: ${requestsData.filter(r => r.status === 'pending').length}</p>
-                        <p class="text-[10px] text-red-600">Cancelled: ${requestsData.filter(r => r.status === 'cancelled').length}</p>
+                        <p class="text-[10px] text-green-600">Approved: ${requestsData.filter(r => r.status === 'approved' && r.is_deleted !== 1).length}</p>
+                        <p class="text-[10px] text-yellow-600">Pending: ${pendingRequests}</p>
+                        <p class="text-[10px] text-red-600">Cancelled: ${requestsData.filter(r => r.status === 'cancelled' && r.is_deleted !== 1).length}</p>
                     </div>
                 </div>
                 <p class="text-[10px] text-gray-500 mt-1 text-right">${formatCurrency(totalRequestsAmount)}</p>
             </div>
+            
+            <!-- CARD 4: Daily Work -->
             <div class="stat-card cursor-pointer" style="border-top: 4px solid #10b981;" onclick="showSection('projects')">
                 <div class="flex items-center justify-between mb-2">
                     <div class="stat-icon bg-green-100 text-green-600" style="margin:0;"><i class="fas fa-calendar-day text-lg"></i></div>
-                    <span class="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">${totalDailyWork} records</span>
+                    <span class="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">${totalDailyRecords} records</span>
                 </div>
                 <p class="stat-label text-left">Daily Work</p>
                 <div class="flex items-end justify-between mt-1">
-                    <p class="stat-number text-green-600" style="font-size:28px; margin:0;">${totalDailyWork}</p>
+                    <p class="stat-number text-green-600" style="font-size:28px; margin:0;">${totalDailyRecords}</p>
                     <div class="text-right">
                         <p class="text-[10px] text-green-600">Budget: ${formatCurrency(totalBudget)}</p>
                         <p class="text-[10px] text-orange-600">Spent: ${formatCurrency(totalSpent)}</p>
                         <p class="text-[10px] ${remainingBudget >= 0 ? 'text-green-600' : 'text-red-600'}">Remaining: ${formatCurrency(remainingBudget)}</p>
                     </div>
                 </div>
-                <div class="flex gap-2 mt-1">
-                    <span class="text-[8px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded">✅ ${dailyworkData.filter(w => w.status === 'completed').length}</span>
-                    <span class="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded">⏳ ${dailyworkData.filter(w => w.status === 'partial').length}</span>
-                    <span class="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">🕐 ${dailyworkData.filter(w => w.status === 'pending' || !w.status).length}</span>
+                <div class="flex gap-2 mt-1 flex-wrap">
+                    <span class="text-[8px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded">✅ ${completedCount}</span>
+                    <span class="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded">⏳ ${partialCount}</span>
+                    <span class="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">🕐 ${pendingCount}</span>
                 </div>
             </div>
         </div>
+        
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-teal-600 mr-2"></i>Project Status</h3><canvas id="statusChart" height="180"></canvas></div>
-            <div class="bg-white rounded-xl p-4 shadow-sm"><h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-bar text-green-600 mr-2"></i>Request Summary</h3><div class="grid grid-cols-2 gap-4 text-center"><div class="bg-green-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Income Requests</p><p class="text-lg font-bold text-green-600">${requestsData.filter(r => r.type === 'income').length}</p></div><div class="bg-red-50 p-3 rounded-xl"><p class="text-xs text-gray-500">Expense Requests</p><p class="text-lg font-bold text-red-600">${requestsData.filter(r => r.type === 'expense').length}</p></div></div></div>
+            <!-- Chart 1: Project Status -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-3 text-gray-800 dark:text-white">
+                    <i class="fas fa-chart-pie text-teal-600 mr-2"></i>Project Status
+                </h3>
+                <canvas id="statusChart" height="180"></canvas>
+                <div class="flex justify-center gap-3 mt-3 text-xs flex-wrap">
+                    <span class="text-yellow-600">Pending: ${pending}</span>
+                    <span class="text-blue-600">In Progress: ${inProgress}</span>
+                    <span class="text-green-600">Completed: ${completed}</span>
+                    <span class="text-purple-600">Approved: ${approved}</span>
+                </div>
+            </div>
+            
+            <!-- Chart 2: Request Summary -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-3 text-gray-800 dark:text-white">
+                    <i class="fas fa-chart-bar text-green-600 mr-2"></i>Request Summary
+                </h3>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border dark:border-green-800">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Income Requests</p>
+                        <p class="text-lg font-bold text-green-600 dark:text-green-400">${requestsData.filter(r => r.type === 'income' && r.is_deleted !== 1).length}</p>
+                        <p class="text-xs text-green-500">${formatCurrency(requestsData.filter(r => r.type === 'income' && r.is_deleted !== 1).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}</p>
+                    </div>
+                    <div class="bg-red-50 dark:bg-red-900/20 p-3 rounded-xl border dark:border-red-800">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Expense Requests</p>
+                        <p class="text-lg font-bold text-red-600 dark:text-red-400">${requestsData.filter(r => r.type === 'expense' && r.is_deleted !== 1).length}</p>
+                        <p class="text-xs text-red-500">${formatCurrency(requestsData.filter(r => r.type === 'expense' && r.is_deleted !== 1).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}</p>
+                    </div>
+                    <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border dark:border-blue-800 col-span-2">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Net Balance</p>
+                        <p class="text-lg font-bold ${totalIncome - totalExpense >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
+                            ${formatCurrency(totalIncome - totalExpense)}
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="grid grid-cols-3 gap-3">
-            <button onclick="showSection('projects')" class="btn-primary text-sm py-2"><i class="fas fa-plus-circle mr-2"></i>Add Project</button>
-            <button onclick="showSection('requests')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#f59e0b,#d97706);"><i class="fas fa-plus-circle mr-2"></i>New Request</button>
-            <button onclick="showSection('reports')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);"><i class="fas fa-chart-line mr-2"></i>Add Report</button>
+        
+        <!-- Quick Actions -->
+        <div class="grid grid-cols-3 gap-3 mb-5">
+            <button onclick="showSection('projects')" class="btn-primary text-sm py-2">
+                <i class="fas fa-plus-circle mr-2"></i>Add Project
+            </button>
+            <button onclick="showSection('requests')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#f59e0b,#d97706);">
+                <i class="fas fa-plus-circle mr-2"></i>New Request
+            </button>
+            <button onclick="showSection('reports')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);">
+                <i class="fas fa-chart-line mr-2"></i>Add Report
+            </button>
         </div>
-        <div class="bg-white rounded-xl p-4 shadow-sm mt-5"><div class="flex justify-between items-center mb-2"><h3 class="text-sm font-semibold"><i class="fas fa-history text-teal-600 mr-1"></i>Recent Activity</h3><button onclick="loadRecycleBinFromDB(); showRecycleBinModal()" class="text-teal-600 text-xs"><i class="fas fa-trash-restore mr-1"></i>Recycle Bin</button></div><div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">${activityLogs.slice(0,5).map(l => `<div class="py-1 border-b flex justify-between"><span>${escapeHtml(l.action)}</span><span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span></div>`).join('')}</div></div>`;
+        
+        <!-- Recent Activity -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-sm font-semibold text-gray-800 dark:text-white">
+                    <i class="fas fa-history text-teal-600 mr-1"></i>Recent Activity
+                </h3>
+                <button onclick="loadRecycleBinFromDB(); showRecycleBinModal()" class="text-teal-600 dark:text-teal-400 text-xs hover:underline">
+                    <i class="fas fa-trash-restore mr-1"></i>Recycle Bin
+                </button>
+            </div>
+            <div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">
+                ${activityLogs && activityLogs.length > 0 ? 
+                    activityLogs.slice(0,5).map(l => `
+                        <div class="py-1 border-b dark:border-gray-700 flex justify-between">
+                            <span class="text-gray-700 dark:text-gray-300">${escapeHtml(l.action || 'No action')}</span>
+                            <span class="text-gray-400 dark:text-gray-500">${l.created_at ? new Date(l.created_at).toLocaleString() : new Date().toLocaleString()}</span>
+                        </div>
+                    `).join('')
+                    : '<div class="py-1 text-gray-400 dark:text-gray-500 text-center">No recent activity</div>'
+                }
+            </div>
+        </div>
+    `;
     
     document.getElementById("dashboardSection").innerHTML = html;
     
+    // ============================================================
+    // RENDER CHART
+    // ============================================================
     const ctx = document.getElementById('statusChart')?.getContext('2d');
     if (ctx) { 
-        new Chart(ctx, { type: 'doughnut', data: { labels: ['Pending', 'In Progress', 'Completed', 'Approved'], datasets: [{ data: [pending, inProgress, completed, approved], backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], borderWidth: 0 }] }, options: { responsive: true, plugins: { legend: { position: 'bottom' } } } }); 
+        // Destroy existing chart if any
+        if (window.statusChartInstance) {
+            window.statusChartInstance.destroy();
+        }
+        
+        window.statusChartInstance = new Chart(ctx, { 
+            type: 'doughnut', 
+            data: { 
+                labels: ['Pending', 'In Progress', 'Completed', 'Approved'], 
+                datasets: [{ 
+                    data: [pending, inProgress, completed, approved], 
+                    backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], 
+                    borderWidth: 0 
+                }] 
+            }, 
+            options: { 
+                responsive: true, 
+                plugins: { 
+                    legend: { 
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            padding: 10,
+                            font: { size: 10 }
+                        }
+                    } 
+                },
+                cutout: '60%'
+            } 
+        }); 
     }
+    
+    // ============================================================
+    // UPDATE BADGES
+    // ============================================================
+    updateProjectBadge();
+    updateReportBadge();
+    updateRequestBadge();
+    
+    // ============================================================
+    // ADD LOG
+    // ============================================================
+    addLog("Dashboard loaded successfully");
 }
-
 // ============================================================
 // SETTINGS FUNCTIONS
 // ============================================================
