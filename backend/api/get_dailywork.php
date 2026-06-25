@@ -1,16 +1,10 @@
 <?php
-// backend/api/get_dailywork.php
+// backend/api/get_dailywork.php - FIXED VERSION
 
-// ============================================================
-// ERROR REPORTING
-// ============================================================
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// ============================================================
-// HEADERS
-// ============================================================
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -21,61 +15,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// ============================================================
-// DATABASE CONNECTION
-// ============================================================
 try {
     $pdo = new PDO("mysql:host=localhost;dbname=geotraverse_erp;charset=utf8mb4", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Database error: ' . $e->getMessage(),
-        'data' => []
-    ]);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage(), 'data' => []]);
     exit;
 }
 
-// ============================================================
-// GET PARAMETERS
-// ============================================================
-$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
-$project_id = isset($_GET['project_id']) ? intval($_GET['project_id']) : 0;
-$project_name = isset($_GET['project_name']) ? trim($_GET['project_name']) : '';
-
-if ($department_id <= 0) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Department ID required',
-        'data' => []
-    ]);
-    exit;
-}
-
-// ============================================================
-// FUNCTION TO SEND JSON
-// ============================================================
 function sendJson($data) {
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
-// ============================================================
-// GET DAILY WORK - KILA DEPARTMENT INAONA YAAKE TU
-// ============================================================
+$department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
+$project_id = isset($_GET['project_id']) ? intval($_GET['project_id']) : 0;
+$project_name = isset($_GET['project_name']) ? trim($_GET['project_name']) : '';
+
+if ($department_id <= 0) {
+    sendJson(['success' => false, 'message' => 'Department ID required', 'data' => []]);
+}
+
 try {
     $dailyWork = [];
     $seenIds = [];
 
     // ============================================================
-    // 1. ORIGINAL DAILY WORK (kwa department iliyounda - SENDER)
+    // 1. ORIGINAL DAILY WORK - SENDER ANAONA ZAKE TU
     // ============================================================
-    // Sender anaona daily work zake zote (original)
     $query = "SELECT 
                 d.*,
                 'original' as source_type,
-                0 as is_sent,
+                0 as is_sent_copy,
+                0 as is_received,
                 NULL as sent_from_name,
                 NULL as sent_to_name
               FROM dailywork d
@@ -94,38 +67,60 @@ try {
     $stmt->execute([$department_id]);
     while ($row = $stmt->fetch()) {
         $row['is_sent'] = 0;
+        $row['is_original'] = 1;
+        $row['source_type'] = 'original';
         $dailyWork[] = $row;
         $seenIds[$row['id']] = true;
     }
 
     // ============================================================
-    // 2. SENT DAILY WORK (kwa department iliyopokea - RECEIVER)
+    // 2. SENT DAILY WORK - RECEIVER ANAONA ZILIZOTUMWA KWAKE
     // ============================================================
-    // Receiver anaona SENT daily work tu (zilizotumwa kwake)
-    // HAZIONYESHI daily work mpya ambazo hazijatumwa
-    $query = "SELECT 
-                sd.id,
-                sd.original_dailywork_id,
-                sd.dailywork_data,
-                sd.from_department_id,
-                sd.to_department_id,
-                sd.sent_by,
-                sd.sent_at,
-                sd.is_viewed,
-                sd.sent_count,
-                sd.is_sent,
-                sd.last_sent_at,
-                sd.from_department_name,
-                sd.to_department_name,
-                sd.dailywork_project_name,
-                sd.dailywork_date,
-                sd.dailywork_amount,
-                sd.dailywork_budget,
-                sd.dailywork_status,
-                'sent' as source_type,
-                1 as is_sent,
-                sd.from_department_name as sent_from_name,
-                sd.to_department_name as sent_to_name
+    // First, let's check what columns exist in sent_dailywork
+    try {
+        $columns = $pdo->query("SHOW COLUMNS FROM sent_dailywork")->fetchAll(PDO::FETCH_COLUMN);
+    } catch(PDOException $e) {
+        $columns = [];
+    }
+    
+    // Build SELECT dynamically based on existing columns
+    $selectFields = "sd.id as sent_id,
+                     sd.original_dailywork_id,
+                     sd.dailywork_data,
+                     sd.from_department_id,
+                     sd.to_department_id,
+                     sd.sent_by,
+                     sd.sent_at,
+                     sd.is_viewed,
+                     sd.sent_count,
+                     sd.from_department_name,
+                     sd.to_department_name,
+                     'sent' as source_type,
+                     1 as is_sent_copy,
+                     1 as is_received,
+                     0 as is_original,
+                     sd.from_department_name as sent_from_name,
+                     sd.to_department_name as sent_to_name,
+                     CASE WHEN (sd.is_viewed = 0 OR sd.is_viewed IS NULL) THEN 1 ELSE 0 END as _is_unviewed";
+    
+    // Add optional columns if they exist
+    if (in_array('dailywork_project_name', $columns)) {
+        $selectFields .= ", sd.dailywork_project_name";
+    }
+    if (in_array('dailywork_date', $columns)) {
+        $selectFields .= ", sd.dailywork_date";
+    }
+    if (in_array('dailywork_amount', $columns)) {
+        $selectFields .= ", sd.dailywork_amount";
+    }
+    if (in_array('dailywork_budget', $columns)) {
+        $selectFields .= ", sd.dailywork_budget";
+    }
+    if (in_array('dailywork_status', $columns)) {
+        $selectFields .= ", sd.dailywork_status";
+    }
+    
+    $query = "SELECT {$selectFields} 
               FROM sent_dailywork sd
               WHERE sd.to_department_id = ?
                 AND (sd.is_deleted = 0 OR sd.is_deleted IS NULL)";
@@ -141,10 +136,12 @@ try {
     $stmt = $pdo->prepare($query);
     $stmt->execute([$department_id]);
     while ($row = $stmt->fetch()) {
-        // Extract dailywork_data
+        $row['is_sent'] = 1;
+        
+        // Extract data from dailywork_data
         if ($row['dailywork_data']) {
             $dwData = json_decode($row['dailywork_data'], true);
-            if ($dwData) {
+            if ($dwData && is_array($dwData)) {
                 foreach ($dwData as $key => $value) {
                     if (!isset($row[$key]) || $row[$key] === null) {
                         $row[$key] = $value;
@@ -158,40 +155,50 @@ try {
         if (isset($seenIds[$row['original_dailywork_id']])) {
             continue;
         }
-        if (isset($seenIds[$row['id']])) {
-            continue;
-        }
-        $seenIds[$row['id']] = true;
+        
         $dailyWork[] = $row;
+        $seenIds['sent_' . $row['sent_id']] = true;
     }
 
     // ============================================================
-    // 3. SENT DAILY WORK (kwa department iliyotuma - SENDER)
+    // 3. SENT DAILY WORK - SENDER ANAONA ZILE ALIZOTUMA
     // ============================================================
-    // Sender pia anaona sent daily work zake (zile alizotuma)
-    $query = "SELECT 
-                sd.id,
-                sd.original_dailywork_id,
-                sd.dailywork_data,
-                sd.from_department_id,
-                sd.to_department_id,
-                sd.sent_by,
-                sd.sent_at,
-                sd.is_viewed,
-                sd.sent_count,
-                sd.is_sent,
-                sd.last_sent_at,
-                sd.from_department_name,
-                sd.to_department_name,
-                sd.dailywork_project_name,
-                sd.dailywork_date,
-                sd.dailywork_amount,
-                sd.dailywork_budget,
-                sd.dailywork_status,
-                'sent' as source_type,
-                1 as is_sent,
-                sd.from_department_name as sent_from_name,
-                sd.to_department_name as sent_to_name
+    $selectFields = "sd.id as sent_id,
+                     sd.original_dailywork_id,
+                     sd.dailywork_data,
+                     sd.from_department_id,
+                     sd.to_department_id,
+                     sd.sent_by,
+                     sd.sent_at,
+                     sd.is_viewed,
+                     sd.sent_count,
+                     sd.from_department_name,
+                     sd.to_department_name,
+                     'sent_from' as source_type,
+                     1 as is_sent_copy,
+                     0 as is_received,
+                     0 as is_original,
+                     sd.from_department_name as sent_from_name,
+                     sd.to_department_name as sent_to_name,
+                     0 as _is_unviewed";
+    
+    if (in_array('dailywork_project_name', $columns)) {
+        $selectFields .= ", sd.dailywork_project_name";
+    }
+    if (in_array('dailywork_date', $columns)) {
+        $selectFields .= ", sd.dailywork_date";
+    }
+    if (in_array('dailywork_amount', $columns)) {
+        $selectFields .= ", sd.dailywork_amount";
+    }
+    if (in_array('dailywork_budget', $columns)) {
+        $selectFields .= ", sd.dailywork_budget";
+    }
+    if (in_array('dailywork_status', $columns)) {
+        $selectFields .= ", sd.dailywork_status";
+    }
+    
+    $query = "SELECT {$selectFields} 
               FROM sent_dailywork sd
               WHERE sd.from_department_id = ?
                 AND (sd.is_deleted = 0 OR sd.is_deleted IS NULL)";
@@ -207,9 +214,11 @@ try {
     $stmt = $pdo->prepare($query);
     $stmt->execute([$department_id]);
     while ($row = $stmt->fetch()) {
+        $row['is_sent'] = 1;
+        
         if ($row['dailywork_data']) {
             $dwData = json_decode($row['dailywork_data'], true);
-            if ($dwData) {
+            if ($dwData && is_array($dwData)) {
                 foreach ($dwData as $key => $value) {
                     if (!isset($row[$key]) || $row[$key] === null) {
                         $row[$key] = $value;
@@ -219,22 +228,25 @@ try {
         }
         unset($row['dailywork_data']);
         
-        if (isset($seenIds[$row['original_dailywork_id']]) || isset($seenIds[$row['id']])) {
+        // Skip if already seen
+        if (isset($seenIds[$row['original_dailywork_id']]) || isset($seenIds['sent_' . $row['sent_id']])) {
             continue;
         }
-        $seenIds[$row['id']] = true;
+        
         $dailyWork[] = $row;
+        $seenIds['sent_from_' . $row['sent_id']] = true;
     }
 
     // ============================================================
-    // 4. FILTER - ONDOA DUPLICATES
+    // 4. REMOVE DUPLICATES
     // ============================================================
     $uniqueWork = [];
     $uniqueIds = [];
     foreach ($dailyWork as $dw) {
-        $id = $dw['original_dailywork_id'] ?? $dw['id'];
-        if (!in_array($id, $uniqueIds)) {
-            $uniqueIds[] = $id;
+        $id = $dw['original_dailywork_id'] ?? $dw['id'] ?? $dw['sent_id'] ?? 0;
+        $key = $dw['source_type'] . '_' . $id;
+        if (!in_array($key, $uniqueIds)) {
+            $uniqueIds[] = $key;
             $uniqueWork[] = $dw;
         }
     }
@@ -244,19 +256,19 @@ try {
     // 5. SORT BY DATE (newest first)
     // ============================================================
     usort($dailyWork, function($a, $b) {
-        $dateA = strtotime($a['date'] ?? $a['dailywork_date'] ?? '1970-01-01');
-        $dateB = strtotime($b['date'] ?? $b['dailywork_date'] ?? '1970-01-01');
+        $dateA = strtotime($a['date'] ?? $a['dailywork_date'] ?? $a['sent_at'] ?? '1970-01-01');
+        $dateB = strtotime($b['date'] ?? $b['dailywork_date'] ?? $b['sent_at'] ?? '1970-01-01');
         return $dateB - $dateA;
     });
 
     // ============================================================
-    // 6. ADD DEBUG INFO
+    // 6. SEND RESPONSE
     // ============================================================
     $originalCount = count(array_filter($dailyWork, function($w) { 
         return $w['source_type'] === 'original'; 
     }));
     $sentCount = count(array_filter($dailyWork, function($w) { 
-        return $w['source_type'] === 'sent'; 
+        return $w['source_type'] === 'sent' || $w['source_type'] === 'sent_from'; 
     }));
 
     sendJson([
@@ -269,7 +281,7 @@ try {
         'debug' => [
             'original_count' => $originalCount,
             'sent_count' => $sentCount,
-            'note' => 'Receiver sees ONLY sent daily work (not new ones until sent again)'
+            'note' => 'Sender sees original + sent daily work. Receiver sees sent only.'
         ],
         'message' => 'Daily work retrieved successfully'
     ]);
