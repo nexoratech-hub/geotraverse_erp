@@ -1163,13 +1163,54 @@ async function fetchProjectDocuments() {
         [];
 }
 
+// ============================================================
+// FETCH DAILY WORK - KWA SUPER ADMIN (all=1)
+// ============================================================
 async function fetchDailyWork() {
-    const res = await apiCall('get_dailywork.php');
-    if (res.success && res.data) {
-        dailyworkData = res.data.filter(w => (!w.is_deleted || w.is_deleted != 1))
-                                .sort((a,b) => new Date(b.date) - new Date(a.date));
-    } else {
+    try {
+        console.log('📥 Fetching daily work for Super Admin (all=1)...');
+        
+        // Super Admin anapaswa kuona daily work zote
+        // Tumia parameter all=1 ili kuona zote
+        const url = `get_dailywork.php?all=1`;
+        
+        const res = await apiCall(url, 'GET');
+        
+        if (res && res.success && res.data) {
+            dailyworkData = res.data;
+            console.log('✅ Daily work loaded:', dailyworkData.length, 'records');
+            console.log('📊 Daily work data sample:', dailyworkData.slice(0, 3));
+            return dailyworkData;
+        } else {
+            console.error('❌ Failed to load daily work:', res?.message);
+            dailyworkData = [];
+            return [];
+        }
+    } catch(e) {
+        console.error('❌ Fetch daily work error:', e);
         dailyworkData = [];
+        return [];
+    }
+}
+
+// ============================================================
+// FETCH DAILY WORK KWA PROJECT MAALUM
+// ============================================================
+async function fetchDailyWorkForProject(projectId) {
+    try {
+        console.log('📥 Fetching daily work for project:', projectId);
+        
+        const res = await apiCall(`get_dailywork.php?all=1&project_id=${projectId}`, 'GET');
+        
+        if (res && res.success && res.data) {
+            console.log('✅ Daily work for project loaded:', res.data.length, 'records');
+            return res.data;
+        } else {
+            return [];
+        }
+    } catch(e) {
+        console.error('❌ Fetch daily work for project error:', e);
+        return [];
     }
 }
 
@@ -2166,23 +2207,80 @@ async function loadReports(highlightId = null) {
 }
 
 // ============================================================
-// SEND PROJECT WITH DAILY WORK - send_project_advanced.php
+// SEND PROJECT TO DEPARTMENT - FIXED
 // ============================================================
-
 async function sendProjectToDept(projectId, deptId) {
-    const p = projectsData.find(p => p.id === projectId);
+    // Find project in data
+    let p = projectsData.find(p => p.id === projectId);
+    let isSentProject = false;
+    let originalProjectId = projectId;
+    let originalSenderId = DEPARTMENT_ID;
+    let isForward = false;
+    let forwardChain = [];
+    let fromDeptId = DEPARTMENT_ID;
+    let sentProjectId = null;
+    
+    // Check if this is a sent project (forwarding)
+    if (p && p.source_type === 'sent') {
+        isSentProject = true;
+        originalProjectId = p.original_project_id || projectId;
+        originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+        isForward = true;
+        forwardChain = p.forward_chain || [];
+        fromDeptId = p.from_department_id || DEPARTMENT_ID;
+        sentProjectId = p.sent_id || p._display_id || p.id;
+    }
+    
+    // If not found by id, try sent_id
+    if (!p) {
+        p = projectsData.find(p => p.sent_id === projectId);
+        if (p) {
+            isSentProject = true;
+            originalProjectId = p.original_project_id || projectId;
+            originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+            isForward = true;
+            forwardChain = p.forward_chain || [];
+            fromDeptId = p.from_department_id || DEPARTMENT_ID;
+            sentProjectId = p.sent_id || p._display_id || p.id;
+        }
+    }
+    
+    // If still not found, try by _display_id
+    if (!p) {
+        p = projectsData.find(p => p._display_id === projectId);
+        if (p) {
+            isSentProject = true;
+            originalProjectId = p.original_project_id || projectId;
+            originalSenderId = p.original_sender_id || p.from_department_id || DEPARTMENT_ID;
+            isForward = true;
+            forwardChain = p.forward_chain || [];
+            fromDeptId = p.from_department_id || DEPARTMENT_ID;
+            sentProjectId = p.sent_id || p._display_id || p.id;
+        }
+    }
+    
     if (!p) {
         showToast('Project not found', true);
         return;
     }
-    if (deptId == 1) {
-        showToast('Cannot send to Super Admin', true);
+    
+    // Don't allow sending to self
+    if (deptId == DEPARTMENT_ID) {
+        showToast('Cannot send to yourself', true);
         return;
+    }
+    
+    // Don't allow forwarding back to original sender if it's a sent project
+    if (isSentProject && deptId == originalSenderId) {
+        if (!confirm('Send this project back to the original sender (' + (p.original_sender_name || 'Unknown') + ')?')) {
+            return;
+        }
     }
 
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
     const deptName = dept ? dept.name : 'Department';
 
+    // Show loading
     const btn = document.querySelector(`#projSendDropdown-${projectId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
@@ -2191,51 +2289,52 @@ async function sendProjectToDept(projectId, deptId) {
     }
 
     try {
-        // ============================================================
-        // 1. FETCH DAILY WORK RECORDS
-        // ============================================================
+        // Get daily work records
         await fetchDailyWork();
         
-        const projectDailyWork = dailyworkData.filter(function(w) {
-            return parseInt(w.project_id) === parseInt(projectId);
-        });
+        let projectDailyWork = [];
         
-        console.log('📋 Found ' + projectDailyWork.length + ' daily work records for project "' + p.name + '"');
+        // For sent projects, try to get daily work from the sent data
+        if (isSentProject && p.daily_work) {
+            projectDailyWork = p.daily_work;
+        } else {
+            // For original projects or fallback, get from dailywork table
+            projectDailyWork = dailyworkData.filter(function(w) {
+                return parseInt(w.project_id) === parseInt(originalProjectId);
+            });
+        }
 
-        // ============================================================
-        // 2. CALCULATE DAILY WORK SUMMARY
-        // ============================================================
+        // Calculate summary
         let totalBudget = 0, totalExpenses = 0;
         let completedCount = 0, partialCount = 0, pendingCount = 0;
         let dailyRecords = [];
 
         for (let w of projectDailyWork) {
-            let budget = parseFloat(w.budget) || 0;
-            let expenses = parseFloat(w.amount) || 0;
+            let budget = parseFloat(w.budget || w.dailywork_budget || 0);
+            let expenses = parseFloat(w.amount || w.dailywork_amount || 0);
             totalBudget += budget;
             totalExpenses += expenses;
 
-            if (w.status === 'completed') completedCount++;
-            else if (w.status === 'partial') partialCount++;
+            let status = w.status || w.dailywork_status || 'pending';
+            if (status === 'completed') completedCount++;
+            else if (status === 'partial') partialCount++;
             else pendingCount++;
 
             dailyRecords.push({
-                id: w.id,
-                date: w.date,
-                work_description: w.work_description || '',
+                id: w.id || w.original_dailywork_id || 0,
+                date: w.date || w.dailywork_date || new Date().toISOString(),
+                work_description: w.work_description || w.description || '',
                 budget: budget,
                 amount: expenses,
-                status: w.status || 'pending',
-                created_by: w.created_by || 'System',
-                created_at: w.created_at || new Date().toISOString()
+                status: status,
+                created_by: w.created_by || w.sent_by || 'System',
+                created_at: w.created_at || w.sent_at || new Date().toISOString()
             });
         }
 
         let remainingBudget = totalBudget - totalExpenses;
 
-        // ============================================================
-        // 3. GET FULL IMAGE PATH
-        // ============================================================
+        // Get image
         let imagePath = p.image || '';
         if (imagePath && !imagePath.startsWith('data:') && !imagePath.startsWith('http')) {
             if (!imagePath.startsWith('/')) {
@@ -2244,80 +2343,54 @@ async function sendProjectToDept(projectId, deptId) {
         }
 
         // ============================================================
-        // 4. BUILD PAYLOAD - send_project_advanced.php
+        // BUILD PAYLOAD
         // ============================================================
         const payload = {
-            project_id: parseInt(projectId),
+            project_id: isSentProject ? (p.sent_id || p.id) : parseInt(projectId),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Super Admin',
-            
-            // Project Details
-            project_name: p.name,
-            client_name: p.client_name || '',
-            amount: parseFloat(p.amount) || 0,
-            status: p.status || 'pending',
-            progress: p.progress || 0,
-            location: p.location || '',
-            description: p.description || '',
-            image: imagePath,
-            start_date: p.start_date || '',
-            end_date: p.end_date || '',
-            created_by: p.created_by || 'System',
-            created_at: p.created_at || new Date().toISOString(),
-            
-            // FORWARD DATA
-            original_sender: p.sent_from_dept || p.from_department_id || null,
-            original_sender_name: p.sent_from_dept ? departmentNames[p.sent_from_dept] : null,
-            is_forward: p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID ? 1 : 0,
-            forward_count: (p.forward_count || 0) + 1,
-            
-            // DAILY WORK RECORDS
-            daily_work_records: dailyRecords,
-            daily_summary: {
-                total_records: projectDailyWork.length,
-                total_budget: totalBudget,
-                total_expenses: totalExpenses,
-                remaining_budget: remainingBudget,
-                completed_count: completedCount,
-                partial_count: partialCount,
-                pending_count: pendingCount
-            },
-            
-            sent_by: currentUserFullName || 'Super Admin'
+            sent_by: currentUserFullName || 'Super Admin',
+            is_forward: isForward ? 1 : 0,
+            original_sender_id: originalSenderId,
+            project_data: {
+                name: p.name || p.project_name,
+                client_name: p.client_name || '',
+                amount: parseFloat(p.amount) || 0,
+                status: p.status || 'pending',
+                progress: p.progress || 0,
+                location: p.location || '',
+                description: p.description || '',
+                image: imagePath,
+                image_path: p.image_path || '',
+                project_type: p.project_type || 'general',
+                created_by: p.created_by || p.sent_by || 'System',
+                created_at: p.created_at || p.sent_at || new Date().toISOString(),
+                original_project_id: originalProjectId,
+                original_sender_id: originalSenderId,
+                original_sender_name: p.original_sender_name || departmentNames[originalSenderId] || 'Unknown',
+                forward_chain: forwardChain,
+                daily_work_records: dailyRecords,
+                daily_work_summary: {
+                    total_records: dailyRecords.length,
+                    total_budget: totalBudget,
+                    total_expenses: totalExpenses,
+                    remaining_budget: remainingBudget,
+                    completed_count: completedCount,
+                    partial_count: partialCount,
+                    pending_count: pendingCount
+                }
+            }
         };
 
-        console.log('📤 Sending project to send_project_advanced.php:', payload);
+        console.log('📤 Sending project payload:', payload);
 
-        // ============================================================
-        // 5. SEND TO send_project_advanced.php ONLY
-        // ============================================================
         const res = await apiCall('send_project_advanced.php', 'POST', payload);
 
-        // ============================================================
-        // 6. HANDLE RESPONSE
-        // ============================================================
         if (res && res.success) {
-            let recordMsg = projectDailyWork.length > 0 ? ' with ' + projectDailyWork.length + ' daily work records' : '';
-            let forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            let forwardMsg = isForward ? ' (Forwarded)' : '';
+            let recordMsg = dailyRecords.length > 0 ? ' with ' + dailyRecords.length + ' daily work records' : '';
             showToast('✅ Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg, false);
             addLog('📤 Project "' + p.name + '" sent to ' + deptName + recordMsg + forwardMsg);
-
-            // Update local data
-            p.sent_to_dept = deptId;
-            p.sent_from_dept = DEPARTMENT_ID;
-            p.is_viewed_by_department = 0;
-            p._is_unviewed = true;
-            p.daily_work_sent = projectDailyWork.length;
-            p.forward_count = (p.forward_count || 0) + 1;
-            p.last_forwarded_at = new Date().toISOString();
-
-            // Add notification
-            await addNotification(deptId, 'project', p.id, p.name, 
-                'Project "' + p.name + '" sent from ' + departmentNames[DEPARTMENT_ID] + 
-                ' with ' + projectDailyWork.length + ' daily work records' +
-                (payload.is_forward ? ' (Forwarded from ' + payload.original_sender_name + ')' : '')
-            );
 
             // Refresh data
             await fetchProjects();
@@ -2328,6 +2401,10 @@ async function sendProjectToDept(projectId, deptId) {
             updateProjectBadge();
 
             closeModal('viewProjModal');
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
             toggleSendDropdown('projSendDropdown-' + projectId);
 
         } else {
@@ -2343,6 +2420,7 @@ async function sendProjectToDept(projectId, deptId) {
         }
     }
 }
+
 // ============================================================
 // GENERATE PROJECT MESSAGE
 // ============================================================
@@ -3331,35 +3409,101 @@ async function saveProject() {
     }
 }
 
+// ============================================================
+// DELETE PROJECT - SOFT DELETE (Inaenda Recycle Bin)
+// ============================================================
 async function deleteProject(id) {
-    if(!confirm('Delete this project? It will be moved to recycle bin.')) return;
-    const p = projectsData.find(p => p.id === id);
-    if(!p) { showToast('Project not found', true); return; }
-
+    if (!confirm('Delete this project? It will be moved to recycle bin.')) return;
+    
+    console.log('🗑️ Deleting project ID:', id);
+    
+    // Show loading state
+    const card = document.getElementById(`proj-card-${id}`);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
     try {
-        await addToRecycleBin(id, 'project', p.name);
         const res = await apiCall('delete_project.php', 'POST', {
-            project_id: id,
-            department_id: 1,
-            is_deleted: 1,
-            deleted_by_admin: 1
+            project_id: parseInt(id),
+            department_id: DEPARTMENT_ID,
+            deleted_by: currentUserFullName || 'Super Admin'
         });
-
-        projectsData = projectsData.filter(project => project.id !== id);
-        const projectCard = document.getElementById(`proj-card-${id}`);
-        if (projectCard) projectCard.remove();
-
-        showToast('Project moved to recycle bin');
-        addLog(`Project deleted: ${p.name}`);
-        await loadProjects();
-        await loadDashboard();
-
+        
+        console.log('📤 Delete response:', res);
+        
+        if (res && res.success) {
+            showToast('✅ ' + (res.message || 'Project moved to recycle bin'), false);
+            addLog(`Project deleted: ID ${id}`);
+            
+            // Remove from local data - SOFT DELETE
+            projectsData = projectsData.filter(project => {
+                // Remove by id
+                if (project.id === id) return false;
+                // Remove by sent_id if it exists
+                if (project.sent_id === id) return false;
+                // Remove by original_project_id if it's a sent project for this department
+                if (project.original_project_id === id && project.to_department_id === DEPARTMENT_ID) return false;
+                return true;
+            });
+            
+            // Remove from DOM
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.95)';
+                setTimeout(() => card.remove(), 300);
+            }
+            
+            // Also remove any other cards with this ID
+            document.querySelectorAll(`[data-project-id="${id}"]`).forEach(el => {
+                el.style.opacity = '0';
+                el.style.transform = 'scale(0.95)';
+                setTimeout(() => el.remove(), 300);
+            });
+            
+            // Refresh data
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+            await loadRecycleBinFromDB();
+            
+            updateProjectBadge();
+            
+        } else {
+            // If API fails, try to remove from UI anyway
+            showToast('⚠️ ' + (res?.message || 'Project removed from view'), false);
+            
+            projectsData = projectsData.filter(project => {
+                if (project.id === id) return false;
+                if (project.sent_id === id) return false;
+                return true;
+            });
+            
+            if (card) card.remove();
+            
+            await fetchProjects();
+            await loadProjects();
+            await loadDashboard();
+        }
+        
     } catch(error) {
         console.error('Delete project error:', error);
-        projectsData = projectsData.filter(project => project.id !== id);
-        const projectCard = document.getElementById(`proj-card-${id}`);
-        if (projectCard) projectCard.remove();
-        showToast('Project removed from view', false);
+        
+        // Fallback: Remove from UI anyway
+        projectsData = projectsData.filter(project => {
+            if (project.id === id) return false;
+            if (project.sent_id === id) return false;
+            return true;
+        });
+        
+        if (card) card.remove();
+        
+        showToast('⚠️ Project removed from view (refresh may be needed)', false);
+        
+        await fetchProjects();
+        await loadProjects();
+        await loadDashboard();
     }
 }
 
@@ -3400,8 +3544,9 @@ async function deleteProjectDocument(docId) {
         showToast('Document removed from local view', false);
     }
 }
-
-// ==================== VIEW PROJECT DETAILS ====================
+// ============================================================
+// VIEW PROJECT DETAILS - WITH SEND BUTTON FOR ALL
+// ============================================================
 async function viewProjectDetails(id) {
     const p = projectsData.find(p => p.id === id);
     if(!p) {
@@ -3409,9 +3554,7 @@ async function viewProjectDetails(id) {
         return;
     }
     
-    // ============================================================
-    // MARK AS VIEWED - IKIWA NI PROJECT ILIYOTUMWA
-    // ============================================================
+    // Mark as viewed
     if (p._is_unviewed) {
         await markProjectViewed(id);
         p._is_unviewed = false;
@@ -3425,31 +3568,54 @@ async function viewProjectDetails(id) {
     }
     
     currentProjectId = id;
-    
-    // ============================================================
-    // LOAD DAILY WORK KWA PROJECT HII - SUBIRI IKAWE
-    // ============================================================
     await loadDailyWorkForProject(id);
 
-    // ============================================================
-    // ONYESHA PROJECT DETAILS
-    // ============================================================
     let imageUrl = getFullImageUrl(p.image);
     let imageHtml = imageUrl ? 
         `<img src="${imageUrl}?t=${Date.now()}" class="w-full h-48 object-cover rounded-lg mb-3 cursor-pointer" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : 
         '<div class="no-image w-full h-48 mb-3 flex items-center justify-center bg-gray-100 rounded-lg"><i class="fas fa-image text-3xl text-gray-400"></i><p class="text-sm ml-2">No Image</p></div>';
 
     let sourceDeptName = 'System';
-    if (p.sent_from_dept) {
+    let isSent = false;
+    let isForwarded = false;
+    let forwardChain = p.forward_chain || [];
+    
+    if (p.sent_from_name) {
+        sourceDeptName = p.sent_from_name;
+        isSent = true;
+    } else if (p.sent_from_dept) {
         sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
+        isSent = true;
     } else if (p.created_by) {
         sourceDeptName = p.created_by;
     }
-    let isSent = p.sent_from_dept && p.sent_from_dept != 1;
+    
+    // Check if this is a forwarded project
+    if (p.is_forward || (p.forward_count && p.forward_count > 0)) {
+        isForwarded = true;
+    }
 
-    // ============================================================
-    // HESABU DAILY WORK SUMMARY KWA ONYESHO
-    // ============================================================
+    // Get original sender info
+    let originalSenderName = p.original_sender_name || departmentNames[p.original_sender_id] || 'Unknown';
+    let originalSenderId = p.original_sender_id || p.department_id || 1;
+
+    // Build forward chain display
+    let forwardChainHtml = '';
+    if (forwardChain.length > 0) {
+        forwardChainHtml = `
+            <div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #f59e0b;">
+                <strong><i class="fas fa-route mr-1"></i> Forward Chain:</strong>
+                <div style="font-size: 11px; margin-top: 5px;">
+                    ${forwardChain.map((f, i) => 
+                        `<span>${i + 1}. ${f.from_department_name || 'Unknown'} → ${f.to_department_name || 'Unknown'}</span>`
+                    ).join(' → ')}
+                    ${isForwarded ? `<br><span style="color: #6b7280; font-size: 9px;">Total forwards: ${forwardChain.length} | Original sender: ${originalSenderName}</span>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // Daily work summary
     const projectWork = dailyworkData.filter(w => 
         parseInt(w.project_id) === parseInt(id) || w.project_name === p.name
     );
@@ -3463,6 +3629,7 @@ async function viewProjectDetails(id) {
 
     document.getElementById('viewProjContent').innerHTML = `
         ${imageHtml}
+        ${forwardChainHtml}
         <div class="space-y-2 text-sm">
             <div class="grid grid-cols-2 gap-2">
                 <div><strong>Name:</strong></div><div>${escapeHtml(p.name)}</div>
@@ -3471,13 +3638,12 @@ async function viewProjectDetails(id) {
                 <div><strong>Status:</strong></div><div><span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></div>
                 <div><strong>Progress:</strong></div><div>${p.progress || 0}%</div>
                 <div><strong>Location:</strong></div><div>${escapeHtml(p.location || 'N/A')}</div>
-                <div><strong>Start Date:</strong></div><div>${p.start_date || 'N/A'}</div>
-                <div><strong>End Date:</strong></div><div>${p.end_date || 'N/A'}</div>
-                <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(p.description || 'N/A')}</div>
                 <div><strong>Source:</strong></div><div><i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i> ${escapeHtml(sourceDeptName)} ${isSent ? '<span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}</div>
+                ${isForwarded ? `<div><strong>Original Sender:</strong></div><div>${escapeHtml(originalSenderName)}</div>` : ''}
+                ${isForwarded ? `<div><strong>Forward Count:</strong></div><div>${forwardChain.length}</div>` : ''}
                 <div><strong>Daily Work Records:</strong></div><div>${projectWork.length}</div>
-                <div><strong>Total Budget (Daily Work):</strong></div><div class="text-blue-600 font-bold">${formatMoney(totalBudget)}</div>
-                <div><strong>Total Expenses (Daily Work):</strong></div><div class="text-orange-600 font-bold">${formatMoney(totalExpenses)}</div>
+                <div><strong>Total Budget:</strong></div><div class="text-blue-600 font-bold">${formatMoney(totalBudget)}</div>
+                <div><strong>Total Expenses:</strong></div><div class="text-orange-600 font-bold">${formatMoney(totalExpenses)}</div>
                 <div><strong>Remaining Budget:</strong></div><div style="color: ${remainingColor}; font-weight: bold;">${formatMoney(remainingBudget)}</div>
             </div>
             <div class="user-info-line mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}</div>
@@ -3485,37 +3651,38 @@ async function viewProjectDetails(id) {
     `;
 
     // ============================================================
-    // ACTION HISTORY
-    // ============================================================
-    let actionHtml = '';
-    if (p.created_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(p.created_by)} | ${formatDateTimeFull(p.created_at)}</div>`;
-    if (p.updated_by && p.updated_by !== p.created_by) actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(p.updated_by)} | ${formatDateTimeFull(p.updated_at)}</div>`;
-    if (p.sent_from_dept) actionHtml += `<div><i class="fas fa-paper-plane text-xs mr-1"></i> Sent from: ${escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown')} on ${formatDateTimeFull(p.sent_at)}</div>`;
-    document.getElementById('projActionHistory').innerHTML = actionHtml || '<div>No history available</div>';
-
-    // ============================================================
-    // SEND DROPDOWN - KWA PROJECTS ZA SUPER ADMIN TU
+    // SEND BUTTON - SHOW FOR ALL USERS (including Super Admin)
     // ============================================================
     let deptOptions = '';
-    if (!p.sent_from_dept || p.sent_from_dept == 1) {
-        allDepartmentsForSend.forEach(d => {
+    // Show send button for ALL departments
+    // Super Admin can send, Manager can forward, everyone can send
+    allDepartmentsForSend.forEach(d => {
+        // Don't send to self
+        if (d.id !== DEPARTMENT_ID) {
             deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
-        });
+        }
+    });
+
+    // Also add send to original sender if this is a forwarded project
+    if (isForwarded && originalSenderId && originalSenderId !== DEPARTMENT_ID) {
+        const origDept = allDepartmentsForSend.find(d => d.id === originalSenderId);
+        if (origDept) {
+            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${origDept.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs" style="background: #8b5cf6;"><i class="fas fa-undo mr-1"></i> Return to ${escapeHtml(origDept.name)}</a>`;
+        }
     }
 
     document.getElementById('viewProjButtons').innerHTML = `
         <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
         <button onclick="exportProjectToPDFNewWindow(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> Full PDF Report</button>
         ${imageUrl ? `<button onclick="showFullImage('${imageUrl}')" class="small-btn small-btn-primary"><i class="fas fa-image"></i> View Image</button>` : ''}
-        ${deptOptions ? `<div class="send-dropdown">
-            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button>
+        <div class="send-dropdown">
+            <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')">
+                <i class="fas fa-paper-plane"></i> ${isForwarded ? 'Forward Project' : 'Send Project'}
+            </button>
             <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
-        </div>` : '<span class="text-gray-400 text-xs"><i class="fas fa-ban mr-1"></i> Received from another department</span>'}
+        </div>
     `;
 
-    // ============================================================
-    // FUNGA MODAL
-    // ============================================================
     openModal('viewProjModal');
 }
 async function loadDailyWorkForProject(projectId) {
