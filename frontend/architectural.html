@@ -2081,7 +2081,7 @@ function exportDailyWorkToPDF() {
 }
 
 // ============================================================
-// LOAD PROJECTS
+// LOAD PROJECTS - FIXED (View & Delete for Sent Projects)
 // ============================================================
 function loadProjects(highlightId) {
     highlightId = highlightId || null;
@@ -2116,9 +2116,14 @@ function loadProjects(highlightId) {
                 var statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
                 var statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
                 
+                // ============================================================
+                // SENT BADGE - "Received" Badge kwa Sent Projects
+                // ============================================================
+                var sentBadge = '';
                 var sentFromBadge = '';
                 if (isSent) {
                     var deptName = departmentNames[p.sent_from_dept] || 'Unknown';
+                    sentBadge = '<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>';
                     sentFromBadge = '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + deptName + '</span>';
                 }
                 
@@ -2131,28 +2136,46 @@ function loadProjects(highlightId) {
                     imageHtml = '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>';
                 }
                 
-                var actionsHtml = '';
+                // ============================================================
+                // CARD BUTTONS - SENT: View & Delete ONLY
+                // ============================================================
+                var cardButtonsHtml = '';
                 if (isSent) {
-                    actionsHtml = 
-                        '<button onclick="viewProjectDetails(' + p.id + ')" class="action-btn view"><i class="fas fa-eye"></i> View</button>' +
-                        '<span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>';
+                    // SENT PROJECT: View and Delete ONLY
+                    cardButtonsHtml = 
+                        '<button onclick="viewProjectDetails(' + p.id + ')" class="action-btn view" title="View Project"><i class="fas fa-eye"></i> View</button>' +
+                        '<button onclick="deleteProject(' + p.id + ')" class="action-btn delete" title="Delete Project"><i class="fas fa-trash"></i> Delete</button>' +
+                        '<span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>';
                 } else {
-                    actionsHtml = 
-                        '<button onclick="viewProjectDetails(' + p.id + ')" class="action-btn view"><i class="fas fa-eye"></i> View</button>' +
-                        '<button onclick="editProject(' + p.id + ')" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>' +
-                        '<button onclick="deleteProject(' + p.id + ')" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>';
+                    // ADDED PROJECT: View, Edit, Delete
+                    cardButtonsHtml = 
+                        '<button onclick="viewProjectDetails(' + p.id + ')" class="action-btn view" title="View Project"><i class="fas fa-eye"></i> View</button>' +
+                        '<button onclick="editProject(' + p.id + ')" class="action-btn edit" title="Edit Project"><i class="fas fa-edit"></i> Edit</button>' +
+                        '<button onclick="deleteProject(' + p.id + ')" class="action-btn delete" title="Delete Project"><i class="fas fa-trash"></i> Delete</button>';
                 }
                 
                 gridHtml += 
                     '<div class="project-card ' + (isHighlighted ? 'search-highlight' : '') + '" id="proj-card-' + p.id + '">' +
                         (isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : '') +
-                        '<div class="card-header"><h4>' + escapeHtml(p.name) + '</h4><p>ID: #' + p.id + ' ' + sentFromBadge + '</p></div>' +
+                        '<div class="card-header">' +
+                            '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+                                '<h4>' + escapeHtml(p.name) + '</h4>' +
+                                (isSent ? '<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>' : '') +
+                            '</div>' +
+                            '<p>ID: #' + p.id + ' ' + sentFromBadge + '</p>' +
+                        '</div>' +
                         imageHtml +
                         '<div class="p-3">' +
-                            '<div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ' + escapeHtml(p.client_name || 'N/A') + '</p><span class="status-badge ' + statusClass + ' text-[9px] px-2 py-0.5">' + statusText + '</span></div>' +
+                            '<div class="flex justify-between items-start">' +
+                                '<p class="text-xs text-gray-500">Client: ' + escapeHtml(p.client_name || 'N/A') + '</p>' +
+                                '<span class="status-badge ' + statusClass + ' text-[9px] px-2 py-0.5">' + statusText + '</span>' +
+                            '</div>' +
                             '<p class="text-sm font-semibold text-pink-600 mt-1">' + formatMoney(p.amount) + '</p>' +
-                            '<div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>' + (p.progress || 0) + '%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-pink-600 h-1 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div></div>' +
-                            '<div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">' + actionsHtml + '</div>' +
+                            '<div class="mt-2">' +
+                                '<div class="flex justify-between text-[9px]"><span>Progress</span><span>' + (p.progress || 0) + '%</span></div>' +
+                                '<div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-pink-600 h-1 rounded-full" style="width:' + (p.progress || 0) + '%"></div></div>' +
+                            '</div>' +
+                            '<div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">' + cardButtonsHtml + '</div>' +
                             '<div class="user-info">Created by: ' + escapeHtml(p.created_by || 'System') + ' on ' + formatDateTime(p.created_at) + '</div>' +
                         '</div>' +
                     '</div>';
@@ -2160,7 +2183,7 @@ function loadProjects(highlightId) {
             document.getElementById('projectsGrid').innerHTML = gridHtml;
             
         } else {
-            // Uploaded documents tab
+            // Uploaded documents tab (unchanged)
             html += 
                 '<div class="section-card">' +
                     '<div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>' +
@@ -2175,6 +2198,7 @@ function loadProjects(highlightId) {
             
             var docsHtml = '';
             projectDocuments.forEach(function(doc) {
+                var isHighlighted = highlightId && doc.id === highlightId;
                 var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
                 var fileIcon = 'fa-file-alt';
                 if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
@@ -2182,9 +2206,21 @@ function loadProjects(highlightId) {
                 else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
                 else if (['JPG','JPEG','PNG','GIF','WEBP'].indexOf(fileExt) !== -1) fileIcon = 'fa-file-image';
                 
+                var isSent = doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID);
+                var sentBadge = '';
+                if (isSent) {
+                    sentBadge = '<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>';
+                }
+                
                 docsHtml += 
-                    '<div class="document-card" id="doc-card-' + doc.id + '">' +
-                        '<div class="card-header"><h4><i class="fas ' + fileIcon + ' mr-2"></i>' + escapeHtml(doc.title) + '</h4><p>' + (doc.file_name || 'Document') + '</p></div>' +
+                    '<div class="document-card ' + (isHighlighted ? 'search-highlight' : '') + '" id="doc-card-' + doc.id + '">' +
+                        '<div class="card-header">' +
+                            '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+                                '<h4><i class="fas ' + fileIcon + ' mr-2"></i>' + escapeHtml(doc.title) + '</h4>' +
+                                (isSent ? sentBadge : '') +
+                            '</div>' +
+                            '<p>' + (doc.file_name || 'Document') + '</p>' +
+                        '</div>' +
                         '<div class="p-3">' +
                             '<div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ' + new Date(doc.created_at).toLocaleDateString() + '</span><span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">' + fileExt + '</span></div>' +
                             '<p class="text-xs text-gray-500 mb-2">' + escapeHtml(doc.description || 'No description') + '</p>' +
@@ -2201,7 +2237,6 @@ function loadProjects(highlightId) {
         updateProjectBadge();
     });
 }
-
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadProjects();
