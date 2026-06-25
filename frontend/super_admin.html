@@ -7032,7 +7032,7 @@ function showPage(pageId, highlightId = null) {
     else if (pageId === 'settings') loadSettings();
 }
 
-// ==================== DASHBOARD ====================
+// ==================== LOAD DASHBOARD - UPDATED ====================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading dashboard...</span></div>';
 
@@ -7056,7 +7056,55 @@ async function loadDashboard() {
         activityLogs = [{ action: "Super Admin Dashboard loaded", created_at: new Date().toISOString() }];
     }
 
-    // Calculate totals for dashboard cards
+    // ============================================================
+    // DAILY WORK CALCULATIONS - ALL RECORDS (NOT JUST SENT)
+    // ============================================================
+    let totalBudgetDW = 0, totalExpensesDW = 0;
+    let completedCount = 0, partialCount = 0, pendingCount = 0;
+    let totalDailyRecords = dailyworkData.length;
+    let totalIncomeDW = 0, totalProfitDW = 0;
+    
+    // Also track sent records vs original
+    let sentRecordsCount = 0;
+    let originalRecordsCount = 0;
+
+    for (let w of dailyworkData) {
+        // Check if this is a sent record
+        const isSentRecord = w.sent_from_dept && w.sent_from_dept != DEPARTMENT_ID;
+        const isCopy = w.source_type === 'sent' || w.source_type === 'sent_from';
+        
+        if (isSentRecord || isCopy) {
+            sentRecordsCount++;
+        } else {
+            originalRecordsCount++;
+        }
+        
+        let budget = parseFloat(w.budget) || 0;
+        let expenses = parseFloat(w.amount) || 0;
+        let income = parseFloat(w.income || w.total_amount || 0) || 0;
+        
+        totalBudgetDW += budget;
+        totalExpensesDW += expenses;
+        totalIncomeDW += income;
+        
+        let status = w.status || 'pending';
+        if (status === 'completed' || status === 'Completed') {
+            completedCount++;
+        } else if (status === 'partial' || status === 'Partial') {
+            partialCount++;
+        } else {
+            pendingCount++;
+        }
+    }
+    
+    totalProfitDW = totalIncomeDW - totalExpensesDW;
+    const remainingBudgetDW = totalBudgetDW - totalExpensesDW;
+    const remainingColor = remainingBudgetDW >= 0 ? '#10b981' : '#ef4444';
+    const profitColor = totalProfitDW >= 0 ? '#10b981' : '#ef4444';
+
+    // ============================================================
+    // PROJECTS AND DOCUMENTS COUNTS
+    // ============================================================
     const totalProjects = projectsData.length;
     const totalDocuments = projectDocuments.length;
     const totalProjectsAndDocs = totalProjects + totalDocuments;
@@ -7066,32 +7114,39 @@ async function loadDashboard() {
     const unviewedDocs = projectDocuments.filter(d => d.is_sent_document && d.is_viewed_by_department == 0).length;
     const totalUnviewedProjects = unviewedProjects + unviewedDocs;
 
+    // ============================================================
+    // REPORTS COUNTS
+    // ============================================================
     const totalReports = reportsData.length + uploadedReportsData.length;
     const addedReports = reportsData.length;
     const uploadedReports = uploadedReportsData.length;
 
+    // ============================================================
+    // BUDGET REQUESTS
+    // ============================================================
     const totalRequests = budgetRequests.length;
     const approvedRequests = budgetRequests.filter(r => r.status === 'approved').length;
     const pendingRequests = budgetRequests.filter(r => r.status === 'pending').length;
     const cancelledRequests = budgetRequests.filter(r => r.status === 'cancelled').length;
     const totalRequestAmount = budgetRequests.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
 
-    // Transactions summary
+    // ============================================================
+    // TRANSACTIONS SUMMARY
+    // ============================================================
     let totalIncome = 0, totalExpense = 0;
     for (let t of transactionsData) {
-        if (t.type === 'income' && (t.status === 'paid' || t.status === 'approved')) totalIncome += parseFloat(t.amount) || 0;
-        if (t.type === 'expense' && (t.status === 'paid' || t.status === 'approved')) totalExpense += parseFloat(t.amount) || 0;
+        if (t.type === 'income' && (t.status === 'paid' || t.status === 'approved')) {
+            totalIncome += parseFloat(t.amount) || 0;
+        }
+        if (t.type === 'expense' && (t.status === 'paid' || t.status === 'approved')) {
+            totalExpense += parseFloat(t.amount) || 0;
+        }
     }
     let netProfit = totalIncome - totalExpense;
 
-    let totalBudgetDW = 0, totalExpensesDW = 0;
-    for (let w of dailyworkData) {
-        totalBudgetDW += parseFloat(w.budget) || 0;
-        totalExpensesDW += parseFloat(w.amount) || 0;
-    }
-    const remainingBudgetDW = totalBudgetDW - totalExpensesDW;
-    const totalDailyRecords = dailyworkData.length;
-
+    // ============================================================
+    // RENDER DASHBOARD
+    // ============================================================
     document.getElementById('dashboardPage').innerHTML = `
         <div class="dashboard-summary">
             <!-- CARD 1: Projects & Documents -->
@@ -7137,17 +7192,21 @@ async function loadDashboard() {
                 </div>
             </div>
 
-            <!-- CARD 4: Daily Work -->
+            <!-- CARD 4: Daily Work - ALL RECORDS (Including Sent) -->
             <div class="dashboard-card card-dailywork" onclick="showPage('projects')">
                 <div class="card-top">
                     <div class="card-icon"><i class="fas fa-calendar-day"></i></div>
                 </div>
                 <div class="card-number">${totalDailyRecords} <span class="small">records</span></div>
-                <div class="card-title">📅 Daily Work</div>
+                <div class="card-title">📅 Daily Work (All)</div>
                 <div class="card-details">
                     <span class="tag primary"><i class="fas fa-coins"></i> ${formatMoney(totalBudgetDW)}</span>
                     <span class="tag warning"><i class="fas fa-receipt"></i> ${formatMoney(totalExpensesDW)}</span>
                     <span class="tag success"><i class="fas fa-chart-simple"></i> ${formatMoney(remainingBudgetDW)}</span>
+                    <span class="tag purple"><i class="fas fa-check-circle"></i> ✅ ${completedCount}</span>
+                    <span class="tag warning"><i class="fas fa-clock"></i> ⏳ ${partialCount}</span>
+                    <span class="tag danger"><i class="fas fa-hourglass"></i> 🕐 ${pendingCount}</span>
+                    ${sentRecordsCount > 0 ? `<span class="tag new"><i class="fas fa-paper-plane"></i> ${sentRecordsCount} received</span>` : ''}
                 </div>
             </div>
         </div>
@@ -7170,6 +7229,7 @@ async function loadDashboard() {
                     <div class="flex justify-between"><span class="text-sm">Total Expenses</span><span class="font-bold text-red-600">${formatMoney(totalExpense)}</span></div>
                     <div class="flex justify-between"><span class="text-sm">Net Profit</span><span class="font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(netProfit)}</span></div>
                     <div class="flex justify-between"><span class="text-sm">Budget Requests</span><span class="font-bold text-orange-600">${formatMoney(totalRequestAmount)}</span></div>
+                    <div class="flex justify-between"><span class="text-sm">Daily Work Profit</span><span class="font-bold ${totalProfitDW >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(totalProfitDW)}</span></div>
                 </div>
             </div>
             <div class="bg-white rounded-xl p-4 shadow-sm border">
@@ -7179,8 +7239,54 @@ async function loadDashboard() {
                     <button onclick="openAddProjectModal()" class="bg-green-600 text-white py-1.5 rounded text-xs hover:bg-green-700 transition"><i class="fas fa-plus mr-1"></i> Add Project</button>
                     <button onclick="openUploadProjectDocModal()" class="bg-cyan-600 text-white py-1.5 rounded text-xs hover:bg-cyan-700 transition"><i class="fas fa-upload mr-1"></i> Upload Doc</button>
                     <button onclick="openModal('reportModal')" class="bg-purple-600 text-white py-1.5 rounded text-xs hover:bg-purple-700 transition"><i class="fas fa-plus mr-1"></i> Add Report</button>
+                    <button onclick="showPage('projects')" class="bg-amber-600 text-white py-1.5 rounded text-xs hover:bg-amber-700 transition"><i class="fas fa-calendar-day mr-1"></i> View Daily Work</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Daily Work Detailed Summary Cards -->
+        <div class="bg-white rounded-xl p-4 shadow-sm border mt-4">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-sm font-semibold"><i class="fas fa-calendar-day text-blue-600 mr-2"></i>Daily Work Summary (All Departments)</h3>
+                <span class="text-xs text-gray-400">${totalDailyRecords} total records</span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="bg-green-50 dark:bg-green-900/30 rounded-xl p-3 text-center border border-green-200 dark:border-green-800">
+                    <div class="text-[10px] font-semibold text-gray-500 uppercase">💰 Total Budget</div>
+                    <div class="text-lg font-bold text-green-600">${formatMoney(totalBudgetDW)}</div>
+                </div>
+                <div class="bg-red-50 dark:bg-red-900/30 rounded-xl p-3 text-center border border-red-200 dark:border-red-800">
+                    <div class="text-[10px] font-semibold text-gray-500 uppercase">💸 Total Expenses</div>
+                    <div class="text-lg font-bold text-red-600">${formatMoney(totalExpensesDW)}</div>
+                </div>
+                <div class="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3 text-center border border-blue-200 dark:border-blue-800">
+                    <div class="text-[10px] font-semibold text-gray-500 uppercase">📊 Remaining Budget</div>
+                    <div class="text-lg font-bold" style="color: ${remainingColor};">${formatMoney(remainingBudgetDW)}</div>
+                </div>
+                <div class="bg-purple-50 dark:bg-purple-900/30 rounded-xl p-3 text-center border border-purple-200 dark:border-purple-800">
+                    <div class="text-[10px] font-semibold text-gray-500 uppercase">📈 Total Profit</div>
+                    <div class="text-lg font-bold" style="color: ${profitColor};">${formatMoney(totalProfitDW)}</div>
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-3 mt-3">
+                <div class="bg-green-50 dark:bg-green-900/30 rounded-lg p-2 text-center">
+                    <span class="text-xs font-semibold text-green-600">✅ Completed</span>
+                    <span class="block text-lg font-bold text-green-600">${completedCount}</span>
+                </div>
+                <div class="bg-yellow-50 dark:bg-yellow-900/30 rounded-lg p-2 text-center">
+                    <span class="text-xs font-semibold text-yellow-600">⏳ Partial</span>
+                    <span class="block text-lg font-bold text-yellow-600">${partialCount}</span>
+                </div>
+                <div class="bg-red-50 dark:bg-red-900/30 rounded-lg p-2 text-center">
+                    <span class="text-xs font-semibold text-red-600">🕐 Pending</span>
+                    <span class="block text-lg font-bold text-red-600">${pendingCount}</span>
+                </div>
+            </div>
+            ${sentRecordsCount > 0 ? `
+            <div class="mt-3 text-center text-xs text-purple-600 bg-purple-50 dark:bg-purple-900/20 rounded-lg p-2">
+                <i class="fas fa-paper-plane mr-1"></i> 
+                ${sentRecordsCount} records received from other departments (included in totals)
+            </div>` : ''}
         </div>
 
         <div class="bg-white rounded-xl p-4 shadow-sm border mt-4">
@@ -7202,6 +7308,9 @@ async function loadDashboard() {
         </div>
     `;
 
+    // ============================================================
+    // STATUS CHART
+    // ============================================================
     const ctx = document.getElementById('statusChart')?.getContext('2d');
     if (ctx) {
         const pending = projectsData.filter(p => p.status === 'pending').length;
@@ -7218,7 +7327,6 @@ async function loadDashboard() {
         });
     }
 }
-
 function showRecycleBinModal() {
     let html = `<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000]" onclick="if(event.target===this) this.remove()">
         <div class="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-4">

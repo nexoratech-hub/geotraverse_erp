@@ -1158,14 +1158,67 @@ async function emptyRecycleBin() {
 }
 
 // ==================== IMAGE FUNCTIONS ====================
+// ==================== IMAGE FUNCTIONS - FIXED ====================
 function getFullImageUrl(imagePath) {
-    if (!imagePath || imagePath === '' || imagePath === 'null') return null;
-    if (imagePath.startsWith('http')) return imagePath;
-    if (imagePath.startsWith('data:')) return null;
-    let cleanPath = imagePath.replace(/^\.\.\/\.\.\//, '').split('/').pop();
-    return '/geotraverse/frontend/assets/uploads/projects/' + cleanPath;
+    if (!imagePath || imagePath === '' || imagePath === 'null' || imagePath === 'undefined') {
+        return null;
+    }
+    
+    // If it's already a full URL or data URL
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) {
+        return imagePath;
+    }
+    
+    // Clean the path
+    let cleanPath = imagePath
+        .replace(/^\.\.\/\.\.\//, '')
+        .replace(/^\.\//, '')
+        .replace(/^\/+/, '')
+        .trim();
+    
+    // If it already has assets/uploads/projects/ in it
+    if (cleanPath.includes('assets/uploads/projects/')) {
+        return '/' + cleanPath;
+    }
+    
+    // If it's just a filename or has projects/ prefix
+    let fileName = cleanPath.split('/').pop();
+    if (fileName && fileName !== '' && fileName !== 'null' && fileName !== 'undefined') {
+        return '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+    }
+    
+    return null;
 }
 
+// Alternative: Try multiple paths
+function tryGetImageUrl(imagePath) {
+    if (!imagePath) return null;
+    
+    // Try different path combinations
+    const paths = [
+        imagePath, // Original
+        getFullImageUrl(imagePath), // Via getFullImageUrl
+        '/geotraverse/frontend/assets/uploads/projects/' + imagePath.split('/').pop(),
+        '/frontend/assets/uploads/projects/' + imagePath.split('/').pop(),
+        '/assets/uploads/projects/' + imagePath.split('/').pop(),
+        'assets/uploads/projects/' + imagePath.split('/').pop()
+    ];
+    
+    // Return first valid path
+    for (let p of paths) {
+        if (p && p !== '' && p !== 'null' && p !== 'undefined' && p !== imagePath.split('/').pop()) {
+            return p;
+        }
+    }
+    
+    // Last resort: just use the filename
+    let fileName = imagePath.split('/').pop();
+    if (fileName && fileName !== '' && fileName !== 'null' && fileName !== 'undefined') {
+        return '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+    }
+    
+    return null;
+}
 // ==================== PROJECT IMAGE UPLOAD ====================
 function triggerProjectImageUpload() {
     const fileInput = document.getElementById('projectImageFile');

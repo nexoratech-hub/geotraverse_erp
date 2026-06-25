@@ -2002,23 +2002,34 @@ function markRequestViewed(id) {
 // ============================================================
 // ==================== IMAGE / FILE FUNCTIONS ====================
 // ============================================================
+// ============================================================
+// ==================== IMAGE / FILE FUNCTIONS - FIXED ====================
+// ============================================================
 function getFullImageUrl(imagePath) {
-    if (!imagePath || imagePath === '') return null;
-    if (imagePath.indexOf('http') === 0) return imagePath;
-    if (imagePath.indexOf('data:image') === 0) return imagePath;
-    if (imagePath.indexOf('data:') === 0) return imagePath;
-    if (imagePath === 'null' || imagePath === 'undefined') return null;
+    if (!imagePath || imagePath === '' || imagePath === 'null' || imagePath === 'undefined') {
+        return null;
+    }
     
-    var cleanPath = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '');
-    if (cleanPath.indexOf('assets/uploads/projects/') !== -1) {
-        return '/' + cleanPath;
+    // If it's already a full URL or data URL
+    if (imagePath.indexOf('http') === 0 || imagePath.indexOf('data:image') === 0 || imagePath.indexOf('data:') === 0) {
+        return imagePath;
     }
-    if (cleanPath.indexOf('/') === -1) {
-        return PATHS.PROJECTS_UPLOAD + cleanPath;
-    }
+    
+    // Clean the path
+    var cleanPath = imagePath.replace(/^\.\.\/\.\.\//, '').replace(/^\/+/, '').trim();
+    
+    // Get just the filename
     var fileName = cleanPath.split('/').pop();
-    return PATHS.PROJECTS_UPLOAD + fileName;
+    if (!fileName || fileName === '' || fileName === 'null' || fileName === 'undefined') {
+        return null;
+    }
+    
+    // ============================================================
+    // ✅ CORRECT PATH: /geotraverse/frontend/assets/uploads/projects/
+    // ============================================================
+    return '/geotraverse/frontend/assets/uploads/projects/' + fileName;
 }
+
 
 function getFullReportPath(filePath) {
     if (!filePath) return null;
@@ -2202,7 +2213,7 @@ function resetProjModalAndClose() {
 }
 
 // ============================================================
-// ==================== SAVE PROJECT ====================
+// ==================== SAVE PROJECT - WITH IMAGE UPLOAD ====================
 // ============================================================
 function saveProject() {
     var id = document.getElementById('projId').value;
@@ -2220,28 +2231,131 @@ function saveProject() {
     var progress = parseInt(document.getElementById('projProgress').value) || 0;
     var department_id = parseInt(document.getElementById('projDept').value) || DEPARTMENT_ID;
     
-    var imageData = '';
-    if (currentProjectImageFile) {
-        getImageAsBase64(currentProjectImageFile).then(function(data) {
-            if (!data) {
-                showToast('Failed to process image. Please try again.', true);
-                return;
-            }
-            imageData = data;
-            saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, imageData);
-        });
-    } else if (id) {
-        var existingProject = projectsData.find(function(p) { return p.id == id; });
-        if (existingProject && existingProject.image) {
-            imageData = existingProject.image;
-        }
-        saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, imageData);
+    // Get image file from input
+    var imageFile = document.getElementById('projImageFile').files[0];
+    
+    // If there's an existing image and no new file selected, keep the existing image
+    var existingProject = null;
+    if (id) {
+        existingProject = projectsData.find(function(p) { return p.id == id; });
+    }
+    
+    // Check if we have a new image file selected
+    if (imageFile) {
+        // Upload the image first
+        uploadProjectImage(imageFile)
+            .then(function(imagePath) {
+                if (imagePath) {
+                    saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, imagePath);
+                } else {
+                    // If upload failed, use existing image or empty
+                    var existingImg = (existingProject && existingProject.image) ? existingProject.image : '';
+                    saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, existingImg);
+                }
+            })
+            .catch(function() {
+                // On error, use existing image
+                var existingImg = (existingProject && existingProject.image) ? existingProject.image : '';
+                saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, existingImg);
+            });
     } else {
-        saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, '');
+        // No new image selected - keep existing or empty
+        var existingImg = (existingProject && existingProject.image) ? existingProject.image : '';
+        saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, existingImg);
     }
 }
 
-function saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, imageData) {
+// ============================================================
+// ==================== UPLOAD PROJECT IMAGE ====================
+// ============================================================
+function uploadProjectImage(file) {
+    return new Promise(function(resolve, reject) {
+        if (!file || !(file instanceof File)) {
+            resolve('');
+            return;
+        }
+        
+        // Validate file size (max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('Image too large. Max 2MB', true);
+            resolve('');
+            return;
+        }
+        
+        // Validate file type
+        if (file.type.indexOf('image/') !== 0) {
+            showToast('Please select an image file (JPG, PNG, GIF)', true);
+            resolve('');
+            return;
+        }
+        
+        // Create FormData
+        var formData = new FormData();
+        formData.append('project_image', file);
+        formData.append('department_id', DEPARTMENT_ID);
+        
+        // Show loading
+        var uploadBtn = document.querySelector('#projModal .btn-primary');
+        var originalText = uploadBtn ? uploadBtn.innerHTML : 'Uploading...';
+        if (uploadBtn) {
+            uploadBtn.innerHTML = '<span class="loading-spinner"></span> Uploading image...';
+            uploadBtn.disabled = true;
+        }
+        
+        // Upload to server
+        fetch(API_BASE + 'upload_project_image.php', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('HTTP error! status: ' + response.status);
+            }
+            return response.json();
+        })
+        .then(function(result) {
+            if (result.success && result.file_path) {
+                var imagePath = result.file_path;
+                console.log('✅ Image uploaded successfully:', imagePath);
+                
+                // Clean the path - keep only the filename with correct path
+                var fileName = imagePath.split('/').pop();
+                if (fileName) {
+                    imagePath = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+                }
+                
+                // Update preview
+                var preview = document.getElementById('projImagePreview');
+                if (preview) {
+                    preview.src = imagePath + '?t=' + Date.now();
+                }
+                
+                resolve(imagePath);
+            } else {
+                var errorMsg = result.message || 'Image upload failed';
+                showToast('⚠️ ' + errorMsg, true);
+                resolve('');
+            }
+        })
+        .catch(function(error) {
+            console.error('Image upload error:', error);
+            showToast('❌ Image upload failed: ' + error.message, true);
+            resolve('');
+        })
+        .finally(function() {
+            if (uploadBtn) {
+                uploadBtn.innerHTML = originalText;
+                uploadBtn.disabled = false;
+            }
+        });
+    });
+}
+
+// ============================================================
+// ==================== SAVE PROJECT REQUEST ====================
+// ============================================================
+function saveProjectRequest(id, name, client_name, amount, location, description, status, progress, department_id, imagePath) {
     var data = {
         name: name,
         client_name: client_name,
@@ -2251,36 +2365,61 @@ function saveProjectRequest(id, name, client_name, amount, location, description
         status: status,
         progress: progress,
         department_id: department_id,
-        image: imageData || '',
+        image: imagePath || '',
+        image_path: imagePath || '',
         created_by: CURRENT_USER,
         updated_by: id ? CURRENT_USER : null
     };
     
     var sendBtn = document.querySelector('#projModal .btn-primary');
-    var originalText = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
-    sendBtn.disabled = true;
+    var originalText = sendBtn ? sendBtn.innerHTML : 'Saving...';
+    if (sendBtn) {
+        sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+        sendBtn.disabled = true;
+    }
     
     var endpoint = id ? 'update_project.php' : 'add_project.php';
     var payload = id ? { ...data, id: parseInt(id) } : data;
     
-    apiCall(endpoint, 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast(id ? '✅ Project updated successfully' : '✅ Project added successfully', false);
-            addToActionHistory(id ? 'Project updated: ' + name : 'Project added: ' + name, CURRENT_USER);
-            resetProjModalAndClose();
-            loadProjects();
-            loadDashboard();
-        } else {
-            showToast(res?.message || 'Failed to save project', true);
-        }
-    }).catch(function(e) {
-        console.error('Save project error:', e);
-        showToast('Network error: ' + e.message, true);
-    }).finally(function() {
-        sendBtn.innerHTML = originalText;
-        sendBtn.disabled = false;
+    console.log('📤 Saving project with image:', {
+        name: name,
+        image: imagePath,
+        has_image: !!imagePath
     });
+    
+    apiCall(endpoint, 'POST', payload)
+        .then(function(res) {
+            if (res && res.success) {
+                showToast(id ? '✅ Project updated successfully' : '✅ Project added successfully', false);
+                addToActionHistory(id ? 'Project updated: ' + name : 'Project added: ' + name, CURRENT_USER);
+                resetProjModalAndClose();
+                
+                // Refresh image preview
+                if (imagePath) {
+                    var preview = document.getElementById('projImagePreview');
+                    if (preview) {
+                        preview.src = imagePath + '?t=' + Date.now();
+                    }
+                }
+                
+                // Reload data
+                fetchProjects();
+                loadProjects();
+                loadDashboard();
+            } else {
+                showToast(res?.message || 'Failed to save project', true);
+            }
+        })
+        .catch(function(e) {
+            console.error('Save project error:', e);
+            showToast('Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (sendBtn) {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }
+        });
 }
 
 // ============================================================
@@ -2941,7 +3080,7 @@ function sendDocumentToDept(docId, deptId, type) {
 }
 
 // ============================================================
-// ==================== SEND PROJECT ====================
+// ==================== SEND PROJECT - WITH IMAGE FIX ====================
 // ============================================================
 function sendProjectToDept(projectId, deptId) {
     var p = projectsData.find(function(p) { return p.id === projectId; });
@@ -2957,13 +3096,21 @@ function sendProjectToDept(projectId, deptId) {
     var dept = allDepartmentsForSend.find(function(d) { return d.id == deptId; });
     var deptName = dept ? dept.name : 'Department';
     
+    // Find send button
     var btn = document.querySelector('#projSendDropdown-' + projectId + ' .dropdown-trigger');
+    if (!btn) {
+        btn = document.querySelector('#viewProjSendDropdown-' + projectId + ' .dropdown-trigger');
+    }
+    
     var originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
         btn.disabled = true;
     }
     
+    // ============================================================
+    // FETCH DAILY WORK
+    // ============================================================
     var projectDailyWork = dailyworkData.filter(function(w) {
         return parseInt(w.project_id) === parseInt(projectId) || w.project_name === p.name;
     });
@@ -2979,22 +3126,71 @@ function sendProjectToDept(projectId, deptId) {
     });
     var remainingBudget = totalBudget - totalExpenses;
     
+    // ============================================================
+    // ✅ FIX: GET IMAGE PATH - CORRECT PATH
+    // ============================================================
     var imagePath = p.image || '';
     var fullImagePath = '';
-    if (imagePath && imagePath !== 'null' && imagePath !== 'undefined') {
+    
+    console.log('📤 Original image path:', imagePath);
+    
+    // Try to get the image from various sources
+    if (imagePath && imagePath !== 'null' && imagePath !== 'undefined' && imagePath !== '') {
+        // 1. If it's a full URL or data URL
         if (imagePath.indexOf('http') === 0 || imagePath.indexOf('data:image') === 0) {
             fullImagePath = imagePath;
-        } else {
-            fullImagePath = getFullImageUrl(imagePath);
-            if (!fullImagePath) {
-                var fileName = imagePath.split('/').pop();
-                if (fileName && fileName !== '') {
-                    fullImagePath = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
-                }
+        } 
+        else {
+            // 2. Get just the filename from the path
+            var fileName = imagePath.split('/').pop();
+            
+            // 3. If there's a filename, construct the correct path
+            if (fileName && fileName !== '' && fileName !== 'null' && fileName !== 'undefined') {
+                // ✅ CORRECT PATH FORMAT
+                fullImagePath = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+                console.log('📤 Constructed image path:', fullImagePath);
             }
         }
     }
     
+    // 4. If still no image, try from project_data
+    if (!fullImagePath && p.project_data) {
+        try {
+            var projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+            if (projectData && projectData.image) {
+                var img = projectData.image;
+                if (img && img !== 'null' && img !== 'undefined' && img !== '') {
+                    if (img.indexOf('http') === 0 || img.indexOf('data:image') === 0) {
+                        fullImagePath = img;
+                    } else {
+                        var fileName = img.split('/').pop();
+                        if (fileName && fileName !== '' && fileName !== 'null' && fileName !== 'undefined') {
+                            fullImagePath = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+                        }
+                    }
+                }
+            }
+        } catch(e) {
+            console.log('Error parsing project_data:', e);
+        }
+    }
+    
+    // 5. If still no image, try from image_path
+    if (!fullImagePath && p.image_path) {
+        var imgPath = p.image_path;
+        if (imgPath && imgPath !== 'null' && imgPath !== 'undefined' && imgPath !== '') {
+            var fileName = imgPath.split('/').pop();
+            if (fileName && fileName !== '' && fileName !== 'null' && fileName !== 'undefined') {
+                fullImagePath = '/geotraverse/frontend/assets/uploads/projects/' + fileName;
+            }
+        }
+    }
+    
+    console.log('📤 Final image path to send:', fullImagePath);
+    
+    // ============================================================
+    // BUILD DAILY WORK RECORDS
+    // ============================================================
     var dailyRecords = projectDailyWork.map(function(w) {
         return {
             id: w.id,
@@ -3010,6 +3206,9 @@ function sendProjectToDept(projectId, deptId) {
         };
     });
     
+    // ============================================================
+    // BUILD PROJECT DATA - WITH IMAGE
+    // ============================================================
     var projectData = {
         id: p.id,
         name: p.name,
@@ -3021,7 +3220,8 @@ function sendProjectToDept(projectId, deptId) {
         progress: p.progress || 0,
         start_date: p.start_date || '',
         end_date: p.end_date || '',
-        image: fullImagePath || imagePath || '',
+        image: fullImagePath || '',  // ✅ IMAGE INCLUDED
+        image_path: fullImagePath || '',  // ✅ IMAGE_PATH INCLUDED
         department_id: p.department_id || DEPARTMENT_ID,
         created_by: p.created_by || CURRENT_USER,
         created_at: p.created_at,
@@ -3042,6 +3242,9 @@ function sendProjectToDept(projectId, deptId) {
         forward_count: (p.forward_count || 0) + 1
     };
     
+    // ============================================================
+    // BUILD PAYLOAD
+    // ============================================================
     var payload = {
         project_id: parseInt(projectId),
         to_department_id: parseInt(deptId),
@@ -3058,7 +3261,8 @@ function sendProjectToDept(projectId, deptId) {
         progress: p.progress || 0,
         location: p.location || '',
         description: p.description || '',
-        image: fullImagePath || imagePath || '',
+        image: fullImagePath || '',  // ✅ IMAGE IN PAYLOAD
+        image_path: fullImagePath || '',  // ✅ IMAGE_PATH IN PAYLOAD
         start_date: p.start_date || '',
         end_date: p.end_date || '',
         daily_work_records: dailyRecords,
@@ -3077,11 +3281,21 @@ function sendProjectToDept(projectId, deptId) {
         forward_count: (p.forward_count || 0) + 1
     };
     
+    console.log('📤 Sending project payload:', {
+        project_name: p.name,
+        image_sent: fullImagePath,
+        has_image: !!fullImagePath,
+        daily_records: dailyRecords.length
+    });
+    
+    // ============================================================
+    // SEND THE PROJECT
+    // ============================================================
     apiCall('send_project_advanced.php', 'POST', payload)
         .then(function(res) {
             if (res && res.success) {
                 var forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
-                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records and image' + forwardMsg, false);
+                showToast('✅ Project "' + p.name + '" sent to ' + deptName + ' with ' + projectDailyWork.length + ' daily work records' + forwardMsg, false);
                 addToActionHistory('Project sent: "' + p.name + '" to ' + deptName + ' with ' + projectDailyWork.length + ' daily records' + forwardMsg, CURRENT_USER);
                 
                 p.sent_to_dept = parseInt(deptId);
@@ -3093,6 +3307,7 @@ function sendProjectToDept(projectId, deptId) {
                 p._is_unviewed = true;
                 p.forward_count = (p.forward_count || 0) + 1;
                 
+                // Add notification
                 apiCall('add_notification.php', 'POST', {
                     department_id: parseInt(deptId),
                     from_department_id: DEPARTMENT_ID,
@@ -3110,6 +3325,7 @@ function sendProjectToDept(projectId, deptId) {
                 loadDashboard();
             } else {
                 showToast(res?.message || 'Failed to send project', true);
+                console.error('Send project error response:', res);
             }
         })
         .catch(function(e) {
@@ -3122,6 +3338,7 @@ function sendProjectToDept(projectId, deptId) {
                 btn.disabled = false;
             }
             toggleSendDropdown('projSendDropdown-' + projectId);
+            toggleSendDropdown('viewProjSendDropdown-' + projectId);
             closeModal('viewProjModal');
         });
 }
