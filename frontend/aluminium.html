@@ -1794,9 +1794,25 @@ function switchIronTab(tab) {
     }
 }
 
-// ==================== RENDER ALUMINIUM PROJECTS - FIXED ====================
+
+// ==================== RENDER ALUMINIUM PROJECTS - WITH SEND BUTTON ====================
 function renderAluminiumProjects() {
-    const sortedAluminium = [...aluminiumProjects].sort((a, b) => {
+    // Get all aluminium projects
+    let allAluminium = aluminiumProjects.filter(p => 
+        p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general'
+    );
+    
+    // Also include sent projects from allProjectsData
+    if (window.allProjectsData) {
+        const sentAluminium = window.allProjectsData.filter(p => 
+            (p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general') &&
+            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID &&
+            !allAluminium.find(ap => ap.id === p.id)
+        );
+        allAluminium = [...allAluminium, ...sentAluminium];
+    }
+    
+    const sortedAluminium = [...allAluminium].sort((a, b) => {
         const aReceived = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID;
         const bReceived = b.sent_from_dept && b.sent_from_dept != DEPARTMENT_ID;
         if (aReceived && !bReceived) return -1;
@@ -1808,13 +1824,11 @@ function renderAluminiumProjects() {
         document.getElementById('aluminiumProjectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No aluminium projects. Click "Add Project" to create one.</div>'; 
         return; 
     }
+    
     let html = '';
     for (let p of sortedAluminium) {
         let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedAluminiumProjectIds.includes(p.id);
         
-        // ============================================================
-        // GET IMAGE - Support multiple path formats
-        // ============================================================
         let imageUrl = getFullImageUrl(p.image);
         if (!imageUrl && p.project_data) {
             try {
@@ -1831,27 +1845,46 @@ function renderAluminiumProjects() {
         let isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
         
         // ============================================================
-        // CARD BUTTONS - Different for Original vs Sent
+        // CARD BUTTONS - Original Projects get Send button
         // ============================================================
         let cardButtons = '';
         if (isReceived) {
-            // SENT PROJECT: View and Delete ONLY
+            // SENT PROJECT: View, Delete ONLY (No Send, No Edit)
             cardButtons = `
                 <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                 <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
                 <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
             `;
         } else {
-            // ORIGINAL PROJECT: View, Edit, Delete
+            // ORIGINAL PROJECT: View, Edit, Delete, Send
+            // Build Send dropdown with departments
+            let deptOptions = '';
+            allDepartmentsForSend.forEach(d => { 
+                if (d.id !== DEPARTMENT_ID) {
+                    deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id}, 'aluminium')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+                }
+            });
+            
             cardButtons = `
                 <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                 <button onclick="editAluminiumProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
                 <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                <div class="send-dropdown" style="display:inline-block;">
+                    <button class="dropdown-trigger" onclick="event.stopPropagation(); toggleSendDropdown('projSendDropdown-${p.id}')" style="padding: 4px 10px; font-size: 10px; border-radius: 5px; background: #8b5cf6; color: white; border: none; cursor: pointer;">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                    <div id="projSendDropdown-${p.id}" class="send-dropdown-content" style="display: none; position: absolute; right: 0; top: 100%; background: #1e293b; min-width: 160px; border-radius: 8px; z-index: 100; border: 1px solid #334155; max-height: 260px; overflow-y: auto; margin-top: 4px;">
+                        ${deptOptions}
+                    </div>
+                </div>
             `;
         }
         
-        html += `<div class="project-card" id="aluminium-card-${p.id}">
-            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p></div>
+        html += `<div class="project-card" id="aluminium-card-${p.id}" data-project-id="${p.id}" data-sent="${isReceived}">
+            <div class="card-header">
+                <h4>${escapeHtml(p.name)}</h4>
+                <p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p>
+            </div>
             ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
             <div class="project-image-wrapper">
                 ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
@@ -1873,9 +1906,23 @@ function renderAluminiumProjects() {
     document.getElementById('aluminiumProjectsGrid').innerHTML = html;
 }
 
-// ==================== RENDER IRON PROJECTS - FIXED ====================
-function renderIronProjects() {
-    const sortedIron = [...ironProjects].sort((a, b) => {
+// ==================== RENDER ALUMINIUM PROJECTS - NO SEND ON CARD ====================
+function renderAluminiumProjects() {
+    // Get all aluminium projects
+    let allAluminium = aluminiumProjects.filter(p => 
+        p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general'
+    );
+    
+    if (window.allProjectsData) {
+        const sentAluminium = window.allProjectsData.filter(p => 
+            (p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general') &&
+            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID &&
+            !allAluminium.find(ap => ap.id === p.id)
+        );
+        allAluminium = [...allAluminium, ...sentAluminium];
+    }
+    
+    const sortedAluminium = [...allAluminium].sort((a, b) => {
         const aReceived = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID;
         const bReceived = b.sent_from_dept && b.sent_from_dept != DEPARTMENT_ID;
         if (aReceived && !bReceived) return -1;
@@ -1883,17 +1930,15 @@ function renderIronProjects() {
         return b.id - a.id;
     });
     
-    if (sortedIron.length === 0) { 
-        document.getElementById('ironProjectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No iron projects. Click "Add Project" to create one.</div>'; 
+    if (sortedAluminium.length === 0) { 
+        document.getElementById('aluminiumProjectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No aluminium projects. Click "Add Project" to create one.</div>'; 
         return; 
     }
+    
     let html = '';
-    for (let p of sortedIron) {
-        let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedIronProjectIds.includes(p.id);
+    for (let p of sortedAluminium) {
+        let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedAluminiumProjectIds.includes(p.id);
         
-        // ============================================================
-        // GET IMAGE - Support multiple path formats
-        // ============================================================
         let imageUrl = getFullImageUrl(p.image);
         if (!imageUrl && p.project_data) {
             try {
@@ -1910,18 +1955,104 @@ function renderIronProjects() {
         let isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
         
         // ============================================================
-        // CARD BUTTONS - Different for Original vs Sent
+        // CARD BUTTONS - NO SEND BUTTON (Send is inside View Modal)
         // ============================================================
         let cardButtons = '';
         if (isReceived) {
-            // SENT PROJECT: View and Delete ONLY
+            // SENT PROJECT: View, Delete ONLY
+            cardButtons = `
+                <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
+            `;
+        } else {
+            // ORIGINAL PROJECT: View, Edit, Delete ONLY (NO SEND)
+            cardButtons = `
+                <button onclick="viewAluminiumProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                <button onclick="editAluminiumProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
+                <button onclick="deleteAluminiumProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+            `;
+        }
+        
+        html += `<div class="project-card" id="aluminium-card-${p.id}" data-project-id="${p.id}" data-sent="${isReceived}">
+            <div class="card-header">
+                <h4>${escapeHtml(p.name)}</h4>
+                <p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p>
+            </div>
+            ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+            <div class="project-image-wrapper">
+                ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
+                <div class="no-image" ${imageUrl ? 'style="display:none;"' : ''}><i class="fas fa-image text-3xl"></i><p class="text-[10px]">No Image</p></div>
+            </div>
+            <div class="p-3">
+                <div class="flex justify-between items-start">
+                    <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
+                    <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
+                </div>
+                ${isReceived ? `<div class="text-[10px] text-purple-600 mb-1"><i class="fas fa-paper-plane mr-1"></i> Received from: ${escapeHtml(sourceDept)}</div>` : ''}
+                <p class="text-sm font-semibold text-gray-600 mt-1">${formatMoney(p.amount)}</p>
+                <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-gray-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
+                <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">${cardButtons}</div>
+                <div class="user-info-line">Created: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
+            </div>
+        </div>`;
+    }
+    document.getElementById('aluminiumProjectsGrid').innerHTML = html;
+}
+
+// ==================== RENDER IRON PROJECTS - NO SEND ON CARD ====================
+function renderIronProjects() {
+    let allIron = ironProjects.filter(p => p.project_type === 'iron');
+    
+    if (window.allProjectsData) {
+        const sentIron = window.allProjectsData.filter(p => 
+            p.project_type === 'iron' &&
+            p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID &&
+            !allIron.find(ap => ap.id === p.id)
+        );
+        allIron = [...allIron, ...sentIron];
+    }
+    
+    const sortedIron = [...allIron].sort((a, b) => {
+        const aReceived = a.sent_from_dept && a.sent_from_dept != DEPARTMENT_ID;
+        const bReceived = b.sent_from_dept && b.sent_from_dept != DEPARTMENT_ID;
+        if (aReceived && !bReceived) return -1;
+        if (!aReceived && bReceived) return 1;
+        return b.id - a.id;
+    });
+    
+    if (sortedIron.length === 0) { 
+        document.getElementById('ironProjectsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400">No iron projects. Click "Add Project" to create one.</div>'; 
+        return; 
+    }
+    
+    let html = '';
+    for (let p of sortedIron) {
+        let isNew = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID && p.sent_to_department === DEPARTMENT_ID && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && !viewedIronProjectIds.includes(p.id);
+        
+        let imageUrl = getFullImageUrl(p.image);
+        if (!imageUrl && p.project_data) {
+            try {
+                let projectData = typeof p.project_data === 'string' ? JSON.parse(p.project_data) : p.project_data;
+                if (projectData && projectData.image) {
+                    imageUrl = getFullImageUrl(projectData.image);
+                }
+            } catch(e) {}
+        }
+        
+        let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
+        let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+        let sourceDept = p.sent_from_dept ? (departmentNames[p.sent_from_dept] || 'Unknown') : 'Self';
+        let isReceived = p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID;
+        
+        let cardButtons = '';
+        if (isReceived) {
             cardButtons = `
                 <button onclick="viewIronProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                 <button onclick="deleteIronProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
                 <span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-paper-plane mr-1"></i> Received</span>
             `;
         } else {
-            // ORIGINAL PROJECT: View, Edit, Delete
             cardButtons = `
                 <button onclick="viewIronProject(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
                 <button onclick="editIronProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
@@ -1929,8 +2060,11 @@ function renderIronProjects() {
             `;
         }
         
-        html += `<div class="project-card" id="iron-card-${p.id}">
-            <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p></div>
+        html += `<div class="project-card" id="iron-card-${p.id}" data-project-id="${p.id}" data-sent="${isReceived}">
+            <div class="card-header">
+                <h4>${escapeHtml(p.name)}</h4>
+                <p>ID: #${p.id} ${isReceived ? '<span class="text-[9px] bg-purple-500/30 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-1"></i> Received</span>' : ''}</p>
+            </div>
             ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
             <div class="project-image-wrapper">
                 ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.style.display='none'; this.parentElement.querySelector('.no-image').style.display='flex';">` : ''}
@@ -1951,6 +2085,7 @@ function renderIronProjects() {
     }
     document.getElementById('ironProjectsGrid').innerHTML = html;
 }
+
 // ==================== RENDER UPLOADED DOCUMENTS - FIXED ====================
 function renderAluminiumUploadedDocuments() {
     // Aluminium documents: ONLY doc_type = 'aluminium'
@@ -3700,7 +3835,7 @@ async function viewIronProject(id) {
     await viewProjectDetails(p, 'iron');
 }
 
-// ==================== VIEW PROJECT DETAILS - FULL IMPLEMENTATION ====================
+// ==================== VIEW PROJECT DETAILS - SEND BUTTON INSIDE ====================
 async function viewProjectDetails(project, type) {
     const p = project;
     
@@ -3712,11 +3847,10 @@ async function viewProjectDetails(project, type) {
     // Determine if it's a sent project
     const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
     const isOriginal = !isSent;
-    const isSentCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
-    const isReceived = isSent || isSentCopy;
+    const isReceived = isSent || p.source_type === 'sent' || p.source_type === 'sent_from';
     
     console.log('📋 Viewing project:', p.name, 'ID:', p.id, 'Type:', type);
-    console.log('📋 isSent:', isSent, 'isOriginal:', isOriginal, 'isReceived:', isReceived);
+    console.log('📋 isSent:', isSent, 'isOriginal:', isOriginal);
     
     // Mark as viewed if sent from another department
     if (isReceived && (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null)) {
@@ -3733,7 +3867,6 @@ async function viewProjectDetails(project, type) {
         p.is_viewed_by_department = 1;
         p._is_unviewed = false;
         
-        // Remove new badge from card
         const cardId = p.sent_id || p.id;
         const card = document.getElementById(`${type}-card-${cardId}`);
         if (card) {
@@ -3746,7 +3879,7 @@ async function viewProjectDetails(project, type) {
     currentProjectType = type;
     
     // ============================================================
-    // GET IMAGE - Support multiple path formats
+    // GET IMAGE
     // ============================================================
     let imageUrl = getFullImageUrl(p.image);
     if (!imageUrl && p.project_data) {
@@ -3759,7 +3892,7 @@ async function viewProjectDetails(project, type) {
     }
     
     // ============================================================
-    // BUILD SENT BADGE
+    // SENT BADGE
     // ============================================================
     let sentBadgeHtml = '';
     let fromDeptName = '';
@@ -3775,7 +3908,6 @@ async function viewProjectDetails(project, type) {
                 <span style="font-size: 11px; color: #92400e;">
                     <i class="fas fa-info-circle mr-1"></i>
                     You can view details, export reports, and view the image.
-                    Daily work records are not available for received projects.
                 </span>
             </div>
         `;
@@ -3810,8 +3942,7 @@ async function viewProjectDetails(project, type) {
                 <div><strong>Start Date:</strong></div><div>${p.start_date || 'N/A'}</div>
                 <div><strong>End Date:</strong></div><div>${p.end_date || 'N/A'}</div>
                 <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(p.description || 'N/A')}</div>
-                ${isReceived ? `<div><strong>Received From:</strong></div><div><span class="from-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(fromDeptName)}</span></div>` : ''}
-                ${isOriginal ? `<div><strong>Daily Work Records:</strong></div><div><strong>${dailyworkData.filter(w => w.project_id == p.id).length} records</strong></div>` : `<div><strong>Daily Work Records:</strong></div><div><span style="color:#9ca3af;">Not available for received projects</span></div>`}
+                ${isReceived ? `<div><strong>Received From:</strong></div><div><span style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(fromDeptName)}</span></div>` : ''}
             </div>
             <div class="user-info-line mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
         </div>
@@ -3821,7 +3952,7 @@ async function viewProjectDetails(project, type) {
     document.getElementById('projectUserInfo').innerHTML = `Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}`;
     
     // ============================================================
-    // DAILY WORK - Only for original projects
+    // DAILY WORK
     // ============================================================
     await fetchDailyWork();
     
@@ -3833,7 +3964,6 @@ async function viewProjectDetails(project, type) {
     const toggleBtn = document.getElementById('toggleDailyWorkBtn');
     
     if (isReceived) {
-        // HIDE DAILY WORK FOR SENT PROJECTS
         if (summaryDiv) summaryDiv.style.display = 'none';
         if (container) container.style.display = 'none';
         if (addBtn) addBtn.style.display = 'none';
@@ -3841,7 +3971,6 @@ async function viewProjectDetails(project, type) {
         if (pdfBtn) pdfBtn.style.display = 'none';
         if (toggleBtn) toggleBtn.style.display = 'none';
     } else {
-        // SHOW DAILY WORK FOR ORIGINAL PROJECTS
         if (summaryDiv) summaryDiv.style.display = 'grid';
         if (container) container.style.display = 'block';
         if (addBtn) addBtn.style.display = 'inline-flex';
@@ -3852,7 +3981,7 @@ async function viewProjectDetails(project, type) {
     }
     
     // ============================================================
-    // VIEW MODAL BUTTONS - Excel, PDF, View Image ONLY (NO SEND)
+    // VIEW MODAL BUTTONS - Excel, PDF, View Image, Send (INSIDE)
     // ============================================================
     let modalButtonsHtml = `
         <button onclick="exportSingleProjectExcel(${p.id}, '${type}')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
@@ -3863,7 +3992,38 @@ async function viewProjectDetails(project, type) {
         modalButtonsHtml += `<button onclick="showFullImage('${imageUrl}')" class="btn-primary text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-eye"></i> View Image</button>`;
     }
     
-    // NO SEND BUTTON INSIDE VIEW MODAL
+    // ============================================================
+    // SEND BUTTON - INSIDE VIEW MODAL (Only for Original Projects)
+    // ============================================================
+    if (!isReceived) {
+        let deptOptions = '';
+        allDepartmentsForSend.forEach(d => { 
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
+            }
+        });
+        
+        modalButtonsHtml += `
+            <div class="send-dropdown" style="display:inline-block; position:relative;">
+                <button class="dropdown-trigger" onclick="toggleSendDropdown('viewProjSendDropdown-${p.id}')" style="background: #8b5cf6; color: white; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; border: none; cursor: pointer;">
+                    <i class="fas fa-paper-plane"></i> Send
+                </button>
+                <div id="viewProjSendDropdown-${p.id}" class="send-dropdown-content" style="display:none; position:absolute; right:0; top:100%; background:#1e293b; min-width:170px; border-radius:8px; z-index:100; border:1px solid #334155; max-height:280px; overflow-y:auto; margin-top:5px; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+                    ${deptOptions}
+                </div>
+            </div>
+        `;
+    } else {
+        // Show "Cannot Send" for received projects
+        modalButtonsHtml += `
+            <div style="display:inline-block; position:relative;">
+                <button class="dropdown-trigger" style="background: #9ca3af; color: white; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; border: none; cursor: not-allowed; display: inline-flex; align-items: center; gap: 6px; opacity: 0.6;" 
+                        title="You cannot send a project received from another department">
+                    <i class="fas fa-ban"></i> Cannot Send
+                </button>
+            </div>
+        `;
+    }
     
     document.getElementById('viewProjectButtons').innerHTML = modalButtonsHtml;
     

@@ -4143,7 +4143,7 @@ async function deleteProjectDocument(docId) {
 }
 
 // ============================================================
-// VIEW PROJECT DETAILS - FIXED (No Duplicate Daily Work)
+// VIEW PROJECT DETAILS - HIDE DAILY WORK FOR SENT PROJECTS
 // ============================================================
 async function viewProjectDetails(id) {
     const p = projectsData.find(p => p.id === id);
@@ -4152,8 +4152,17 @@ async function viewProjectDetails(id) {
         return;
     }
     
-    // Mark as viewed
-    if (p._is_unviewed) {
+    // ============================================================
+    // CHECK IF PROJECT IS SENT (Received from other department)
+    // ============================================================
+    const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isCopy = p.source_type === 'sent' || p.source_type === 'sent_from';
+    const isReceived = isSent || isCopy;
+    
+    console.log('📋 Project:', p.name, 'isReceived:', isReceived);
+    
+    // Mark as viewed if sent from another department
+    if (isReceived && p._is_unviewed) {
         await markProjectViewed(id);
         p._is_unviewed = false;
         const card = document.getElementById(`proj-card-${id}`);
@@ -4166,31 +4175,30 @@ async function viewProjectDetails(id) {
     }
     
     currentProjectId = id;
-    await loadDailyWorkForProject(id);
-
+    
     // ============================================================
-    // GET UNIQUE DAILY WORK FOR THIS PROJECT (NO DUPLICATES)
+    // LOAD DAILY WORK - ONLY FOR ORIGINAL PROJECTS
     // ============================================================
     let projectDailyWork = [];
-    let seenDailyWorkIds = [];
+    let totalBudget = 0, totalExpenses = 0;
     
-    // Get daily work for this project
-    let allWork = dailyworkData.filter(w => {
-        if (w.project_id && parseInt(w.project_id) === parseInt(id)) return true;
-        if (w.project_name && w.project_name === p.name) return true;
-        return false;
-    });
-    
-    // Remove duplicates
-    for (let w of allWork) {
-        let wid = w.id || w.original_dailywork_id || w.sent_id || 0;
-        if (!seenDailyWorkIds.includes(wid)) {
-            seenDailyWorkIds.push(wid);
-            projectDailyWork.push(w);
+    if (!isReceived) {
+        // Only load daily work for original projects
+        await loadDailyWorkForProject(id);
+        projectDailyWork = dailyworkData.filter(w => {
+            if (w.project_id && parseInt(w.project_id) === parseInt(id)) return true;
+            if (w.project_name && w.project_name === p.name) return true;
+            return false;
+        });
+        
+        for (let w of projectDailyWork) {
+            totalBudget += parseFloat(w.budget) || 0;
+            totalExpenses += parseFloat(w.amount) || 0;
         }
+    } else {
+        // Hide daily work for sent projects
+        console.log('📋 Sent project - Daily work hidden');
     }
-    
-    console.log('📋 Daily work for project (unique):', projectDailyWork.length);
 
     // ============================================================
     // BUILD IMAGE HTML
@@ -4204,76 +4212,11 @@ async function viewProjectDetails(id) {
     // GET SOURCE DEPARTMENT INFO
     // ============================================================
     let sourceDeptName = 'System';
-    let isSent = false;
-    let isForwarded = false;
-    let forwardChain = p.forward_chain || [];
-    let originalSenderName = 'Unknown';
-    let originalSenderId = 1;
-    
-    if (p.sent_from_name) {
-        sourceDeptName = p.sent_from_name;
-        isSent = true;
-    } else if (p.sent_from_dept) {
-        sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown Department';
-        isSent = true;
+    if (isReceived) {
+        sourceDeptName = departmentNames[p.sent_from_dept] || 'Unknown';
     } else if (p.created_by) {
         sourceDeptName = p.created_by;
     }
-    
-    // Check if this is a forwarded project
-    if (p.is_forward || (p.forward_count && p.forward_count > 0)) {
-        isForwarded = true;
-    }
-
-    // Get original sender info
-    if (p.original_sender_name) {
-        originalSenderName = p.original_sender_name;
-    } else if (p.original_sender_id) {
-        originalSenderName = departmentNames[p.original_sender_id] || 'Unknown';
-    } else if (p.department_id) {
-        originalSenderName = departmentNames[p.department_id] || 'Unknown';
-        originalSenderId = p.department_id;
-    }
-
-    // ============================================================
-    // BUILD FORWARD CHAIN DISPLAY
-    // ============================================================
-    let forwardChainHtml = '';
-    if (forwardChain.length > 0) {
-        forwardChainHtml = `
-            <div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #f59e0b;">
-                <strong><i class="fas fa-route mr-1"></i> Forward Chain:</strong>
-                <div style="font-size: 11px; margin-top: 5px;">
-                    ${forwardChain.map((f, i) => 
-                        `<span>${i + 1}. ${f.from_department_name || 'Unknown'} → ${f.to_department_name || 'Unknown'}</span>`
-                    ).join(' → ')}
-                    ${isForwarded ? `<br><span style="color: #6b7280; font-size: 9px;">Total forwards: ${forwardChain.length} | Original sender: ${originalSenderName}</span>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    // ============================================================
-    // CALCULATE DAILY WORK TOTALS
-    // ============================================================
-    let totalBudget = 0, totalExpenses = 0;
-    let completedCount = 0, partialCount = 0, pendingCount = 0;
-    
-    for (let w of projectDailyWork) {
-        let budget = parseFloat(w.budget || w.dailywork_budget || 0);
-        let expenses = parseFloat(w.amount || w.dailywork_amount || 0);
-        let status = w.status || w.dailywork_status || 'pending';
-        
-        totalBudget += budget;
-        totalExpenses += expenses;
-        
-        if (status === 'completed') completedCount++;
-        else if (status === 'partial') partialCount++;
-        else pendingCount++;
-    }
-    
-    let remainingBudget = totalBudget - totalExpenses;
-    let remainingColor = remainingBudget >= 0 ? '#059669' : '#dc2626';
 
     // ============================================================
     // BUILD PROJECT DETAILS HTML
@@ -4285,7 +4228,6 @@ async function viewProjectDetails(id) {
 
     document.getElementById('viewProjContent').innerHTML = `
         ${imageHtml}
-        ${forwardChainHtml}
         <div class="space-y-2 text-sm">
             <div class="grid grid-cols-2 gap-2">
                 <div><strong>Project Name:</strong></div>
@@ -4316,13 +4258,12 @@ async function viewProjectDetails(id) {
                 
                 <div><strong>Source:</strong></div>
                 <div>
-                    <i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i> 
+                    <i class="fas ${isReceived ? 'fa-paper-plane' : 'fa-user'} mr-1"></i> 
                     ${escapeHtml(sourceDeptName)} 
-                    ${isSent ? '<span class="text-green-500 ml-1"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                    ${isReceived ? '<span class="text-purple-600 ml-1"><i class="fas fa-check-circle"></i> Received</span>' : ''}
                 </div>
                 
-                ${isForwarded ? `<div><strong>Original Sender:</strong></div><div>${escapeHtml(originalSenderName)}</div>` : ''}
-                ${isForwarded ? `<div><strong>Forward Count:</strong></div><div>${forwardChain.length}</div>` : ''}
+                ${isReceived ? `<div><strong>Received From:</strong></div><div><span class="from-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;">${escapeHtml(sourceDeptName)}</span></div>` : ''}
                 
                 <div class="col-span-2"><strong>Description:</strong></div>
                 <div class="col-span-2 text-gray-600">${escapeHtml(p.description || 'No description')}</div>
@@ -4336,6 +4277,91 @@ async function viewProjectDetails(id) {
     `;
 
     // ============================================================
+    // DAILY WORK SECTION - HIDE FOR SENT PROJECTS
+    // ============================================================
+    const summaryDiv = document.getElementById('dailyWorkSummary');
+    const container = document.getElementById('dailyWorkListContainer');
+    const addBtn = document.getElementById('addDailyWorkBtn');
+    const excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+    const pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+    const toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    const tbody = document.getElementById('dailyWorkTableBody');
+
+    if (isReceived) {
+        // ============================================================
+        // SENT PROJECTS - HIDE EVERYTHING DAILY WORK RELATED
+        // ============================================================
+        if (summaryDiv) {
+            summaryDiv.style.display = 'none';
+            summaryDiv.style.visibility = 'hidden';
+        }
+        if (container) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+        }
+        if (addBtn) {
+            addBtn.style.display = 'none';
+            addBtn.style.visibility = 'hidden';
+        }
+        if (excelBtn) {
+            excelBtn.style.display = 'none';
+            excelBtn.style.visibility = 'hidden';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'none';
+            pdfBtn.style.visibility = 'hidden';
+        }
+        if (toggleBtn) {
+            toggleBtn.style.display = 'none';
+            toggleBtn.style.visibility = 'hidden';
+        }
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-8 text-gray-400">
+                        <i class="fas fa-info-circle text-3xl mb-2 block opacity-50"></i>
+                        <strong>Daily work records are not available for received projects</strong>
+                        <br>
+                        <span class="text-xs text-gray-400">This project was sent from another department</span>
+                    </td>
+                </tr>
+            `;
+        }
+    } else {
+        // ============================================================
+        // ORIGINAL PROJECTS - SHOW DAILY WORK
+        // ============================================================
+        if (summaryDiv) {
+            summaryDiv.style.display = 'grid';
+            summaryDiv.style.visibility = 'visible';
+        }
+        if (container) {
+            container.style.display = 'block';
+            container.style.visibility = 'visible';
+        }
+        if (addBtn) {
+            addBtn.style.display = 'inline-flex';
+            addBtn.style.visibility = 'visible';
+        }
+        if (excelBtn) {
+            excelBtn.style.display = 'inline-flex';
+            excelBtn.style.visibility = 'visible';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'inline-flex';
+            pdfBtn.style.visibility = 'visible';
+        }
+        if (toggleBtn) {
+            toggleBtn.style.display = 'inline-flex';
+            toggleBtn.style.visibility = 'visible';
+            toggleBtn.innerHTML = '<i class="fas fa-table mr-1"></i>Show Daily Work';
+        }
+        
+        // Update summary
+        updateDailyWorkSummary();
+    }
+
+    // ============================================================
     // BUILD ACTION HISTORY
     // ============================================================
     let actionHtml = '';
@@ -4345,28 +4371,25 @@ async function viewProjectDetails(id) {
     if (p.updated_by && p.updated_by !== p.created_by) {
         actionHtml += `<div><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(p.updated_by)} | ${formatDateTimeFull(p.updated_at)}</div>`;
     }
-    if (p.sent_from_dept) {
-        let sentFromName = departmentNames[p.sent_from_dept] || 'Unknown';
-        actionHtml += `<div><i class="fas fa-paper-plane text-xs mr-1"></i> Sent from: ${escapeHtml(sentFromName)} on ${formatDateTimeFull(p.sent_at)}</div>`;
-    }
-    if (p.sent_to_dept) {
-        let sentToName = departmentNames[p.sent_to_dept] || 'Unknown';
-        actionHtml += `<div><i class="fas fa-inbox text-xs mr-1"></i> Sent to: ${escapeHtml(sentToName)} on ${formatDateTimeFull(p.last_sent_at)}</div>`;
+    if (isReceived) {
+        let fromDept = departmentNames[p.sent_from_dept] || 'Unknown';
+        actionHtml += `<div><i class="fas fa-paper-plane text-xs mr-1"></i> Received from: ${escapeHtml(fromDept)} on ${formatDateTimeFull(p.sent_at || p.last_sent_at || p.created_at)}</div>`;
     }
     if (p.sent_count > 0) {
-        actionHtml += `<div><i class="fas fa-envelope text-xs mr-1"></i> Sent count: ${p.sent_count} times</div>`;
+        actionHtml += `<div><i class="fas fa-envelope text-xs mr-1"></i> Forward count: ${p.sent_count} times</div>`;
     }
     
     document.getElementById('projActionHistory').innerHTML = actionHtml || '<div class="text-gray-400 text-xs">No history available</div>';
 
     // ============================================================
-    // SEND BUTTON - SHOW FOR ALL USERS (including Super Admin)
+    // VIEW MODAL BUTTONS - Excel, PDF, View Image, FORWARD (Send)
+    // FOR SENT PROJECTS - Forward is ALLOWED
     // ============================================================
     let deptOptions = '';
     
-    // Show send button for ALL departments
+    // Build department options - Super Admin can forward to any department
     allDepartmentsForSend.forEach(d => {
-        // Don't send to self
+        // Don't send to self (Super Admin)
         if (d.id !== DEPARTMENT_ID) {
             // Check if already sent to this department (avoid duplicate)
             const alreadySent = projectsData.some(proj => {
@@ -4390,32 +4413,16 @@ async function viewProjectDetails(id) {
         }
     });
 
-    // Also add send to original sender if this is a forwarded project
-    if (isForwarded && originalSenderId && originalSenderId !== DEPARTMENT_ID) {
-        const origDept = allDepartmentsForSend.find(d => d.id === originalSenderId);
-        if (origDept) {
-            const alreadySentBack = projectsData.some(proj => {
-                if (proj.source_type === 'sent' && proj.to_department_id === originalSenderId) {
-                    if (proj.original_project_id === p.original_project_id || proj.original_project_id === p.id) {
-                        return true;
-                    }
-                }
-                return false;
-            });
-            
-            if (!alreadySentBack) {
-                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${origDept.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs" style="background: #8b5cf6;">
-                    <i class="fas fa-undo mr-1"></i> Return to ${escapeHtml(origDept.name)}
-                </a>`;
-            }
-        }
-    }
-
     // If no departments available to send to
     if (!deptOptions) {
         deptOptions = `<a class="block px-3 py-1.5 text-gray-400 cursor-not-allowed text-xs">No departments available to send to</a>`;
     }
 
+    // ============================================================
+    // BUTTONS: Excel, PDF, View Image, FORWARD (Send)
+    // ============================================================
+    let forwardLabel = isReceived ? 'Forward Project' : 'Send Project';
+    
     document.getElementById('viewProjButtons').innerHTML = `
         <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success">
             <i class="fas fa-file-excel"></i> Excel
@@ -4428,7 +4435,7 @@ async function viewProjectDetails(id) {
         </button>` : ''}
         <div class="send-dropdown">
             <button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')">
-                <i class="fas fa-paper-plane"></i> ${isForwarded ? 'Forward Project' : 'Send Project'}
+                <i class="fas fa-paper-plane"></i> ${forwardLabel}
             </button>
             <div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div>
         </div>
