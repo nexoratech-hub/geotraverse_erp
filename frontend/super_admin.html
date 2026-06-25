@@ -1962,7 +1962,9 @@ async function saveProjectDocument() {
     }
 }
 
-// ==================== SHOW DOCUMENT INFO ====================
+// ============================================================
+// SHOW DOCUMENT INFO - Download + Send ONLY (Inside Modal)
+// ============================================================
 function showDocumentInfo(doc, type) {
     let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
     let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
@@ -1979,22 +1981,48 @@ function showDocumentInfo(doc, type) {
             ${isSent ? `<div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin-bottom: 12px; text-align: center; color: #d97706; font-weight: 600; font-size: 12px;">
                 <i class="fas fa-paper-plane mr-2"></i> This document was sent from <strong>${escapeHtml(sentFromDept)}</strong>
             </div>` : ''}
-            <div class="doc-info-item"><div class="doc-info-label">Document Title:</div><div class="doc-info-value">${escapeHtml(doc.title)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">${escapeHtml(doc.file_name)}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">${fileExt}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">${fileSize}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div></div>
-            <div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div></div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">Document Title:</div>
+                <div class="doc-info-value"><strong>${escapeHtml(doc.title)}</strong></div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">File Name:</div>
+                <div class="doc-info-value">${escapeHtml(doc.file_name)}</div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">File Type:</div>
+                <div class="doc-info-value">${fileExt}</div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">File Size:</div>
+                <div class="doc-info-value">${fileSize}</div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">Uploaded By:</div>
+                <div class="doc-info-value">${escapeHtml(doc.uploaded_by || 'System')}</div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">Uploaded At:</div>
+                <div class="doc-info-value">${new Date(doc.created_at).toLocaleString()}</div>
+            </div>
+            <div class="doc-info-item">
+                <div class="doc-info-label">Description:</div>
+                <div class="doc-info-value">${escapeHtml(doc.description || 'No description')}</div>
+            </div>
             ${doc.period ? `<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">${doc.period}</div></div>` : ''}
+            ${isSent ? `<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="from-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;background:#dbeafe;color:#0369a1;font-size:12px;">${escapeHtml(sentFromDept)}</span></div></div>` : ''}
         </div>
     `;
     
     document.getElementById('documentInfoContent').innerHTML = infoHtml;
     
+    // ============================================================
+    // BUILD BUTTONS: Download + Send ONLY (Inside Modal)
+    // NO DELETE BUTTON INSIDE
+    // ============================================================
     let deptOptions = '';
     allDepartmentsForSend.forEach(d => {
-        if (d.id !== 1) {
+        if (d.id !== DEPARTMENT_ID) {
             deptOptions += `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, '${type}')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`;
         }
     });
@@ -2009,10 +2037,14 @@ function showDocumentInfo(doc, type) {
             </button>
             <div id="docSendDropdown-${doc.id}" class="send-dropdown-content">${deptOptions}</div>
         </div>
+        <!-- Delete button REMOVED from modal -->
     `;
     openModal('documentInfoModal');
 }
 
+// ============================================================
+// VIEW UPLOADED DOCUMENT - Calls showDocumentInfo
+// ============================================================
 function viewUploadedDocument(docId) {
     const doc = projectDocuments.find(d => d.id === docId);
     if(!doc) { 
@@ -2020,8 +2052,8 @@ function viewUploadedDocument(docId) {
         return; 
     }
     
-    // Mark as viewed
-    if (doc.sent_from_department && doc.sent_from_department != 1) {
+    // Mark as viewed if sent from another department
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
         if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) {
             apiCall('mark_document_viewed.php', 'POST', {
                 document_id: docId,
@@ -2030,11 +2062,9 @@ function viewUploadedDocument(docId) {
                 if (res && res.success) {
                     doc.is_viewed_by_department = 1;
                     doc._is_unviewed = false;
-                    // Update badge
                     unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
                     updateProjectBadge();
                     
-                    // Remove NEW badge from card
                     const card = document.getElementById('doc-card-' + docId);
                     if (card) {
                         const badge = card.querySelector('.new-badge');
@@ -2047,37 +2077,40 @@ function viewUploadedDocument(docId) {
         }
     }
     
+    // ============================================================
+    // SHOW DOCUMENT INFO - Download + Send buttons (Inside Modal)
+    // NO DELETE INSIDE
+    // ============================================================
     showDocumentInfo(doc, 'project');
 }
-// ==================== VIEW UPLOADED REPORT DOCUMENT - FIXED ====================
+
+// ============================================================
+// VIEW UPLOADED REPORT DOCUMENT - Download + Send Inside
+// ============================================================
 function viewUploadedReportDocument(docId) {
-    console.log('viewUploadedReportDocument called with ID:', docId);
+    console.log('📄 viewUploadedReportDocument called with ID:', docId);
     
-    // Find document in multiple sources
     let doc = null;
     
-    // 1. Check uploadedReportsData
     if (uploadedReportsData && uploadedReportsData.length > 0) {
         doc = uploadedReportsData.find(d => d.id === docId);
     }
     
-    // 2. Check projectDocuments
     if (!doc && projectDocuments && projectDocuments.length > 0) {
         doc = projectDocuments.find(d => d.id === docId);
     }
     
-    // 3. Check reportsData (for added reports)
     if (!doc && reportsData && reportsData.length > 0) {
         doc = reportsData.find(d => d.id === docId);
     }
     
     if (!doc) {
         showToast('📄 Document not found. Please refresh.', true);
-        console.error('Document not found for ID:', docId);
+        console.error('❌ Document not found for ID:', docId);
         return;
     }
     
-    console.log('Document found:', doc);
+    console.log('✅ Document found:', doc);
 
     let fileName = doc.file_name || 'document.pdf';
     let docType = doc.doc_type || 'uploaded_report';
@@ -2088,12 +2121,11 @@ function viewUploadedReportDocument(docId) {
         docType = 'project';
     }
 
-    // Check if sent from another department
     let isUnviewed = false;
     let isSent = false;
     let sentFromDept = '';
     
-    if (doc.sent_from_department && doc.sent_from_department != 1) {
+    if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
         isSent = true;
         sentFromDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
         if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) {
@@ -2104,11 +2136,10 @@ function viewUploadedReportDocument(docId) {
         }
     }
     
-    // Mark as viewed if unviewed
     if (isUnviewed) {
         apiCall('mark_document_viewed.php', 'POST', {
             document_id: docId,
-            department_id: 1
+            department_id: DEPARTMENT_ID
         }).then(function(res) {
             if (res && res.success) {
                 doc.is_viewed_by_department = 1;
@@ -2122,14 +2153,20 @@ function viewUploadedReportDocument(docId) {
                 }
             }
         }).catch(function(e) {
-            console.log('Mark viewed error:', e);
+            console.log('⚠️ Mark viewed error:', e);
         });
     }
     
-    // Show document info
+    // ============================================================
+    // SHOW DOCUMENT INFO - Download + Send buttons (Inside Modal)
+    // NO DELETE INSIDE
+    // ============================================================
     showDocumentInfo(doc, 'uploaded_report');
 }
-// ==================== LOAD REPORTS - UPLOADED REPORTS FIX ====================
+
+// ============================================================
+// LOAD REPORTS - UPLOADED REPORTS (View + Delete ONLY)
+// ============================================================
 async function loadReports(highlightId = null) {
     await Promise.all([fetchReports(), fetchUploadedReports(), fetchUnviewedCounts()]);
 
@@ -2138,45 +2175,187 @@ async function loadReports(highlightId = null) {
 
     let html = `
         <div class="tab-container">
-            <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')"><i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span></button>
-            <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')"><i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span></button>
+            <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')">
+                <i class="fas fa-plus-circle mr-1"></i> Added Reports 
+                <span class="tab-count">${reportsData.length}</span>
+            </button>
+            <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')">
+                <i class="fas fa-upload mr-1"></i> Uploaded Reports 
+                <span class="tab-count">${uploadedReportsData.length}</span>
+            </button>
         </div>
     `;
 
     if (currentReportTab === 'added') {
-        // ... existing code for added reports ...
-        html += `<div class="section-card"><div class="section-card-header"><h3><i class="fas fa-chart-line text-purple-600 mr-2"></i> Added Reports</h3><div class="flex gap-2"><button onclick="openModal('reportModal')" class="btn-primary text-sm">Add Report</button><button onclick="openGenerateReportModal()" class="btn-cyan text-sm">Generate Report</button><button onclick="exportAllReportsToExcel()" class="btn-success text-sm">Excel All</button><button onclick="exportAllReportsToPDF()" class="btn-danger text-sm">PDF All</button></div></div>
-        <div class="section-card-body"><div id="reportsGrid" class="reports-grid"></div></div></div>`;
+        html += `
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="fas fa-chart-line text-purple-600 mr-2"></i> Added Reports</h3>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openModal('reportModal')" class="btn-primary text-sm">
+                            <i class="fas fa-plus mr-1"></i> Add Report
+                        </button>
+                        <button onclick="openGenerateReportModal()" class="btn-cyan text-sm">
+                            <i class="fas fa-chart-line mr-1"></i> Generate Report
+                        </button>
+                        <button onclick="exportAllReportsToExcel()" class="btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i> Excel All
+                        </button>
+                        <button onclick="exportAllReportsToPDF()" class="btn-danger text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> PDF All
+                        </button>
+                    </div>
+                </div>
+                <div class="section-card-body">
+                    <div id="reportsGrid" class="reports-grid"></div>
+                </div>
+            </div>
+        `;
         document.getElementById('reportsPage').innerHTML = html;
-        // ... rest of added reports rendering ...
+
+        // ============================================================
+        // RENDER ADDED REPORTS
+        // ============================================================
+        if (reportsData.length === 0) {
+            document.getElementById('reportsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300"></i>
+                    <p class="text-sm">No added reports found</p>
+                    <p class="text-xs mt-1">Click "Add Report" to create your first report</p>
+                </div>
+            `;
+            return;
+        }
+
+        let reportsHtml = '';
+        for (let r of reportsData) {
+            if (r.is_deleted == 1) continue;
+            
+            let sourceDeptName = 'System';
+            let isReportSent = false;
+            
+            if (r.sent_from_department) {
+                sourceDeptName = departmentNames[r.sent_from_department] || 'Unknown Department';
+                isReportSent = true;
+            } else if (r.created_by) {
+                sourceDeptName = r.created_by;
+            }
+            
+            let isNew = r._is_unviewed || false;
+            let isHighlighted = highlightId && r.id === highlightId;
+            
+            let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+            let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+            
+            let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
+
+            reportsHtml += `
+                <div class="report-card ${isHighlighted ? 'search-highlight' : ''}" 
+                     id="report-card-${r.id}" 
+                     onclick="viewReportDetailsModal(${r.id})" 
+                     style="cursor:pointer;">
+                    
+                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    
+                    <div class="card-header">
+                        <h4>${escapeHtml(r.title)}</h4>
+                        <p style="font-size:10px; opacity:0.8;">
+                            ${r.period} report 
+                            ${isReportSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}
+                        </p>
+                    </div>
+                    
+                    <div class="p-3">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span>
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
+                        </div>
+                        
+                        <div class="text-[10px] mb-1">
+                            <span class="text-gray-400">Source: </span>
+                            <span class="${isReportSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                                <i class="fas ${isReportSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                                ${escapeHtml(sourceDeptName)}
+                                ${isReportSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            </span>
+                        </div>
+                        
+                        <div class="report-preview text-[10px] text-gray-600 mb-2">
+                            ${escapeHtml(shortContent)}
+                        </div>
+                        
+                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                            <button onclick="event.stopPropagation(); viewReportDetailsModal(${r.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                        
+                        <div class="user-info-line">
+                            Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTimeFull(r.created_at)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        document.getElementById('reportsGrid').innerHTML = reportsHtml;
         
-    } else {
-        // ============================================================
-        // UPLOADED REPORTS TAB - FIXED
-        // ============================================================
+        if (highlightId) {
+            const el = document.getElementById(`report-card-${highlightId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => el.classList.remove('search-highlight'), 3000);
+            }
+        }
+    } 
+    // ============================================================
+    // TAB 2: UPLOADED REPORTS - View + Delete ONLY (No Send)
+    // ============================================================
+    else {
         html += `
             <div class="section-card">
                 <div class="section-card-header">
                     <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Reports (${uploadedReportsData.length})</h3>
-                    <div class="flex gap-2">
-                        <button onclick="openUploadReportModal()" class="btn-warning text-sm"><i class="fas fa-upload mr-1"></i> Upload Report</button>
-                        <button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button>
-                        <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openUploadReportModal()" class="btn-warning text-sm">
+                            <i class="fas fa-upload mr-1"></i> Upload Report
+                        </button>
+                        <button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i> Excel All
+                        </button>
+                        <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> PDF All
+                        </button>
                     </div>
                 </div>
-                <div class="section-card-body"><div id="uploadedReportsGrid" class="reports-grid"></div></div>
+                <div class="section-card-body">
+                    <div id="uploadedReportsGrid" class="reports-grid"></div>
+                </div>
             </div>
         `;
         document.getElementById('reportsPage').innerHTML = html;
 
         if (uploadedReportsData.length === 0) {
-            document.getElementById('uploadedReportsGrid').innerHTML = '<div class="col-span-2 text-center py-8 text-gray-400 bg-white rounded-xl">No uploaded reports found. Click "Upload Report" to add one.</div>';
+            document.getElementById('uploadedReportsGrid').innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
+                    <i class="fas fa-file-upload text-4xl mb-3 text-gray-300"></i>
+                    <p class="text-sm">No uploaded reports found</p>
+                    <p class="text-xs mt-1">Click "Upload Report" to add a report document</p>
+                </div>
+            `;
             return;
         }
 
+        // ============================================================
+        // BUILD UPLOADED REPORT CARDS - View + Delete ONLY (No Send)
+        // ============================================================
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
-            // Skip if deleted
             if (doc.is_deleted == 1) continue;
             
             let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
@@ -2192,21 +2371,34 @@ async function loadReports(highlightId = null) {
             } else if (doc.uploaded_by) {
                 sourceDeptName = doc.uploaded_by;
             }
-            let isDocSent = doc.sent_from_department && doc.sent_from_department != 1;
-
+            let isDocSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+            let isNew = doc._is_unviewed || false;
             let isHighlighted = highlightId && doc.id === highlightId;
 
             reportsHtml += `
-                <div class="uploaded-report-card ${isHighlighted ? 'search-highlight' : ''}" id="uploaded-report-card-${doc.id}" style="cursor:pointer;">
+                <div class="uploaded-report-card ${isHighlighted ? 'search-highlight' : ''}" 
+                     id="uploaded-report-card-${doc.id}" 
+                     style="cursor:pointer;"
+                     onclick="viewUploadedReportDocument(${doc.id})">
+                    
+                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    
                     <div class="card-header" style="padding: 10px 14px;">
-                        <h4 style="font-size:13px;"><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title || 'Untitled')}</h4>
-                        <p style="font-size:9px;">${doc.file_name || 'Document'} ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}</p>
+                        <h4 style="font-size:13px;">
+                            <i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title || 'Untitled')}
+                        </h4>
+                        <p style="font-size:9px;">
+                            ${doc.file_name || 'Document'} 
+                            ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}
+                        </p>
                     </div>
+                    
                     <div class="p-3" style="padding: 10px 14px;">
                         <div class="flex justify-between items-start mb-2">
                             <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
                             <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
                         </div>
+                        
                         <div class="text-[10px] mb-2">
                             <span class="text-gray-400">Source: </span>
                             <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
@@ -2215,28 +2407,28 @@ async function loadReports(highlightId = null) {
                                 ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
                             </span>
                         </div>
+                        
                         <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                        
+                        <!-- ============================================================
+                             BUTTONS: View + Delete ONLY (No Send)
+                             ============================================================ -->
                         <div class="flex gap-2 mt-2 pt-1 border-t">
-                            <button onclick="event.stopPropagation(); viewUploadedReportDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                            <div class="send-dropdown" onclick="event.stopPropagation();">
-                                <button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')">
-                                    <i class="fas fa-paper-plane"></i> Send
-                                </button>
-                                <div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">
-                                    ${allDepartmentsForSend.filter(d => d.id !== 1).map(d => 
-                                        `<a onclick="sendUploadedReportToDept(${doc.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
-                                            <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
-                                        </a>`
-                                    ).join('')}
-                                </div>
-                            </div>
+                            <button onclick="event.stopPropagation(); viewUploadedReportDocument(${doc.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                            <!-- Send button REMOVED from cards -->
                         </div>
+                        
                         <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
                             Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
                         </div>
                     </div>
-                </div>`;
+                </div>
+            `;
         }
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
         
@@ -2248,9 +2440,9 @@ async function loadReports(highlightId = null) {
             }
         }
     }
+    
     updateReportBadge();
 }
-
 // ============================================================
 // SEND PROJECT TO DEPARTMENT - FIXED
 // ============================================================
@@ -3302,44 +3494,37 @@ function tryFirstEndpoint(endpoints, index, fileName) {
 
 
 // ============================================================
-// LOAD PROJECTS - FIXED (Sender anaona Original tu)
+// LOAD PROJECTS - COMPLETE (Added + Uploaded Documents)
 // ============================================================
 async function loadProjects() {
+    // Fetch all projects data
     await fetchProjects();
     await fetchProjectDocuments();
     await fetchUnviewedCounts();
 
     // ============================================================
-    // FILTER: Sender anaona ORIGINAL tu
-    // Receiver anaona SENT copies tu
+    // FILTER PROJECTS - Sender anaona Original tu, Receiver anaona Sent copies tu
     // ============================================================
     let filteredProjects = [];
-    
     for (let p of projectsData) {
-        // Ikiwa ni original project, ionyeshe
+        if (p.is_deleted == 1) continue;
+        
         if (p.source_type === 'original') {
             filteredProjects.push(p);
-        }
-        // Ikiwa ni sent project (copy), ionyeshe TU kama imetumwa kwa department hii
-        else if (p.source_type === 'sent') {
-            // Ikiwa to_department_id ni department ya sasa, ionyeshe
-            if (p.to_department_id === DEPARTMENT_ID) {
+        } else if (p.source_type === 'sent') {
+            if (p.to_department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) {
                 filteredProjects.push(p);
             }
-            // Vinginevyo, skip (sender haoni copy)
-        }
-        // Ikiwa ni sent_from (history), SKIP - sender haoni
-        else if (p.source_type === 'sent_from') {
+        } else if (p.source_type === 'sent_from') {
             // Skip - sender anaona original tu
             continue;
         }
     }
-    
     projectsData = filteredProjects;
-    console.log('📊 Projects after filtering (original + received copies):', projectsData.length);
+    console.log('📊 Projects after filtering:', projectsData.length);
 
     // ============================================================
-    // BUILD HTML
+    // BUILD TABS
     // ============================================================
     let html = `
         <div class="tab-container">
@@ -3354,10 +3539,10 @@ async function loadProjects() {
         </div>
     `;
 
+    // ============================================================
+    // TAB 1: ADDED PROJECTS
+    // ============================================================
     if (currentProjectTab === 'added') {
-        // ============================================================
-        // ADDED PROJECTS TAB
-        // ============================================================
         html += `
             <div class="section-card">
                 <div class="section-card-header">
@@ -3379,9 +3564,11 @@ async function loadProjects() {
                 </div>
             </div>
         `;
-        
         document.getElementById('projectsPage').innerHTML = html;
 
+        // ============================================================
+        // RENDER ADDED PROJECTS
+        // ============================================================
         if (projectsData.length === 0) {
             document.getElementById('projectsGrid').innerHTML = `
                 <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
@@ -3393,12 +3580,8 @@ async function loadProjects() {
             return;
         }
 
-        // ============================================================
-        // BUILD PROJECT CARDS
-        // ============================================================
         let projectsHtml = '';
         for (let p of projectsData) {
-            // Skip if deleted
             if (p.is_deleted == 1) continue;
             
             let imageUrl = getFullImageUrl(p.image);
@@ -3411,11 +3594,11 @@ async function loadProjects() {
                             p.status === 'completed' ? 'Completed' : 
                             p.status === 'approved' ? 'Approved' : 'Pending';
 
+            // Source department info
             let sourceDeptName = 'System';
             let isSentFromOtherDept = false;
             
             if (p.source_type === 'sent') {
-                // Hii ni copy iliyotumwa kwa department hii
                 sourceDeptName = p.sent_from_name || departmentNames[p.from_department_id] || 'Unknown Department';
                 isSentFromOtherDept = true;
             } else if (p.sent_from_dept) {
@@ -3425,7 +3608,7 @@ async function loadProjects() {
                 sourceDeptName = p.created_by;
             }
 
-            // Source badge - Sender anaona ORIGINAL tu
+            // Badges
             let sourceBadge = '';
             if (p.source_type === 'original') {
                 sourceBadge = '<span class="badge-original" style="background:#059669;color:white;padding:2px 10px;border-radius:12px;font-size:9px;margin-left:6px;">📁 Original</span>';
@@ -3433,33 +3616,46 @@ async function loadProjects() {
                 sourceBadge = '<span class="badge-copy" style="background:#8b5cf6;color:white;padding:2px 10px;border-radius:12px;font-size:9px;margin-left:6px;">📨 Copy</span>';
             }
 
-            // Forward chain info
             let forwardInfo = '';
             if (p.forward_chain && p.forward_chain.length > 0) {
                 forwardInfo = `<span class="text-[8px] text-purple-500 ml-1" title="Forwarded ${p.forward_chain.length} times">🔁 ${p.forward_chain.length}</span>`;
             }
 
-            // Determine if this is a copy (receiver view) or original (sender view)
-            let isCopy = p.source_type === 'sent';
+            // Daily work count
+            let dailyWorkCount = p.daily_work_count || 0;
+            let dailyBadge = dailyWorkCount > 0 ? `<span class="text-[9px] text-gray-400">📅 ${dailyWorkCount}</span>` : '';
+
             let isOriginal = p.source_type === 'original';
+            let isCopy = p.source_type === 'sent';
 
             projectsHtml += `
                 <div class="project-card" id="proj-card-${p.id}" data-project-id="${p.id}" data-source-type="${p.source_type}">
                     <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
                         <div>
                             <h4>${escapeHtml(p.name)} ${sourceBadge}</h4>
-                            <p style="font-size:10px; opacity:0.8;">ID: #${p.id} ${isSentFromOtherDept ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}</p>
+                            <p style="font-size:10px; opacity:0.8;">
+                                ID: #${p.id} 
+                                ${isSentFromOtherDept ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}
+                                ${dailyBadge}
+                            </p>
                         </div>
                         ${forwardInfo}
                     </div>
+                    
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    ${imageUrl ? `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'}
+                    
+                    ${imageUrl ? 
+                        `<img src="${imageUrl}?t=${Date.now()}" class="project-image" onclick="event.stopPropagation(); showFullImage('${imageUrl}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f3f4f6%22/%3E%3Ctext x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%239ca3af%22%3ENo Image%3C/text%3E%3C/svg%3E'">` : 
+                        '<div class="no-image"><i class="fas fa-image text-3xl"></i><p class="text-[10px] mt-1">No Image</p></div>'
+                    }
+                    
                     <div class="p-3">
                         <div class="flex justify-between items-start">
                             <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
                             <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
                         </div>
                         <p class="text-sm font-semibold text-blue-600 mt-1">${formatMoney(p.amount)}</p>
+                        
                         <div class="mt-1 text-[10px]">
                             <span class="text-gray-400">Source: </span>
                             <span class="${isSentFromOtherDept ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
@@ -3468,6 +3664,7 @@ async function loadProjects() {
                                 ${isSentFromOtherDept ? '<span class="text-green-500 ml-1"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
                             </span>
                         </div>
+                        
                         <div class="mt-2">
                             <div class="flex justify-between text-[9px]">
                                 <span>Progress</span>
@@ -3477,22 +3674,33 @@ async function loadProjects() {
                                 <div class="bg-blue-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div>
                             </div>
                         </div>
+                        
                         <div class="mt-2 text-[9px] text-gray-400">
-                            ${p.daily_work_count || 0} daily work records
+                            ${dailyWorkCount} daily work records
                             ${p.sent_count > 0 ? `| Sent ${p.sent_count} times` : ''}
                         </div>
+                        
                         <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                            <button onclick="viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
+                            <button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view">
+                                <i class="fas fa-eye"></i> View
+                            </button>
                             
                             ${isOriginal ? `
-                                <button onclick="editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                                <button onclick="deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                                <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit">
+                                    <i class="fas fa-edit"></i> Edit
+                                </button>
+                                <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
                             ` : ''}
                             
                             ${isCopy ? `
-                                <button onclick="deleteProjectCopy(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete Copy</button>
+                                <button onclick="event.stopPropagation(); deleteProjectCopy(${p.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete Copy
+                                </button>
                             ` : ''}
                         </div>
+                        
                         <div class="user-info-line">
                             Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTimeFull(p.created_at)}
                         </div>
@@ -3502,117 +3710,119 @@ async function loadProjects() {
         }
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
         
-    } else {
-        // ============================================================
-        // UPLOADED DOCUMENTS TAB - SAME AS BEFORE
-        // ============================================================
-        html += `
-            <div class="section-card">
-                <div class="section-card-header">
-                    <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Project Documents</h3>
-                    <div class="flex gap-2 flex-wrap">
-                        <button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm">
-                            <i class="fas fa-upload mr-1"></i> Upload Document
-                        </button>
-                        <button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm">
-                            <i class="fas fa-file-excel mr-1"></i> Excel All
-                        </button>
-                        <button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm">
-                            <i class="fas fa-file-pdf mr-1"></i> PDF All
-                        </button>
-                    </div>
+        updateProjectBadge();
+        return;
+    }
+
+    // ============================================================
+    // TAB 2: UPLOADED DOCUMENTS - View + Delete ONLY (No Send)
+    // ============================================================
+    html += `
+        <div class="section-card">
+            <div class="section-card-header">
+                <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Documents (${projectDocuments.length})</h3>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm">
+                        <i class="fas fa-upload mr-1"></i> Upload Document
+                    </button>
+                    <button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm">
+                        <i class="fas fa-file-excel mr-1"></i> Excel All
+                    </button>
+                    <button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm">
+                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    </button>
                 </div>
-                <div class="section-card-body">
-                    <div id="uploadedDocsGrid" class="documents-grid"></div>
+            </div>
+            <div class="section-card-body">
+                <div id="uploadedDocsGrid" class="documents-grid"></div>
+            </div>
+        </div>
+    `;
+    document.getElementById('projectsPage').innerHTML = html;
+
+    if (projectDocuments.length === 0) {
+        document.getElementById('uploadedDocsGrid').innerHTML = `
+            <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
+                <i class="fas fa-file-upload text-4xl mb-3 text-gray-300"></i>
+                <p class="text-sm">No uploaded documents</p>
+                <p class="text-xs mt-1">Click "Upload Document" to add a document</p>
+            </div>
+        `;
+        return;
+    }
+
+    // ============================================================
+    // BUILD DOCUMENT CARDS - View + Delete ONLY (No Send)
+    // ============================================================
+    let docsHtml = '';
+    for (let doc of projectDocuments) {
+        if (doc.is_deleted == 1) continue;
+        
+        let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+        let fileIcon = 'fa-file-alt';
+        if (fileExt === 'pdf') fileIcon = 'fa-file-pdf';
+        else if (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' || fileExt === 'gif') fileIcon = 'fa-file-image';
+        else if (fileExt === 'doc' || fileExt === 'docx') fileIcon = 'fa-file-word';
+        else if (fileExt === 'xls' || fileExt === 'xlsx') fileIcon = 'fa-file-excel';
+
+        let docSourceDept = 'System';
+        if (doc.sent_from_department) {
+            docSourceDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
+        } else if (doc.uploaded_by) {
+            docSourceDept = doc.uploaded_by;
+        }
+        let isDocSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+        let isNew = doc._is_unviewed || false;
+
+        docsHtml += `
+            <div class="uploaded-doc-card" id="doc-card-${doc.id}" data-doc-id="${doc.id}" style="cursor:pointer;">
+                ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                <div class="card-header">
+                    <h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4>
+                    <p style="font-size:9px;">
+                        ${doc.file_name || 'Document'} 
+                        ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(docSourceDept) + '</span>' : ''}
+                    </p>
+                </div>
+                <div class="p-3">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                        <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
+                    </div>
+                    <div class="text-[10px] mb-2">
+                        <span class="text-gray-400">Source: </span>
+                        <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                            <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                            ${escapeHtml(docSourceDept)}
+                            ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
+                    
+                    <!-- ============================================================
+                         BUTTONS: View + Delete ONLY (No Send)
+                         ============================================================ -->
+                    <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
+                        <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                        <!-- Send button REMOVED from cards -->
+                    </div>
+                    <div class="user-info-line">
+                        Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
+                    </div>
                 </div>
             </div>
         `;
-        document.getElementById('projectsPage').innerHTML = html;
-
-        if (projectDocuments.length === 0) {
-            document.getElementById('uploadedDocsGrid').innerHTML = `
-                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
-                    <i class="fas fa-file-upload text-4xl mb-3 text-gray-300"></i>
-                    <p class="text-sm">No uploaded documents</p>
-                    <p class="text-xs mt-1">Click "Upload Document" to add a document</p>
-                </div>
-            `;
-            return;
-        }
-
-        // ============================================================
-        // BUILD DOCUMENT CARDS
-        // ============================================================
-        let docsHtml = '';
-        for (let doc of projectDocuments) {
-            if (doc.is_deleted == 1) continue;
-            
-            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
-            let fileIcon = 'fa-file-alt';
-            if (fileExt === 'pdf') fileIcon = 'fa-file-pdf';
-            else if (fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'png' || fileExt === 'gif') fileIcon = 'fa-file-image';
-            else if (fileExt === 'doc' || fileExt === 'docx') fileIcon = 'fa-file-word';
-            else if (fileExt === 'xls' || fileExt === 'xlsx') fileIcon = 'fa-file-excel';
-
-            let docSourceDept = 'System';
-            if (doc.sent_from_department) {
-                docSourceDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
-            } else if (doc.uploaded_by) {
-                docSourceDept = doc.uploaded_by;
-            }
-            let isDocSent = doc.sent_from_department && doc.sent_from_department != 1;
-
-            let isNew = doc._is_unviewed || false;
-
-            docsHtml += `
-                <div class="uploaded-doc-card" id="doc-card-${doc.id}" data-doc-id="${doc.id}">
-                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    <div class="card-header">
-                        <h4><i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title)}</h4>
-                        <p style="font-size:9px;">${doc.file_name || 'Document'} ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(docSourceDept) + '</span>' : ''}</p>
-                    </div>
-                    <div class="p-3">
-                        <div class="flex justify-between items-start mb-2">
-                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
-                        </div>
-                        <div class="text-[10px] mb-2">
-                            <span class="text-gray-400">Source: </span>
-                            <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                                <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                                ${escapeHtml(docSourceDept)}
-                                ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
-                            </span>
-                        </div>
-                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
-                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                            <button onclick="viewUploadedDocument(${doc.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="deleteProjectDocument(${doc.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
-                            <div class="send-dropdown" onclick="event.stopPropagation();">
-                                <button class="dropdown-trigger" onclick="toggleSendDropdown('docSendDropdown-${doc.id}')">
-                                    <i class="fas fa-paper-plane"></i> Send
-                                </button>
-                                <div id="docSendDropdown-${doc.id}" class="send-dropdown-content">
-                                    ${allDepartmentsForSend.filter(d => d.id !== 1).map(d => 
-                                        `<a onclick="sendDocumentToDept(${doc.id}, ${d.id}, 'project')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">
-                                            <i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}
-                                        </a>`
-                                    ).join('')}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="user-info-line">
-                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
     }
+    document.getElementById('uploadedDocsGrid').innerHTML = docsHtml;
     
     updateProjectBadge();
 }
+
 function switchProjectTab(tab) {
     currentProjectTab = tab;
     loadProjects();
