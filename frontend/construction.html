@@ -2418,6 +2418,9 @@ async function saveProject() {
     } 
 }
 
+// ============================================================
+// LOAD PROJECTS - FIXED (View & Delete for Sent Projects)
+// ============================================================
 async function loadProjects(highlightId = null) {
     await fetchProjects();
     await fetchProjectDocuments();
@@ -2448,7 +2451,8 @@ async function loadProjects(highlightId = null) {
                         sent_to_dept: sent.to_department_id,
                         is_viewed_by_department: sent.is_viewed || 0,
                         is_sent: 1,
-                        _is_unviewed: sent.is_viewed == 0 || sent.is_viewed === null
+                        _is_unviewed: sent.is_viewed == 0 || sent.is_viewed === null,
+                        source_type: 'sent'
                     };
                     allProjects.push(projectData);
                 }
@@ -2490,24 +2494,60 @@ async function loadProjects(highlightId = null) {
             let statusClass = p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved';
             let statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
             let isHighlighted = highlightId && p.id === highlightId;
+            
+            // ============================================================
+            // CHECK IF SENT PROJECT
+            // ============================================================
+            let isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
             let fromDept = '';
-            if (p.sent_from_dept && p.sent_from_dept != DEPARTMENT_ID) {
-                fromDept = `<span class="from-badge">From: ${departmentNames[p.sent_from_dept] || 'Unknown'}</span>`;
+            let sentBadge = '';
+            
+            if (isSent) {
+                let deptName = departmentNames[p.sent_from_dept] || 'Unknown';
+                fromDept = `<span class="from-badge" style="background:#fef3c7;color:#d97706;padding:2px 10px;border-radius:12px;font-size:9px;display:inline-block;"><i class="fas fa-paper-plane mr-1"></i> From ${deptName}</span>`;
+                sentBadge = `<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>`;
             }
+            
+            // ============================================================
+            // CARD BUTTONS - DIFFERENT FOR SENT VS ADDED
+            // ============================================================
+            let cardButtonsHtml = '';
+            if (isSent) {
+                // SENT PROJECT: View and Delete ONLY
+                cardButtonsHtml = 
+                    '<button onclick="event.stopPropagation(); viewProjectDetails(' + p.id + ')" class="action-btn view" title="View Project"><i class="fas fa-eye"></i> View</button>' +
+                    '<button onclick="event.stopPropagation(); deleteProject(' + p.id + ')" class="action-btn delete" title="Delete Project"><i class="fas fa-trash"></i> Delete</button>' +
+                    `<span class="text-[8px] text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>`;
+            } else {
+                // ADDED PROJECT: View, Edit, Delete
+                cardButtonsHtml = 
+                    '<button onclick="event.stopPropagation(); viewProjectDetails(' + p.id + ')" class="action-btn view" title="View Project"><i class="fas fa-eye"></i> View</button>' +
+                    '<button onclick="event.stopPropagation(); editProject(' + p.id + ')" class="action-btn edit" title="Edit Project"><i class="fas fa-edit"></i> Edit</button>' +
+                    '<button onclick="event.stopPropagation(); deleteProject(' + p.id + ')" class="action-btn delete" title="Delete Project"><i class="fas fa-trash"></i> Delete</button>';
+            }
+            
             projectsHtml += `
                 <div class="project-card ${isHighlighted ? 'search-highlight' : ''}" id="proj-card-${p.id}" onclick="viewProjectDetails(${p.id})">
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    <div class="card-header"><h4>${escapeHtml(p.name)}</h4><p>ID: #${p.id} ${fromDept}</p></div>
+                    <div class="card-header">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h4>${escapeHtml(p.name)}</h4>
+                            ${isSent ? sentBadge : ''}
+                        </div>
+                        <p>ID: #${p.id} ${fromDept}</p>
+                    </div>
                     ${imageHtml}
                     <div class="p-3">
-                        <div class="flex justify-between items-start"><p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p><span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span></div>
-                        <p class="text-sm font-semibold text-amber-600 mt-1">${formatMoney(p.amount)}</p>
-                        <div class="mt-2"><div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div><div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-amber-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div></div>
-                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">
-                            <button onclick="event.stopPropagation(); viewProjectDetails(${p.id})" class="action-btn view"><i class="fas fa-eye"></i> View</button>
-                            <button onclick="event.stopPropagation(); editProject(${p.id})" class="action-btn edit"><i class="fas fa-edit"></i> Edit</button>
-                            <button onclick="event.stopPropagation(); deleteProject(${p.id})" class="action-btn delete"><i class="fas fa-trash"></i> Delete</button>
+                        <div class="flex justify-between items-start">
+                            <p class="text-xs text-gray-500">Client: ${escapeHtml(p.client_name || 'N/A')}</p>
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
                         </div>
+                        <p class="text-sm font-semibold text-amber-600 mt-1">${formatMoney(p.amount)}</p>
+                        <div class="mt-2">
+                            <div class="flex justify-between text-[9px]"><span>Progress</span><span>${p.progress || 0}%</span></div>
+                            <div class="w-full bg-gray-200 rounded-full h-1"><div class="bg-amber-600 h-1 rounded-full" style="width:${p.progress || 0}%"></div></div>
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-2 pt-1 border-t">${cardButtonsHtml}</div>
                         <div class="user-info">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
                     </div>
                 </div>`;
@@ -2515,6 +2555,7 @@ async function loadProjects(highlightId = null) {
         document.getElementById('projectsGrid').innerHTML = projectsHtml;
         if (highlightId) { const el = document.getElementById(`proj-card-${highlightId}`); if(el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 3000); } }
     } else {
+        // Uploaded documents tab...
         html += `
             <div class="section-card">
                 <div class="section-card-header"><h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Documents</h3><div class="flex gap-2"><button onclick="openUploadProjectDocModal()" class="btn-cyan text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button><button onclick="exportAllProjectDocsToExcel()" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> Excel All</button><button onclick="exportAllProjectDocsToPDF()" class="btn-danger text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF All</button></div></div>
@@ -2533,12 +2574,20 @@ async function loadProjects(highlightId = null) {
             let isNew = doc._is_unviewed || false;
             let isHighlighted = highlightId && doc.id === highlightId;
             let fromDept = '';
+            let sentBadge = '';
             if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
                 fromDept = `<span class="from-badge">From: ${departmentNames[doc.sent_from_department] || 'Unknown'}</span>`;
+                sentBadge = `<span class="text-[8px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-paper-plane mr-0.5"></i> Received</span>`;
             }
             docsHtml += `
                 <div class="document-card ${isHighlighted ? 'search-highlight' : ''}" id="doc-card-${doc.id}">
-                    <div class="card-header"><h4>${escapeHtml(doc.title)}</h4><p>${doc.file_name || 'Document'} ${fromDept}</p></div>
+                    <div class="card-header">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h4>${escapeHtml(doc.title)}</h4>
+                            ${isNew ? sentBadge : ''}
+                        </div>
+                        <p>${doc.file_name || 'Document'} ${fromDept}</p>
+                    </div>
                     ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     <div class="p-3">
                         <div class="flex justify-between items-start mb-2"><span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span></div>
@@ -2922,7 +2971,9 @@ async function deleteProject(id) {
     }
 }
 
-
+// ============================================================
+// VIEW PROJECT DETAILS - FIXED (Construction Dashboard)
+// ============================================================
 async function viewProjectDetails(id) {
     // ============================================================
     // TAFUTA PROJECT KWA ID
@@ -2933,7 +2984,15 @@ async function viewProjectDetails(id) {
         return;
     }
     
-    console.log('📋 Viewing project:', p.name, 'ID:', p.id, 'Daily Work:', p.daily_work_count || 0);
+    console.log('📋 Viewing project:', p.name, 'ID:', p.id, 'Sent from:', p.sent_from_dept);
+    
+    // ============================================================
+    // CHECK PROJECT TYPE
+    // ============================================================
+    const isSent = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+    const isOriginal = !isSent;
+    
+    console.log('📋 isSent:', isSent, 'isOriginal:', isOriginal);
     
     // ============================================================
     // MARK AS VIEWED IKIWA IMETUMWA
@@ -2952,49 +3011,53 @@ async function viewProjectDetails(id) {
     currentProjectId = id;
     
     // ============================================================
-    // HAKIKISHA DAILY WORK IMELOAD
+    // HAKIKISHA DAILY WORK IMELOAD (Only for Original projects)
     // ============================================================
-    let dailyWork = p.daily_work || [];
+    let dailyWork = [];
+    let totalBudget = 0, totalExpenses = 0;
+    let remainingBudget = 0;
     
-    // If no daily work, try to fetch it
-    if (dailyWork.length === 0) {
-        try {
-            const projectId = p.original_project_id || p.id;
-            const projectName = p.name || '';
-            
-            // Try by project_id
-            let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}`);
-            if (dwRes && dwRes.success && dwRes.data) {
-                dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
-            }
-            
-            // Try by project_name
-            if (dailyWork.length === 0) {
-                dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}`);
+    if (isOriginal) {
+        // Only load daily work for original projects
+        dailyWork = p.daily_work || [];
+        
+        // If no daily work, try to fetch it
+        if (dailyWork.length === 0) {
+            try {
+                const projectId = p.original_project_id || p.id;
+                const projectName = p.name || '';
+                
+                // Try by project_id
+                let dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_id=${projectId}`);
                 if (dwRes && dwRes.success && dwRes.data) {
                     dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
                 }
+                
+                // Try by project_name
+                if (dailyWork.length === 0) {
+                    dwRes = await apiCall(`get_dailywork.php?department_id=${DEPARTMENT_ID}&project_name=${encodeURIComponent(projectName)}`);
+                    if (dwRes && dwRes.success && dwRes.data) {
+                        dailyWork = dwRes.data.filter(w => (!w.is_deleted || w.is_deleted != 1));
+                    }
+                }
+                
+                p.daily_work = dailyWork;
+                p.daily_work_count = dailyWork.length;
+                p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
+                
+                console.log(`📋 Loaded ${dailyWork.length} daily work records for project ${p.name}`);
+            } catch(e) {
+                console.error('Error fetching daily work:', e);
             }
-            
-            p.daily_work = dailyWork;
-            p.daily_work_count = dailyWork.length;
-            p.daily_work_summary = calculateDailyWorkSummary(dailyWork);
-            
-            console.log(`📋 Loaded ${dailyWork.length} daily work records for project ${p.name}`);
-        } catch(e) {
-            console.error('Error fetching daily work:', e);
         }
+        
+        // Calculate totals
+        for (let w of dailyWork) {
+            totalBudget += parseFloat(w.budget || 0);
+            totalExpenses += parseFloat(w.amount || 0);
+        }
+        remainingBudget = totalBudget - totalExpenses;
     }
-    
-    // ============================================================
-    // HESABU TOTALS
-    // ============================================================
-    let totalBudget = 0, totalExpenses = 0;
-    for (let w of dailyWork) {
-        totalBudget += parseFloat(w.budget || 0);
-        totalExpenses += parseFloat(w.amount || 0);
-    }
-    let remainingBudget = totalBudget - totalExpenses;
     
     // ============================================================
     // BUILD IMAGE HTML
@@ -3002,148 +3065,230 @@ async function viewProjectDetails(id) {
     let filePreviewHtml = renderProjectImageInView(p);
     
     // ============================================================
+    // BUILD SENT BADGE
+    // ============================================================
+    let sentBadgeHtml = '';
+    if (isSent) {
+        const fromDeptName = departmentNames[p.sent_from_dept] || 'Unknown';
+        sentBadgeHtml = `
+            <div style="background: #fef3c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                <i class="fas fa-paper-plane text-orange-600 mr-2"></i>
+                <span style="font-weight: 600; color: #d97706;">
+                    This project was received from <strong>${escapeHtml(fromDeptName)}</strong>
+                </span>
+                <br>
+                <span style="font-size: 11px; color: #92400e;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    You can view project details, export reports, and view the image.
+                    Daily work records are not available for received projects.
+                </span>
+            </div>
+        `;
+    }
+    
+    // ============================================================
     // BUILD PROJECT DETAILS
     // ============================================================
-    document.getElementById('viewProjContent').innerHTML = `
+    const statusClass = p.status === 'pending' ? 'status-pending' : 
+                        p.status === 'in_progress' ? 'status-progress' : 
+                        p.status === 'completed' ? 'status-completed' : 'status-approved';
+    const statusText = p.status === 'in_progress' ? 'In Progress' : p.status;
+    
+    // Daily work section - only for original projects
+    let dailyWorkHtml = '';
+    let dailyWorkSummaryHtml = '';
+    
+    if (isOriginal) {
+        // Show daily work for original projects
+        if (dailyWork.length > 0) {
+            let tableRows = '';
+            for (let w of dailyWork) {
+                const isSentRecord = w.is_sent_record === 1 || w.source === 'sent';
+                const sentBadge = isSentRecord ? 
+                    `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || 'another department'}"><i class="fas fa-paper-plane"></i></span>` : '';
+                
+                const budget = parseFloat(w.budget || 0);
+                const expenses = parseFloat(w.amount || 0);
+                const status = w.status || 'pending';
+                const recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                const description = w.work_description || '';
+                const createdBy = w.sent_by || w.created_by || 'System';
+                
+                let statusClassDw = status === 'completed' ? 'status-completed' :
+                                   status === 'partial' ? 'status-partial' : 'status-pending';
+                let statusTextDw = status === 'completed' ? 'Completed' :
+                                  status === 'partial' ? 'Partial' : 'Pending';
+                
+                // Actions - only for original records (not sent)
+                let actionsHtml = '';
+                if (isSentRecord) {
+                    actionsHtml = `
+                        <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                        <span class="text-[8px] text-purple-500 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-check-circle"></i> Received</span>
+                    `;
+                } else {
+                    actionsHtml = `
+                        <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                        <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                    `;
+                }
+                
+                tableRows += `
+                    <tr style="border-bottom: 1px solid #e5e7eb; ${isSentRecord ? 'background: #faf5ff;' : ''}">
+                        <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
+                            ${recordDate}
+                            ${sentBadge}
+                        </td>
+                        <td style="padding: 10px 8px; word-break: break-word; font-size:12px;">
+                            ${escapeHtml(description || '-')}
+                            ${isSentRecord ? `<div class="text-[8px] text-purple-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || 'Unknown')}</div>` : ''}
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(budget)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(expenses)}</td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;"><span class="status-badge ${statusClassDw}">${statusTextDw}</span></td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;">${escapeHtml(createdBy)}</td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;">
+                            <div class="flex gap-1 justify-center">
+                                ${actionsHtml}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            dailyWorkHtml = `
+                <div style="overflow-x: auto; margin-top: 15px; border: 1px solid #e5e7eb; border-radius: 8px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 750px;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Date/Time</th>
+                                <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Description</th>
+                                <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Budget (TZS)</th>
+                                <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Expenses (TZS)</th>
+                                <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Status</th>
+                                <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Created By</th>
+                                <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            `;
+            
+            dailyWorkSummaryHtml = `
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; padding: 15px; background: #f0fdf4; border-radius: 12px; margin-bottom: 15px;">
+                    <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #d1fae5;">
+                        <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💰 Total Budget</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #059669; margin-top: 4px;">${formatMoney(totalBudget)}</div>
+                    </div>
+                    <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #fef3c7;">
+                        <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💸 Total Expenses</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #ea580c; margin-top: 4px;">${formatMoney(totalExpenses)}</div>
+                    </div>
+                    <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #dbeafe;">
+                        <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">📊 Remaining Budget</div>
+                        <div style="font-size: 18px; font-weight: 800; color: ${remainingBudget >= 0 ? '#3b82f6' : '#dc2626'}; margin-top: 4px;">${formatMoney(remainingBudget)}</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            dailyWorkHtml = `
+                <div style="text-align: center; padding: 30px; color: #9ca3af;">
+                    <i class="fas fa-calendar-day text-4xl mb-3 block"></i>
+                    <p>No daily work records found for this project</p>
+                    <p class="text-xs text-gray-400 mt-2">Click "Add" to create a new daily work record</p>
+                </div>
+            `;
+        }
+    }
+    
+    // ============================================================
+    // BUILD PROJECT DETAILS HTML
+    // ============================================================
+    let detailsHtml = `
+        ${sentBadgeHtml}
         ${filePreviewHtml}
         <div class="space-y-2 text-sm">
             <div class="grid grid-cols-2 gap-2">
-                <div><strong>Name:</strong></div><div>${escapeHtml(p.name)}</div>
+                <div><strong>Project Name:</strong></div><div><strong>${escapeHtml(p.name)}</strong></div>
                 <div><strong>Client:</strong></div><div>${escapeHtml(p.client_name || 'N/A')}</div>
                 <div><strong>Amount:</strong></div><div><span class="text-green-600 font-bold">${formatMoney(p.amount)}</span></div>
-                <div><strong>Status:</strong></div><div><span class="status-badge ${p.status === 'pending' ? 'status-pending' : p.status === 'in_progress' ? 'status-progress' : p.status === 'completed' ? 'status-completed' : 'status-approved'}">${p.status === 'in_progress' ? 'In Progress' : p.status}</span></div>
+                <div><strong>Status:</strong></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
                 <div><strong>Progress:</strong></div><div>${p.progress || 0}%</div>
                 <div><strong>Location:</strong></div><div>${escapeHtml(p.location || 'N/A')}</div>
                 <div><strong>Start Date:</strong></div><div>${p.start_date || 'N/A'}</div>
                 <div><strong>End Date:</strong></div><div>${p.end_date || 'N/A'}</div>
                 <div><strong>Description:</strong></div><div class="col-span-2">${escapeHtml(p.description || 'N/A')}</div>
-                ${p.sent_from_dept ? `<div><strong>Received From:</strong></div><div><span class="from-badge">${escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown')}</span></div>` : ''}
-                <div><strong>Daily Work Records:</strong></div><div><strong>${dailyWork.length} records</strong></div>
-                <div><strong>Total Budget (Daily Work):</strong></div><div class="text-blue-600 font-bold">${formatMoney(totalBudget)}</div>
-                <div><strong>Total Expenses (Daily Work):</strong></div><div class="text-orange-600 font-bold">${formatMoney(totalExpenses)}</div>
-                <div><strong>Remaining Budget:</strong></div><div style="color: ${remainingBudget >= 0 ? '#059669' : '#dc2626'}; font-weight: bold;">${formatMoney(remainingBudget)}</div>
+                ${isSent ? `<div><strong>Received From:</strong></div><div><span class="from-badge">${escapeHtml(departmentNames[p.sent_from_dept] || 'Unknown')}</span></div>` : ''}
+                ${isOriginal ? `<div><strong>Daily Work Records:</strong></div><div><strong>${dailyWork.length} records</strong></div>` : `<div><strong>Daily Work Records:</strong></div><div><span style="color:#9ca3af;">Not available for received projects</span></div>`}
             </div>
             <div class="user-info mt-2">Created by: ${escapeHtml(p.created_by || 'System')} on ${formatDateTime(p.created_at)}</div>
         </div>
     `;
     
     // ============================================================
-    // BUILD DAILY WORK TABLE
+    // SET CONTENT
     // ============================================================
-    let dailyWorkHtml = '';
-    if (dailyWork.length > 0) {
-        let tableRows = '';
-        for (let w of dailyWork) {
-            const isSent = w.is_sent_record === 1 || w.source === 'sent';
-            const sentBadge = isSent ? 
-                `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from ${w.sent_from_name || 'another department'}"><i class="fas fa-paper-plane"></i></span>` : '';
-            
-            const budget = parseFloat(w.budget || 0);
-            const expenses = parseFloat(w.amount || 0);
-            const status = w.status || 'pending';
-            const recordDate = w.date || 'N/A';
-            const description = w.work_description || '';
-            const createdBy = w.sent_by || w.created_by || 'System';
-            
-            let statusClassDw = status === 'completed' ? 'status-completed' :
-                               status === 'partial' ? 'status-partial' : 'status-pending';
-            let statusTextDw = status === 'completed' ? 'Completed' :
-                              status === 'partial' ? 'Partial' : 'Pending';
-            
-            tableRows += `
-                <tr style="border-bottom: 1px solid #e5e7eb; ${isSent ? 'background: #faf5ff;' : ''}">
-                    <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
-                        ${new Date(recordDate).toLocaleString()}
-                        ${sentBadge}
-                    </td>
-                    <td style="padding: 10px 8px; word-break: break-word; font-size:12px;">
-                        ${escapeHtml(description || '-')}
-                        ${isSent ? `<div class="text-[8px] text-purple-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || 'Unknown')}</div>` : ''}
-                    </td>
-                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(budget)}</td>
-                    <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(expenses)}</td>
-                    <td style="padding: 10px 8px; text-align: center; font-size:12px;"><span class="status-badge ${statusClassDw}">${statusTextDw}</span></td>
-                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">${escapeHtml(createdBy)}</td>
-                    <td style="padding: 10px 8px; text-align: center; font-size:12px;">
-                        <div class="flex gap-1 justify-center">
-                            <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
-                            ${!isSent ? `<button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>` : ''}
-                            ${!isSent ? `<button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>` : ''}
-                            ${isSent ? `<span class="text-[8px] text-purple-500"><i class="fas fa-check-circle"></i> Received</span>` : ''}
-                        </div>
-                    </td>
-                </tr>
-            `;
+    document.getElementById('viewProjContent').innerHTML = detailsHtml;
+    
+    // ============================================================
+    // DAILY WORK SECTION - ONLY FOR ORIGINAL PROJECTS
+    // ============================================================
+    const summaryDiv = document.getElementById('dailyWorkSummaryCards');
+    const container = document.getElementById('dailyWorkListContainer');
+    const addBtn = document.getElementById('addDailyWorkBtn');
+    const excelBtn = document.getElementById('exportDailyWorkExcelBtn');
+    const pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
+    const toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    const tbody = document.getElementById('dailyWorkTableBody');
+    
+    if (isOriginal) {
+        // Show daily work for original projects
+        if (summaryDiv) {
+            summaryDiv.style.display = 'grid';
+            summaryDiv.style.visibility = 'visible';
+            document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget);
+            document.getElementById('totalExpenses').innerHTML = formatMoney(totalExpenses);
+            const remainingSpan = document.getElementById('remainingBudget');
+            if (remainingSpan) {
+                remainingSpan.innerHTML = formatMoney(remainingBudget);
+                if (remainingBudget < 0) {
+                    remainingSpan.className = 'value negative';
+                } else {
+                    remainingSpan.className = 'value remaining';
+                }
+            }
         }
         
-        dailyWorkHtml = `
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; padding: 15px; background: #f0fdf4; border-radius: 12px; margin-bottom: 15px;">
-                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #d1fae5;">
-                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💰 Total Budget</div>
-                    <div style="font-size: 18px; font-weight: 800; color: #059669; margin-top: 4px;">${formatMoney(totalBudget)}</div>
-                </div>
-                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #fef3c7;">
-                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">💸 Total Expenses</div>
-                    <div style="font-size: 18px; font-weight: 800; color: #ea580c; margin-top: 4px;">${formatMoney(totalExpenses)}</div>
-                </div>
-                <div style="background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #dbeafe;">
-                    <div style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase;">📊 Remaining Budget</div>
-                    <div style="font-size: 18px; font-weight: 800; color: ${remainingBudget >= 0 ? '#3b82f6' : '#dc2626'}; margin-top: 4px;">${formatMoney(remainingBudget)}</div>
-                </div>
-            </div>
-            <div style="overflow-x: auto; margin-top: 15px; border: 1px solid #e5e7eb; border-radius: 8px;">
-                <table style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 750px;">
-                    <thead>
-                        <tr style="background: #f3f4f6;">
-                            <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Date/Time</th>
-                            <th style="padding: 10px 8px; text-align: left; font-weight: 700;">Description</th>
-                            <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Budget (TZS)</th>
-                            <th style="padding: 10px 8px; text-align: right; font-weight: 700;">Expenses (TZS)</th>
-                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Status</th>
-                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Created By</th>
-                            <th style="padding: 10px 8px; text-align: center; font-weight: 700;">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>${tableRows}</tbody>
-                </table>
-            </div>
-        `;
-    } else {
-        dailyWorkHtml = `
-            <div style="text-align: center; padding: 30px; color: #9ca3af;">
-                <i class="fas fa-calendar-day text-4xl mb-3 block"></i>
-                <p>No daily work records found for this project</p>
-                <p class="text-xs text-gray-400 mt-2">Click "Add" to create a new daily work record</p>
-            </div>
-        `;
-    }
-    
-    // Update daily work summary in the modal
-    document.getElementById('totalBudget').innerHTML = formatMoney(totalBudget);
-    document.getElementById('totalExpenses').innerHTML = formatMoney(totalExpenses);
-    const remainingSpan = document.getElementById('remainingBudget');
-    if (remainingSpan) {
-        remainingSpan.innerHTML = formatMoney(remainingBudget);
-        if (remainingBudget < 0) {
-            remainingSpan.className = 'value negative';
-        } else if (remainingBudget === 0) {
-            remainingSpan.className = 'value remaining';
-        } else {
-            remainingSpan.className = 'value remaining';
+        if (container) {
+            container.style.display = 'block';
+            container.style.visibility = 'visible';
         }
-    }
-    
-    // Show daily work table
-    const container = document.getElementById('dailyWorkListContainer');
-    if (container) {
-        container.style.display = 'block';
-    }
-    const tbody = document.getElementById('dailyWorkTableBody');
-    if (tbody) {
-        if (dailyWork.length > 0) {
-            // Build table rows
+        
+        if (addBtn) {
+            addBtn.style.display = 'inline-flex';
+            addBtn.style.visibility = 'visible';
+        }
+        if (excelBtn) {
+            excelBtn.style.display = 'inline-flex';
+            excelBtn.style.visibility = 'visible';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'inline-flex';
+            pdfBtn.style.visibility = 'visible';
+        }
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Records';
+            toggleBtn.style.display = 'inline-flex';
+            toggleBtn.style.visibility = 'visible';
+        }
+        
+        // Build table rows
+        if (tbody && dailyWork.length > 0) {
             let rows = '';
             for (let w of dailyWork) {
+                const isSentRecord = w.is_sent_record === 1 || w.source === 'sent';
                 const budget = parseFloat(w.budget || 0);
                 const expenses = parseFloat(w.amount || 0);
                 const status = w.status || 'pending';
@@ -3151,50 +3296,144 @@ async function viewProjectDetails(id) {
                 const statusClass = status === 'completed' ? 'status-completed' : status === 'partial' ? 'status-partial' : 'status-pending';
                 const recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
                 const description = w.work_description || '-';
+                const createdBy = w.created_by || 'System';
+                
+                let actionsHtml = '';
+                if (isSentRecord) {
+                    actionsHtml = `
+                        <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                        <span class="text-[8px] text-purple-500 bg-purple-100 px-2 py-0.5 rounded-full"><i class="fas fa-check-circle"></i> Received</span>
+                    `;
+                } else {
+                    actionsHtml = `
+                        <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                        <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                    `;
+                }
+                
+                const sentBadge = isSentRecord ? 
+                    `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full ml-1" title="Sent from another department"><i class="fas fa-paper-plane"></i></span>` : '';
                 
                 rows += `
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 10px 8px; white-space: nowrap;">${recordDate}</td>
-                        <td style="padding: 10px 8px; word-break: break-word;">${escapeHtml(description)}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${formatMoney(budget)}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${formatMoney(expenses)}</td>
-                        <td style="padding: 10px 8px; text-align: center;"><span class="status-badge ${statusClass}">${statusText}</span></td>
-                        <td style="padding: 10px 8px; text-align: center;">${escapeHtml(w.created_by || 'System')}</td>
-                        <td style="padding: 10px 8px; text-align: center;">
+                    <tr style="border-bottom: 1px solid #e5e7eb; ${isSentRecord ? 'background: #faf5ff;' : ''}">
+                        <td style="padding: 10px 8px; white-space: nowrap; font-size:12px;">
+                            ${recordDate}
+                            ${sentBadge}
+                        </td>
+                        <td style="padding: 10px 8px; word-break: break-word; font-size:12px;">
+                            ${escapeHtml(description)}
+                            ${isSentRecord ? `<div class="text-[8px] text-purple-500 mt-1"><i class="fas fa-paper-plane mr-1"></i> Sent from: ${escapeHtml(w.sent_from_name || w.from_department_name || 'Unknown')}</div>` : ''}
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(budget)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; font-size:12px;">${formatMoney(expenses)}</td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;"><span class="status-badge ${statusClass}">${statusText}</span></td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;">${escapeHtml(createdBy)}</td>
+                        <td style="padding: 10px 8px; text-align: center; font-size:12px;">
                             <div class="flex gap-1 justify-center">
-                                <button onclick="viewDailyWork(${w.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
-                                <button onclick="editDailyWork(${w.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
-                                <button onclick="deleteDailyWork(${w.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                                ${actionsHtml}
                             </div>
                         </td>
                     </tr>
                 `;
             }
             tbody.innerHTML = rows;
-        } else {
+        } else if (tbody) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">No daily work records for this project</td></tr>';
+        }
+        
+    } else {
+        // HIDE DAILY WORK FOR SENT PROJECTS
+        if (summaryDiv) {
+            summaryDiv.style.display = 'none';
+            summaryDiv.style.visibility = 'hidden';
+        }
+        if (container) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+        }
+        if (addBtn) {
+            addBtn.style.display = 'none';
+            addBtn.style.visibility = 'hidden';
+        }
+        if (excelBtn) {
+            excelBtn.style.display = 'none';
+            excelBtn.style.visibility = 'hidden';
+        }
+        if (pdfBtn) {
+            pdfBtn.style.display = 'none';
+            pdfBtn.style.visibility = 'hidden';
+        }
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-eye mr-1"></i> View Daily Work (Read Only)';
+            toggleBtn.style.display = 'none';
+            toggleBtn.style.visibility = 'hidden';
+        }
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400"><i class="fas fa-info-circle text-2xl block mb-2 opacity-50"></i>Daily work records are only available for projects created by your department.</td></tr>';
         }
     }
     
     // ============================================================
-    // BUILD BUTTONS
+    // BUILD BUTTONS - DIFFERENT FOR ORIGINAL VS SENT
     // ============================================================
-    let deptOptions = ''; 
-    allDepartmentsForSend.forEach(d => { 
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
-        }
-    });
-    
+    let buttonsHtml = '';
     const safeSrc = getSafeImageSrc(p.image);
     const hasImage = safeSrc !== null && safeSrc !== '' && safeSrc !== 'null';
     
-    document.getElementById('viewProjButtons').innerHTML = `
-        <button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>
-        <button onclick="exportProjectToPDF(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>
-        ${hasImage ? `<button onclick="showFullImage('${safeSrc}')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> View Image</button>` : ''}
-        <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
-    `;
+    // ============================================================
+    // BASE BUTTONS - Excel, PDF, View Image (For BOTH)
+    // ============================================================
+    buttonsHtml += 
+        `<button onclick="exportSingleProjectExcel(${p.id})" class="small-btn small-btn-success"><i class="fas fa-file-excel"></i> Excel</button>` +
+        `<button onclick="exportProjectToPDF(${p.id})" class="small-btn small-btn-danger"><i class="fas fa-file-pdf"></i> PDF (Full Report)</button>`;
+    
+    if (hasImage) {
+        buttonsHtml += `<button onclick="showFullImage('${safeSrc}')" class="small-btn small-btn-primary"><i class="fas fa-eye"></i> View Image</button>`;
+    }
+    
+    // ============================================================
+    // ORIGINAL PROJECTS - ADD Send button (NO Edit, NO Delete)
+    // ============================================================
+    if (isOriginal) {
+        let deptOptions = ''; 
+        allDepartmentsForSend.forEach(d => { 
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += `<a onclick="sendProjectToDept(${p.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-1"></i> ${escapeHtml(d.name)}</a>`; 
+            }
+        });
+        
+        buttonsHtml += `
+            <div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('projSendDropdown-${p.id}')"><i class="fas fa-paper-plane"></i> Send Project</button><div id="projSendDropdown-${p.id}" class="send-dropdown-content">${deptOptions}</div></div>
+        `;
+        
+        // Add Hide Daily Work button - only for original projects
+        buttonsHtml += `
+            <button onclick="toggleDailyWorkTable()" class="small-btn small-btn-primary" style="background: #6b7280; color: white;"><i class="fas fa-eye-slash"></i> Hide Records</button>
+        `;
+        
+    } else {
+        // ============================================================
+        // SENT PROJECTS - NO Send, NO Edit, NO Delete
+        // Show "Cannot Send" message
+        // ============================================================
+        buttonsHtml += `
+            <div style="display: inline-block; position: relative;">
+                <button class="dropdown-trigger" style="background: #9ca3af; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: not-allowed; display: inline-flex; align-items: center; gap: 6px; opacity: 0.6;" 
+                        title="You cannot send a project received from another department">
+                    <i class="fas fa-ban"></i> Cannot Send
+                </button>
+            </div>
+            <div style="width:100%;text-align:center;margin-top:5px;padding-top:5px;">
+                <span style="font-size:9px;color:#9ca3af;">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    Only projects created by your department can be sent
+                </span>
+            </div>
+        `;
+    }
+    
+    document.getElementById('viewProjButtons').innerHTML = buttonsHtml;
     
     // ============================================================
     // OPEN MODAL
@@ -3202,7 +3441,6 @@ async function viewProjectDetails(id) {
     openModal('viewProjModal');
     loadProjects();
 }
-
 // ============================================================
 // HELPER: Calculate Daily Work Summary
 // ============================================================
