@@ -1,7 +1,7 @@
 <?php
 // backend/api/delete_project.php
 // ============================================================
-// FIXED: Inafuta copy kwa receiver, original kwa sender
+// UNIVERSAL - Inafanya kazi kwa departments zote
 // ============================================================
 
 error_reporting(0);
@@ -30,6 +30,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
+    if (ob_get_length()) ob_clean();
     echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
     exit;
 }
@@ -40,7 +41,7 @@ try {
 $input = json_decode(file_get_contents('php://input'), true);
 
 if (!$input || !isset($input['project_id']) || !isset($input['department_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+    echo json_encode(['success' => false, 'message' => 'Missing required fields: project_id, department_id']);
     exit;
 }
 
@@ -53,18 +54,19 @@ try {
     $deletedId = 0;
     $deletedName = '';
     $deletedType = '';
+    $deletedItems = [];
 
     // ============================================================
-    // CHECK 1: ORIGINAL PROJECT (Sender's own project)
+    // STEP 1: CHECK ORIGINAL PROJECT
     // ============================================================
     $stmt = $pdo->prepare("SELECT id, name, department_id, is_deleted FROM projects WHERE id = ?");
     $stmt->execute([$projectId]);
     $project = $stmt->fetch();
 
     if ($project && $project['is_deleted'] == 0) {
-        // Only Sender can delete original project
+        // SENDER deleting original
         if ($project['department_id'] == $departmentId) {
-            // SOFT DELETE original
+            // Soft delete original - inaenda recycle bin
             $query = "UPDATE projects SET 
                       is_deleted = 1,
                       deleted_by_department = 1,
@@ -102,7 +104,7 @@ try {
             ]);
             exit;
         } else {
-            // Receiver cannot delete original
+            // Receiver trying to delete original - NOT ALLOWED
             echo json_encode([
                 'success' => false,
                 'message' => 'You cannot delete the original project. Only the sender can delete it.',
@@ -117,15 +119,15 @@ try {
     }
 
     // ============================================================
-    // CHECK 2: SENT PROJECT (Receiver's copy)
+    // STEP 2: CHECK SENT PROJECT (RECEIVER'S COPY)
     // ============================================================
-    // Try by ID first
+    // Try by ID
     $stmt = $pdo->prepare("SELECT id, original_project_id, project_name, from_department_id, to_department_id, is_deleted 
                            FROM sent_projects WHERE id = ?");
     $stmt->execute([$projectId]);
     $sentProject = $stmt->fetch();
 
-    // If not found, try by original_project_id + to_department_id
+    // Try by original_project_id + to_department_id
     if (!$sentProject) {
         $stmt = $pdo->prepare("SELECT id, original_project_id, project_name, from_department_id, to_department_id, is_deleted 
                                FROM sent_projects 
@@ -134,14 +136,50 @@ try {
         $sentProject = $stmt->fetch();
     }
 
+    // Try by original_project_id only
+    if (!$sentProject) {
+        $stmt = $pdo->prepare("SELECT id, original_project_id, project_name, from_department_id, to_department_id, is_deleted 
+                               FROM sent_projects 
+                               WHERE original_project_id = ? AND is_deleted = 0");
+        $stmt->execute([$projectId]);
+        $allSentProjects = $stmt->fetchAll();
+        
+        foreach ($allSentProjects as $sp) {
+            if ($sp['to_department_id'] == $departmentId) {
+                $sentProject = $sp;
+                break;
+            }
+        }
+    }
+
     if ($sentProject && $sentProject['is_deleted'] == 0) {
         $sentId = $sentProject['id'];
         $sentName = $sentProject['project_name'] ?? 'Sent Project';
+        $originalProjectId = $sentProject['original_project_id'] ?? $projectId;
         
-        // Only Receiver can delete their copy
+        // RECEIVER deleting their copy
         if ($sentProject['to_department_id'] == $departmentId) {
-            // SOFT DELETE sent copy
-            $query = "UPDATE sent_projects SET is_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            // 1. Delete sent daily work
+            $query = "UPDATE sent_dailywork SET 
+                      is_deleted = 1, 
+                      deleted_at = NOW() 
+                      WHERE to_department_id = ? 
+                        AND dailywork_project_name = ? 
+                        AND (is_deleted = 0 OR is_deleted IS NULL)";
+            $stmt = $pdo->prepare($query);
+            $stmt->execute([$departmentId, $sentName]);
+            $dailyworkDeleted = $stmt->rowCount();
+            
+            if ($dailyworkDeleted > 0) {
+                $deletedItems[] = [
+                    'table' => 'sent_dailywork',
+                    'count' => $dailyworkDeleted,
+                    'type' => 'sent_copy_deleted_by_receiver'
+                ];
+            }
+
+            // 2. Delete sent project (HARD DELETE - permanent)
+            $query = "DELETE FROM sent_projects WHERE id = ?";
             $stmt = $pdo->prepare($query);
             $stmt->execute([$sentId]);
             $deleted = true;
@@ -149,34 +187,42 @@ try {
             $deletedName = $sentName;
             $deletedType = 'sent_copy';
             
-            // Add to recycle bin
+            $deletedItems[] = [
+                'table' => 'sent_projects',
+                'id' => $sentId,
+                'name' => $sentName,
+                'type' => 'sent_copy_deleted_by_receiver'
+            ];
+
+            // 3. Add to recycle bin
             $recycleQuery = "INSERT INTO recycle_bin (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, deleted_by_name, created_at) 
                             VALUES (?, 'sent_project', ?, ?, 0, ?, NOW())";
             $stmt = $pdo->prepare($recycleQuery);
             $stmt->execute([$sentId, $sentName, $departmentId, $deletedBy]);
 
-            // Soft delete sent daily work
-            $query = "UPDATE sent_dailywork SET is_deleted = 1, deleted_at = NOW() 
-                      WHERE to_department_id = ? AND dailywork_project_name = ? 
-                      AND (is_deleted = 0 OR is_deleted IS NULL)";
-            $stmt = $pdo->prepare($query);
-            $stmt->execute([$departmentId, $sentName]);
-
             echo json_encode([
                 'success' => true,
-                'message' => 'Project copy moved to recycle bin',
+                'message' => 'Project copy deleted from your dashboard',
                 'data' => [
                     'deleted_id' => $sentId,
                     'deleted_name' => $sentName,
-                    'type' => 'sent_copy'
+                    'original_project_id' => $originalProjectId,
+                    'type' => 'sent_copy',
+                    'deleted_items' => $deletedItems,
+                    'note' => 'Only your copy was deleted. The original remains with the sender.'
                 ]
             ]);
             exit;
+            
         } else if ($sentProject['from_department_id'] == $departmentId) {
-            // Sender can delete sent history record (soft delete)
-            $query = "UPDATE sent_projects SET is_deleted = 1, deleted_at = NOW() WHERE id = ?";
+            // Sender deleting sent history
+            $query = "DELETE FROM sent_projects WHERE id = ?";
             $stmt = $pdo->prepare($query);
             $stmt->execute([$sentId]);
+            $deleted = true;
+            $deletedId = $sentId;
+            $deletedName = $sentName;
+            $deletedType = 'sent_history';
             
             echo json_encode([
                 'success' => true,
@@ -202,37 +248,29 @@ try {
     }
 
     // ============================================================
-    // NOT FOUND OR ALREADY DELETED
+    // STEP 3: ALREADY DELETED
     // ============================================================
-    if (!$deleted) {
-        // Check if already deleted
-        if ($project && $project['is_deleted'] == 1) {
-            echo json_encode([
-                'success' => false,
-                'message' => 'Project is already deleted',
-                'debug' => ['project_id' => $projectId]
-            ]);
-            exit;
-        }
-        
-        if ($sentProject && $sentProject['is_deleted'] == 1) {
-            echo json_encode([
-                'success' => false,
-                'message' => 'Project copy is already deleted',
-                'debug' => ['project_id' => $projectId]
-            ]);
-            exit;
-        }
-        
-        echo json_encode([
-            'success' => false,
-            'message' => 'Project not found or already deleted for this department',
-            'debug' => [
-                'project_id' => $projectId,
-                'department_id' => $departmentId
-            ]
-        ]);
+    if ($project && $project['is_deleted'] == 1) {
+        echo json_encode(['success' => false, 'message' => 'Project is already deleted']);
+        exit;
     }
+    
+    if ($sentProject && $sentProject['is_deleted'] == 1) {
+        echo json_encode(['success' => false, 'message' => 'Project copy is already deleted']);
+        exit;
+    }
+
+    // ============================================================
+    // STEP 4: NOT FOUND
+    // ============================================================
+    echo json_encode([
+        'success' => false,
+        'message' => 'Project not found or already deleted for this department',
+        'debug' => [
+            'project_id' => $projectId,
+            'department_id' => $departmentId
+        ]
+    ]);
 
 } catch (PDOException $e) {
     echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
