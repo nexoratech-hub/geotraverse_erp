@@ -49,27 +49,33 @@ $offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
 // FUNCTION TO SEND JSON
 // ============================================================
 function sendJson($data) {
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
 // ============================================================
-// GET REPORTS
+// GET REPORTS - EXCLUDE ALL DELETED
 // ============================================================
 try {
     $reports = [];
     $seenIds = [];
     
     // ============================================================
-    // CASE 1: GET ALL REPORTS (for Super Admin)
+    // CASE 1: GET ALL REPORTS (for Super Admin) - EXCLUDE DELETED
     // ============================================================
     if ($all == 1) {
-        // Get original reports
+        // ============================================================
+        // Get original reports - ONLY NOT DELETED
+        // ============================================================
         $sql = "
             SELECT * FROM reports 
             WHERE (is_deleted = 0 OR is_deleted IS NULL)
             AND (deleted_by_admin = 0 OR deleted_by_admin IS NULL)
             AND (deleted_by_department = 0 OR deleted_by_department IS NULL)
+            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
         ";
@@ -81,14 +87,18 @@ try {
         
         foreach ($originalReports as $report) {
             $report['source_type'] = 'original';
+            $report['_is_unviewed'] = false;
             $reports[] = $report;
             $seenIds['orig_' . $report['id']] = true;
         }
         
-        // Get sent reports
+        // ============================================================
+        // Get sent reports - ONLY NOT DELETED
+        // ============================================================
         $sql2 = "
             SELECT * FROM sent_reports 
             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY sent_at DESC
             LIMIT :limit OFFSET :offset
         ";
@@ -113,8 +123,14 @@ try {
                 $data['is_forward'] = $sent['is_forward'] ?? 0;
                 $data['forward_count'] = $sent['forward_count'] ?? 0;
                 $data['original_sender_department'] = $sent['original_sender_department'] ?? null;
+                $data['report_title'] = $sent['report_title'] ?? $data['title'] ?? 'Untitled';
+                $data['report_period'] = $sent['report_period'] ?? $data['period'] ?? 'daily';
+                $data['report_status'] = $sent['report_status'] ?? $data['status'] ?? 'draft';
                 
-                // Use a unique key to avoid duplicates
+                if (!isset($data['id'])) {
+                    $data['id'] = $sent['id'];
+                }
+                
                 $key = 'sent_' . $sent['id'];
                 if (!isset($seenIds[$key])) {
                     $reports[] = $data;
@@ -127,17 +143,17 @@ try {
             'success' => true,
             'data' => $reports,
             'count' => count($reports),
-            'message' => 'All reports retrieved successfully'
+            'message' => 'All reports retrieved successfully (deleted reports excluded)'
         ]);
         exit;
     }
     
     // ============================================================
-    // CASE 2: GET REPORTS FOR SPECIFIC DEPARTMENT
+    // CASE 2: GET REPORTS FOR SPECIFIC DEPARTMENT - EXCLUDE DELETED
     // ============================================================
     if ($department_id > 0) {
         // ============================================================
-        // 1. GET ORIGINAL REPORTS (Created by this department)
+        // 1. GET ORIGINAL REPORTS - ONLY NOT DELETED
         // ============================================================
         $sql = "
             SELECT * FROM reports 
@@ -145,6 +161,7 @@ try {
             AND (is_deleted = 0 OR is_deleted IS NULL)
             AND (deleted_by_admin = 0 OR deleted_by_admin IS NULL)
             AND (deleted_by_department = 0 OR deleted_by_department IS NULL)
+            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
         ";
@@ -163,12 +180,13 @@ try {
         }
         
         // ============================================================
-        // 2. GET SENT REPORTS (Received by this department)
+        // 2. GET SENT REPORTS (Received by this department) - ONLY NOT DELETED
         // ============================================================
         $sql2 = "
             SELECT * FROM sent_reports 
             WHERE to_department_id = :department_id
             AND (is_deleted = 0 OR is_deleted IS NULL)
+            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY sent_at DESC
             LIMIT :limit OFFSET :offset
         ";
@@ -182,7 +200,6 @@ try {
         foreach ($sentReports as $sent) {
             $data = json_decode($sent['report_data'], true);
             if ($data && is_array($data)) {
-                // Add sent report metadata
                 $data['sent_id'] = $sent['id'];
                 $data['source_type'] = 'sent_received';
                 $data['_is_unviewed'] = ($sent['is_viewed'] == 0);
@@ -196,9 +213,17 @@ try {
                 $data['forward_count'] = $sent['forward_count'] ?? 0;
                 $data['original_sender_department'] = $sent['original_sender_department'] ?? null;
                 $data['display_id'] = $sent['id'];
-                
-                // Use sent_id as the main ID for display
                 $data['id'] = $sent['id'];
+                
+                if (!isset($data['title']) || empty($data['title'])) {
+                    $data['title'] = $sent['report_title'] ?? 'Untitled Report';
+                }
+                if (!isset($data['period']) || empty($data['period'])) {
+                    $data['period'] = $sent['report_period'] ?? 'daily';
+                }
+                if (!isset($data['status']) || empty($data['status'])) {
+                    $data['status'] = $sent['report_status'] ?? 'draft';
+                }
                 
                 $key = 'sent_rec_' . $sent['id'];
                 if (!isset($seenIds[$key])) {
@@ -209,13 +234,14 @@ try {
         }
         
         // ============================================================
-        // 3. GET SENT REPORTS (Sent by this department - their outgoing copies)
+        // 3. GET SENT REPORTS (Sent by this department) - ONLY NOT DELETED
         // ============================================================
         $sql3 = "
             SELECT * FROM sent_reports 
             WHERE from_department_id = :department_id
             AND to_department_id != :department_id
             AND (is_deleted = 0 OR is_deleted IS NULL)
+            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY sent_at DESC
             LIMIT :limit OFFSET :offset
         ";
@@ -243,6 +269,10 @@ try {
                 $data['original_sender_department'] = $sent['original_sender_department'] ?? null;
                 $data['id'] = $sent['id'];
                 
+                if (!isset($data['title']) || empty($data['title'])) {
+                    $data['title'] = $sent['report_title'] ?? 'Untitled Report';
+                }
+                
                 $key = 'sent_from_' . $sent['id'];
                 if (!isset($seenIds[$key])) {
                     $reports[] = $data;
@@ -256,7 +286,7 @@ try {
             'data' => $reports,
             'count' => count($reports),
             'department_id' => $department_id,
-            'message' => 'Reports retrieved successfully'
+            'message' => 'Reports retrieved successfully (deleted reports excluded)'
         ]);
         exit;
     }

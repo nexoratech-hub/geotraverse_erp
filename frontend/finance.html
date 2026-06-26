@@ -2935,26 +2935,25 @@ function sleep(ms) {
 }
 
 // ============================================================
-// DELETE UPLOADED REPORT - FIXED
+// DELETE UPLOADED REPORT - REMOVE FROM DASHBOARD & MOVE TO RECYCLE BIN
 // ============================================================
 
 async function deleteUploadedReport(id) {
-    if (!confirm('Delete this uploaded report permanently?')) return;
-    
-    console.log('🗑️ Deleting uploaded report ID:', id);
-    console.log('🗑️ Department ID:', DEPARTMENT_ID);
-    
-    // ============================================================
-    // FIND THE REPORT
-    // ============================================================
-    const doc = uploadedReportsData.find(d => d.id === id);
-    if (!doc) {
-        showToast('Uploaded report not found', true);
+    if (!confirm('Delete this uploaded report? It will be moved to recycle bin.')) {
         return;
     }
     
+    // Find the report
+    const doc = uploadedReportsData.find(d => d.id === id);
+    if (!doc) {
+        showToast('❌ Uploaded report not found', true);
+        return;
+    }
+    
+    console.log('🗑️ Deleting uploaded report:', doc.id, doc.title);
+    
     // ============================================================
-    // SHOW LOADING
+    // SHOW LOADING STATE
     // ============================================================
     const card = document.getElementById(`uploaded-report-card-${id}`);
     const btn = card ? card.querySelector('.action-btn.delete') : null;
@@ -2977,7 +2976,7 @@ async function deleteUploadedReport(id) {
         await addToRecycleBin(id, 'uploaded_report', doc.title);
         
         // ============================================================
-        // 2. DELETE FROM DATABASE
+        // 2. DELETE FROM DATABASE - SOFT DELETE
         // ============================================================
         const res = await apiCall('delete_uploaded_report.php', 'POST', {
             id: parseInt(id),
@@ -2989,35 +2988,41 @@ async function deleteUploadedReport(id) {
         console.log('📤 Delete uploaded report response:', res);
         
         // ============================================================
-        // 3. IMMEDIATELY REMOVE FROM ALL LOCAL DATA
+        // 3. IMMEDIATELY REMOVE FROM LOCAL DATA
         // ============================================================
-        // Remove from uploadedReportsData
         uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
         
-        // Remove from any temporary arrays
-        if (window._allUploadedReportsData) {
-            window._allUploadedReportsData = window._allUploadedReportsData.filter(d => d.id !== id);
-        }
-        
         // ============================================================
-        // 4. IMMEDIATELY REMOVE FROM UI
+        // 4. IMMEDIATELY REMOVE FROM UI - ALL INSTANCES
         // ============================================================
         if (card) {
-            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.transition = 'opacity 0.3s, transform 0.3s, height 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
-            setTimeout(() => {
+            card.style.height = card.offsetHeight + 'px';
+            
+            setTimeout(function() {
+                card.style.height = '0';
+                card.style.margin = '0';
+                card.style.padding = '0';
+                card.style.overflow = 'hidden';
+                card.style.border = 'none';
+            }, 300);
+            
+            setTimeout(function() {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
-            }, 300);
+            }, 600);
         }
         
-        // Also remove any other instances of this card
+        // Remove any other instances
         const otherCards = document.querySelectorAll(`[id="uploaded-report-card-${id}"]`);
-        otherCards.forEach(c => {
+        otherCards.forEach(function(c) {
+            c.style.transition = 'opacity 0.3s, transform 0.3s';
             c.style.opacity = '0';
-            setTimeout(() => {
+            c.style.transform = 'scale(0.95)';
+            setTimeout(function() {
                 if (c.parentNode) c.parentNode.removeChild(c);
             }, 300);
         });
@@ -3025,7 +3030,7 @@ async function deleteUploadedReport(id) {
         // ============================================================
         // 5. UPDATE BADGE
         // ============================================================
-        unviewedReportsCount = uploadedReportsData.filter(d => {
+        unviewedReportsCount = uploadedReportsData.filter(function(d) {
             return d.sent_from_department && 
                    d.sent_from_department != DEPARTMENT_ID && 
                    (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
@@ -3036,21 +3041,34 @@ async function deleteUploadedReport(id) {
         // 6. SHOW SUCCESS
         // ============================================================
         if (res && res.success) {
-            showToast(`✅ Uploaded report "${doc.title}" deleted successfully`, false);
+            showToast('✅ Uploaded report "' + doc.title + '" moved to recycle bin', false);
         } else {
-            showToast(`⚠️ Uploaded report "${doc.title}" removed from view`, false);
+            showToast('⚠️ Uploaded report "' + doc.title + '" removed from view', false);
         }
         
-        addLog(`Uploaded report deleted: ${doc.title}`);
+        addLog('🗑️ Uploaded report deleted: ' + doc.title);
         
         // ============================================================
-        // 7. REFRESH FROM API (BACKGROUND)
+        // 7. CHECK IF GRID IS EMPTY - SHOW EMPTY MESSAGE
         // ============================================================
-        setTimeout(async () => {
+        const grid = document.getElementById('uploadedReportsGrid');
+        if (grid && grid.children.length === 0) {
+            grid.innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p>No uploaded reports. Click "Upload Report" to add one.</p>
+                </div>
+            `;
+        }
+        
+        // ============================================================
+        // 8. REFRESH DATA IN BACKGROUND
+        // ============================================================
+        setTimeout(async function() {
             await fetchUploadedReports();
             await loadReports();
             await loadDashboard();
-        }, 500);
+        }, 1000);
         
     } catch(e) {
         console.error('❌ Delete uploaded report error:', e);
@@ -3061,16 +3079,17 @@ async function deleteUploadedReport(id) {
         uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
         
         if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
-            setTimeout(() => {
+            setTimeout(function() {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 300);
         }
         
-        showToast('⚠️ Uploaded report removed from view', false);
+        showToast('⚠️ Uploaded report "' + doc.title + '" removed from view', false);
         
     } finally {
         if (btn) {
@@ -4569,20 +4588,25 @@ function openGenerateReportModal() { document.getElementById('genReportTitle').v
 
 
 // ============================================================
-// DELETE REPORT - SAFISHA DATA BAADA YA KUFUTA
+// DELETE REPORT - REMOVE FROM DASHBOARD & MOVE TO RECYCLE BIN
 // ============================================================
 
 async function deleteReportItem(id) {
-    if (!confirm('Delete this report permanently?')) return;
-    
-    const r = reportsData.find(report => report.id === id);
-    if (!r) {
-        showToast('Report not found', true);
+    if (!confirm('Delete this report? It will be moved to recycle bin.')) {
         return;
     }
     
+    // Find the report
+    const r = reportsData.find(report => report.id === id);
+    if (!r) {
+        showToast('❌ Report not found', true);
+        return;
+    }
+    
+    console.log('🗑️ Deleting report:', r.id, r.title);
+    
     // ============================================================
-    // SHOW LOADING
+    // SHOW LOADING STATE
     // ============================================================
     const card = document.getElementById(`report-card-${id}`);
     const btn = card ? card.querySelector('.action-btn.delete') : null;
@@ -4605,7 +4629,7 @@ async function deleteReportItem(id) {
         await addToRecycleBin(id, 'report', r.title);
         
         // ============================================================
-        // 2. DELETE FROM DATABASE
+        // 2. DELETE FROM DATABASE - SOFT DELETE
         // ============================================================
         const res = await apiCall('delete_report.php', 'POST', {
             report_id: id,
@@ -4615,38 +4639,45 @@ async function deleteReportItem(id) {
             deleted_by: CURRENT_USER || 'System'
         });
         
-        console.log('📤 Delete report response:', res);
+        console.log('📤 Delete response:', res);
         
         // ============================================================
-        // 3. IMMEDIATELY REMOVE FROM ALL LOCAL DATA
+        // 3. IMMEDIATELY REMOVE FROM LOCAL DATA
         // ============================================================
-        // Remove from reportsData
         reportsData = reportsData.filter(report => report.id !== id);
         
-        // Remove from any temporary arrays
-        if (window._allReportsData) {
-            window._allReportsData = window._allReportsData.filter(report => report.id !== id);
-        }
-        
         // ============================================================
-        // 4. IMMEDIATELY REMOVE FROM UI
+        // 4. IMMEDIATELY REMOVE FROM UI - ALL INSTANCES
         // ============================================================
+        // Remove from grid
         if (card) {
-            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.transition = 'opacity 0.3s, transform 0.3s, height 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
-            setTimeout(() => {
+            card.style.height = card.offsetHeight + 'px';
+            
+            setTimeout(function() {
+                card.style.height = '0';
+                card.style.margin = '0';
+                card.style.padding = '0';
+                card.style.overflow = 'hidden';
+                card.style.border = 'none';
+            }, 300);
+            
+            setTimeout(function() {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
-            }, 300);
+            }, 600);
         }
         
-        // Also remove any other instances of this card
+        // Remove any other instances of this card
         const otherCards = document.querySelectorAll(`[id="report-card-${id}"]`);
-        otherCards.forEach(c => {
+        otherCards.forEach(function(c) {
+            c.style.transition = 'opacity 0.3s, transform 0.3s';
             c.style.opacity = '0';
-            setTimeout(() => {
+            c.style.transform = 'scale(0.95)';
+            setTimeout(function() {
                 if (c.parentNode) c.parentNode.removeChild(c);
             }, 300);
         });
@@ -4654,7 +4685,7 @@ async function deleteReportItem(id) {
         // ============================================================
         // 5. UPDATE BADGE
         // ============================================================
-        unviewedReportsCount = reportsData.filter(r => {
+        unviewedReportsCount = reportsData.filter(function(r) {
             return r.sent_from_department && 
                    r.sent_from_department != DEPARTMENT_ID && 
                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
@@ -4665,21 +4696,35 @@ async function deleteReportItem(id) {
         // 6. SHOW SUCCESS
         // ============================================================
         if (res && res.success) {
-            showToast(`✅ Report "${r.title}" deleted successfully`, false);
+            showToast('✅ Report "' + r.title + '" moved to recycle bin', false);
         } else {
-            showToast(`⚠️ Report "${r.title}" removed from view`, false);
+            showToast('⚠️ Report "' + r.title + '" removed from view', false);
         }
         
-        addLog(`Report deleted: ${r.title}`);
+        addLog('🗑️ Report deleted: ' + r.title);
         
         // ============================================================
-        // 7. REFRESH FROM API (BACKGROUND)
+        // 7. CHECK IF GRID IS EMPTY - SHOW EMPTY MESSAGE
         // ============================================================
-        setTimeout(async () => {
+        const grid = document.getElementById('reportsGrid');
+        if (grid && grid.children.length === 0) {
+            grid.innerHTML = `
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p class="text-sm">No added reports found</p>
+                    <p class="text-xs mt-1">Click "Add Report" to create your first report</p>
+                </div>
+            `;
+        }
+        
+        // ============================================================
+        // 8. REFRESH DATA IN BACKGROUND
+        // ============================================================
+        setTimeout(async function() {
             await fetchReports();
             await loadReports();
             await loadDashboard();
-        }, 500);
+        }, 1000);
         
     } catch(e) {
         console.error('❌ Delete report error:', e);
@@ -4690,16 +4735,17 @@ async function deleteReportItem(id) {
         reportsData = reportsData.filter(report => report.id !== id);
         
         if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
-            setTimeout(() => {
+            setTimeout(function() {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 300);
         }
         
-        showToast('⚠️ Report removed from view', false);
+        showToast('⚠️ Report "' + r.title + '" removed from view', false);
         
     } finally {
         if (btn) {
@@ -4708,7 +4754,6 @@ async function deleteReportItem(id) {
         }
     }
 }
-
 // ============================================================
 // FETCH DAILY WORK - ONGEZA HII FUNCTION
 // ============================================================
