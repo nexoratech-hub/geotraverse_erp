@@ -2,123 +2,125 @@
 // backend/api/restore_from_recycle_bin.php
 
 // ============================================================
-// RESTORE - INAHITAJI DEPARTMENT ID NA INARESTORE KWA DEPARTMENT HUSIKA TU
+// ERROR REPORTING
 // ============================================================
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-// ... (headers, database connection) ...
+// ============================================================
+// HEADERS
+// ============================================================
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+// ============================================================
+// INCLUDE CONFIG
+// ============================================================
+require_once '../config/database.php';
+
+// ============================================================
+// GET INPUT
+// ============================================================
 $input = json_decode(file_get_contents('php://input'), true);
 
-if (!$input || !isset($input['recycle_id']) || !isset($input['department_id'])) {
+if (!$input) {
     echo json_encode([
         'success' => false,
-        'message' => 'Missing required fields: recycle_id, department_id'
+        'message' => 'Invalid input'
     ]);
     exit;
 }
 
-$recycle_id = intval($input['recycle_id']);
-$department_id = intval($input['department_id']);
+// ============================================================
+// VALIDATE REQUIRED FIELDS
+// ============================================================
+if (!isset($input['recycle_id'])) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Recycle ID required'
+    ]);
+    exit;
+}
 
+$recycleId = intval($input['recycle_id']);
+
+// ============================================================
+// RESTORE FROM RECYCLE BIN
+// ============================================================
 try {
-    // ============================================================
-    // 1. GET RECYCLE BIN ITEM - HAKIKISHA NI YA DEPARTMENT HII
-    // ============================================================
-    $query = "SELECT * FROM recycle_bin 
-              WHERE id = ? 
-                AND restored = 0 
-                AND deleted_by_department_id = ?";
-    $stmt = $pdo->prepare($query);
-    $stmt->execute([$recycle_id, $department_id]);
-    $item = $stmt->fetch();
-
+    // Get the item first
+    $stmt = $db->prepare("SELECT * FROM recycle_bin WHERE id = ? AND restored = 0");
+    $stmt->execute([$recycleId]);
+    $item = $stmt->fetch(PDO::FETCH_ASSOC);
+    
     if (!$item) {
         echo json_encode([
             'success' => false,
-            'message' => 'Item not found, already restored, or not from this department'
+            'message' => 'Item not found or already restored'
         ]);
         exit;
     }
-
-    $item_id = intval($item['item_id']);
-    $item_type = $item['item_type'];
-    $item_name = $item['item_name'] ?? 'Item';
-
+    
+    // ============================================================
+    // RESTORE BASED ON ITEM TYPE
+    // ============================================================
     $restored = false;
-    $dailywork_restored = 0;
-
-    // ============================================================
-    // 2. RESTORE BASED ON ITEM TYPE - KWA DEPARTMENT HII TU
-    // ============================================================
-    if ($item_type === 'project') {
-        // Restore original project - KWA DEPARTMENT HII TU
-        $query = "UPDATE projects SET 
-                  is_deleted = 0,
-                  deleted_by_department = 0,
-                  deleted_by_admin = 0,
-                  deleted_at = NULL,
-                  deleted_by_department_id = NULL
-                  WHERE id = ?";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$item_id]);
-        $restored = true;
-
-        // Restore daily work
-        $query = "UPDATE dailywork SET 
-                  is_deleted = 0,
-                  deleted_at = NULL
-                  WHERE project_id = ? AND is_deleted = 1";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$item_id]);
-        $dailywork_restored = $stmt->rowCount();
-
-    } elseif ($item_type === 'sent_project') {
-        // Restore sent project - KWA DEPARTMENT HII TU
-        $query = "UPDATE sent_projects SET 
-                  is_deleted = 0,
-                  deleted_at = NULL
-                  WHERE id = ?";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$item_id]);
-        $restored = true;
-
-        // Restore sent daily work
-        if ($item_name) {
-            $query = "UPDATE sent_dailywork SET 
-                      is_deleted = 0,
-                      deleted_at = NULL
-                      WHERE dailywork_project_name = ? 
-                        AND to_department_id = ? 
-                        AND is_deleted = 1";
-            $stmt = $pdo->prepare($query);
-            $stmt->execute([$item_name, $department_id]);
-            $sent_dailywork_restored = $stmt->rowCount();
-        }
+    $table = '';
+    $idColumn = 'id';
+    
+    switch ($item['item_type']) {
+        case 'project':
+            $table = 'projects';
+            break;
+        case 'project_document':
+            $table = 'project_documents';
+            break;
+        case 'budget_request':
+            $table = 'fund_requests';
+            break;
+        case 'report':
+            $table = 'reports';
+            break;
+        case 'uploaded_report':
+            $table = 'uploaded_reports';
+            break;
+        case 'daily_work':
+            $table = 'dailywork';
+            break;
+        case 'employee':
+            $table = 'employees';
+            break;
+        default:
+            echo json_encode([
+                'success' => false,
+                'message' => 'Unknown item type: ' . $item['item_type']
+            ]);
+            exit;
     }
-
-    // ============================================================
-    // 3. MARK AS RESTORED
-    // ============================================================
+    
+    // Restore the item
+    $restoreStmt = $db->prepare("UPDATE $table SET is_deleted = 0, deleted_at = NULL WHERE id = ?");
+    $restored = $restoreStmt->execute([$item['item_id']]);
+    
     if ($restored) {
-        $query = "UPDATE recycle_bin SET 
-                  restored = 1,
-                  restored_at = NOW()
-                  WHERE id = ?";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute([$recycle_id]);
-
+        // Mark as restored in recycle bin
+        $updateStmt = $db->prepare("UPDATE recycle_bin SET restored = 1, restored_at = NOW() WHERE id = ?");
+        $updateStmt->execute([$recycleId]);
+        
         echo json_encode([
             'success' => true,
-            'message' => 'Item restored successfully for department ' . $department_id,
-            'data' => [
-                'item_id' => $item_id,
-                'item_type' => $item_type,
-                'item_name' => $item_name,
-                'department_id' => $department_id,
-                'dailywork_restored' => $dailywork_restored,
-                'sent_dailywork_restored' => $sent_dailywork_restored ?? 0,
-                'note' => 'Restored only for department ' . $department_id
-            ]
+            'message' => 'Item restored successfully',
+            'item_id' => $item['item_id'],
+            'item_type' => $item['item_type'],
+            'item_name' => $item['item_name']
         ]);
     } else {
         echo json_encode([

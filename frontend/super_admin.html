@@ -1320,53 +1320,268 @@ async function fetchBudgetRequests() {
     }
     updateRequestBadge();
 }
+// ============================================================
+// FETCH REPORTS - FIXED (Returns All Reports for Super Admin)
+// ============================================================
+
 async function fetchReports() {
-    const res = await apiCall('get_reports.php?department_id=1');
-    if (res.success && res.data) {
-        reportsData = res.data.filter(r =>
-            r.department_id == 1 &&
-            (!r.deleted_by_admin || r.deleted_by_admin != 1)
-        ).sort((a,b) => b.id - a.id);
-    } else {
+    console.log('📡 Fetching reports...');
+    
+    try {
+        // ============================================================
+        // USE CACHE BUSTING TO AVOID CACHED RESPONSES
+        // ============================================================
+        const cacheBuster = `&_t=${Date.now()}`;
+        const url = `get_reports.php?department_id=${DEPARTMENT_ID}${cacheBuster}`;
+        
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(API_BASE + url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        // Get response as text first for debugging
+        const responseText = await response.text();
+        console.log('📥 Raw response:', responseText);
+        
+        let res;
+        try {
+            res = JSON.parse(responseText);
+        } catch(e) {
+            console.error('❌ Failed to parse JSON:', e);
+            // Try to extract data if it's wrapped
+            if (responseText.includes('data')) {
+                try {
+                    // Try to find JSON in the response
+                    const jsonMatch = responseText.match(/\{.*\}/s);
+                    if (jsonMatch) {
+                        res = JSON.parse(jsonMatch[0]);
+                    } else {
+                        res = { success: false, message: 'Invalid JSON response', data: [] };
+                    }
+                } catch(e2) {
+                    res = { success: false, message: 'Invalid JSON response', data: [] };
+                }
+            } else {
+                res = { success: false, message: 'Invalid JSON response', data: [] };
+            }
+        }
+        
+        console.log('📥 Parsed response:', res);
+        
+        if (res && res.success) {
+            // ============================================================
+            // HAKIKISHA DATA NI ARRAY
+            // ============================================================
+            let reportsArray = [];
+            
+            if (res.data) {
+                if (Array.isArray(res.data)) {
+                    reportsArray = res.data;
+                } else if (typeof res.data === 'object') {
+                    // Check for nested data
+                    if (res.data.reports && Array.isArray(res.data.reports)) {
+                        reportsArray = res.data.reports;
+                    } else if (res.data.data && Array.isArray(res.data.data)) {
+                        reportsArray = res.data.data;
+                    } else {
+                        // Try to convert object to array
+                        const values = Object.values(res.data);
+                        if (values.length > 0 && Array.isArray(values[0])) {
+                            reportsArray = values[0];
+                        } else {
+                            reportsArray = [res.data];
+                        }
+                    }
+                }
+            }
+            
+            // ============================================================
+            // FILTER - ONDOA ZILIZOFUTWA NA ZISIZO ZA DEPARTMENT HII
+            // ============================================================
+            if (Array.isArray(reportsArray) && reportsArray.length > 0) {
+                reportsData = reportsArray
+                    .filter(r => {
+                        // Skip if deleted
+                        if (r.is_deleted == 1) return false;
+                        if (r.deleted_by_admin == 1) return false;
+                        if (r.deleted_by_department == 1) return false;
+                        
+                        // For Super Admin (department_id = 1), show all reports
+                        // that belong to Super Admin OR were sent to Super Admin
+                        if (DEPARTMENT_ID == 1) {
+                            // Show all reports where department_id = 1 OR sent_to_department = 1
+                            if (r.department_id == 1 || r.sent_to_department == 1) {
+                                return true;
+                            }
+                            // Also show reports sent from other departments to Super Admin
+                            if (r.sent_from_department && r.sent_to_department == 1) {
+                                return true;
+                            }
+                            return false;
+                        }
+                        
+                        // For other departments, show their own reports
+                        return r.department_id == DEPARTMENT_ID || r.sent_to_department == DEPARTMENT_ID;
+                    })
+                    .map(r => {
+                        // Ensure all fields exist
+                        r.id = parseInt(r.id) || 0;
+                        if (!r.source_type) r.source_type = 'original';
+                        if (!r.is_original) r.is_original = 1;
+                        if (!r.is_sent_copy) r.is_sent_copy = 0;
+                        return r;
+                    })
+                    .sort((a, b) => (b.id || 0) - (a.id || 0));
+                
+                console.log(`✅ Reports loaded: ${reportsData.length}`);
+                console.log('📋 Reports:', reportsData.map(r => ({ id: r.id, title: r.title, dept: r.department_id })));
+            } else {
+                console.warn('⚠️ No reports data found');
+                reportsData = [];
+            }
+        } else {
+            console.warn('⚠️ Failed to fetch reports:', res?.message);
+            reportsData = [];
+        }
+        
+        // ============================================================
+        // HESABU UNVIEWED REPORTS
+        // ============================================================
+        unviewedReportsCount = reportsData.filter(r => {
+            return r.sent_from_department && 
+                   r.sent_from_department != DEPARTMENT_ID && 
+                   (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
+                   !viewedReportIds.includes(r.id);
+        }).length;
+        
+        console.log(`📊 Unviewed reports count: ${unviewedReportsCount}`);
+        updateReportBadge();
+        
+        return reportsData;
+        
+    } catch(e) {
+        console.error('❌ fetchReports error:', e);
         reportsData = [];
+        return [];
+    }
+}
+// ============================================================
+// FETCH UPLOADED REPORTS - FIXED (Super Admin)
+// ============================================================
+async function fetchUploadedReports() {
+    try {
+        console.log('📡 Fetching uploaded reports for Super Admin...');
+        
+        const cacheBuster = `&_t=${Date.now()}`;
+        const url = `get_uploaded_reports.php?department_id=${DEPARTMENT_ID}${cacheBuster}`;
+        
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(API_BASE + url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        const res = await response.json();
+        console.log('📥 Uploaded reports response:', res);
+        
+        // ============================================================
+        // HAKIKISHA DATA NI ARRAY KABLA YA KUFILTER
+        // ============================================================
+        let reportsData = [];
+        
+        if (res && res.success) {
+            // Angalia kama data ipo kwenye res.data
+            if (res.data) {
+                // Kama res.data ni array, tumia moja kwa moja
+                if (Array.isArray(res.data)) {
+                    reportsData = res.data;
+                } 
+                // Kama res.data ni object, jaribu kupata array kutoka ndani
+                else if (typeof res.data === 'object') {
+                    // Angalia kama kuna property ya 'reports' au 'data'
+                    if (res.data.reports && Array.isArray(res.data.reports)) {
+                        reportsData = res.data.reports;
+                    } else if (res.data.data && Array.isArray(res.data.data)) {
+                        reportsData = res.data.data;
+                    } else {
+                        // Jaribu kubadilisha object values kuwa array
+                        const values = Object.values(res.data);
+                        if (values.length > 0 && Array.isArray(values[0])) {
+                            reportsData = values[0];
+                        } else {
+                            // Weka object kwenye array
+                            reportsData = [res.data];
+                        }
+                    }
+                }
+            }
+            
+            // ============================================================
+            // FILTER REPORTS
+            // ============================================================
+            if (Array.isArray(reportsData) && reportsData.length > 0) {
+                uploadedReportsData = reportsData
+                    .filter(d => {
+                        // Hakikisha haijafutwa
+                        if (d.is_deleted == 1) return false;
+                        if (d.deleted_at && d.deleted_at !== null) return false;
+                        return true;
+                    })
+                    .map(d => {
+                        // Hakikisha id ni number
+                        d.id = parseInt(d.id) || 0;
+                        // Weka source_type ikiwa haipo
+                        if (!d.source_type) {
+                            d.source_type = 'original';
+                        }
+                        return d;
+                    })
+                    .sort((a, b) => (b.id || 0) - (a.id || 0));
+                
+                console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
+            } else {
+                console.warn('⚠️ No uploaded reports data found');
+                uploadedReportsData = [];
+            }
+        } else {
+            console.warn('⚠️ Failed to fetch uploaded reports:', res?.message);
+            uploadedReportsData = [];
+        }
+        
+        // ============================================================
+        // HESABU UNVIEWED REPORTS
+        // ============================================================
+        unviewedReportsCount = uploadedReportsData.filter(d => {
+            return d.sent_from_department && 
+                   d.sent_from_department != DEPARTMENT_ID && 
+                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        }).length;
+        
+        updateReportBadge();
+        
+        return uploadedReportsData;
+        
+    } catch(e) {
+        console.error('❌ Fetch uploaded reports error:', e);
+        uploadedReportsData = [];
+        return [];
     }
 }
 
-// ==================== FETCH UPLOADED REPORTS - FIXED ====================
-// ==================== FETCH UPLOADED REPORTS - FIXED ====================
-async function fetchUploadedReports() {
-    try {
-        console.log('📥 Fetching uploaded reports...');
-        const res = await apiCall(`get_uploaded_reports.php?department_id=1`);
-        
-        if (res.success && res.data) {
-            uploadedReportsData = res.data
-                .filter(d => d.is_deleted != 1)
-                .map(d => { d.id = parseInt(d.id); return d; })
-                .sort((a, b) => b.id - a.id);
-            
-            // HESABU YA UNVIEWED UPLOADED REPORTS
-            const unviewedUploaded = uploadedReportsData.filter(d => {
-                return d.sent_from_department && d.sent_from_department != 1 &&
-                       (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
-            }).length;
-            
-            // HESABU YA UNVIEWED ADDED REPORTS
-            const unviewedAdded = reportsData.filter(r => {
-                return r.sent_from_department && r.sent_from_department != 1 &&
-                       (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
-            }).length;
-            
-            unviewedReportsCount = unviewedUploaded + unviewedAdded;
-            console.log('📊 Unviewed Reports:', unviewedReportsCount);
-        } else {
-            uploadedReportsData = [];
-        }
-    } catch(e) {
-        console.error('Fetch uploaded reports error:', e);
-        uploadedReportsData = [];
-    }
-}
+
 async function fetchProjectDocuments() {
     const res = await apiCall('get_project_documents.php?department_id=1');
     projectDocuments = (res.success && res.data) ?
@@ -2345,14 +2560,39 @@ function viewUploadedReportDocument(docId) {
 }
 
 // ============================================================
-// LOAD REPORTS - UPLOADED REPORTS (View + Delete ONLY)
+// LOAD REPORTS - FIXED (Shows All Reports for Super Admin)
 // ============================================================
+
 async function loadReports(highlightId = null) {
-    await Promise.all([fetchReports(), fetchUploadedReports(), fetchUnviewedCounts()]);
+    console.log('📊 Loading reports...');
+    
+    // ============================================================
+    // CLEAR UI FIRST
+    // ============================================================
+    const reportsGrid = document.getElementById('reportsGrid');
+    const uploadedGrid = document.getElementById('uploadedReportsGrid');
+    
+    if (reportsGrid) {
+        reportsGrid.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i> Loading reports...</div>';
+    }
+    if (uploadedGrid) {
+        uploadedGrid.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i> Loading uploaded reports...</div>';
+    }
+    
+    // ============================================================
+    // FETCH FRESH DATA
+    // ============================================================
+    await fetchReports();
+    await fetchUploadedReports();
+    await fetchUnviewedCounts();
 
-    console.log('Uploaded Reports Data:', uploadedReportsData);
-    console.log('Reports Data:', reportsData);
+    console.log('📊 Reports Data:', reportsData.length);
+    console.log('📊 Reports Data Sample:', reportsData.slice(0, 3));
+    console.log('📊 Uploaded Reports Data:', uploadedReportsData.length);
 
+    // ============================================================
+    // BUILD HTML - TAB CONTAINER
+    // ============================================================
     let html = `
         <div class="tab-container">
             <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')">
@@ -2366,31 +2606,34 @@ async function loadReports(highlightId = null) {
         </div>
     `;
 
+    // ============================================================
+    // ADDED REPORTS TAB
+    // ============================================================
     if (currentReportTab === 'added') {
         html += `
-            <div class="section-card">
-                <div class="section-card-header">
-                    <h3><i class="fas fa-chart-line text-purple-600 mr-2"></i> Added Reports</h3>
-                    <div class="flex gap-2 flex-wrap">
-                        <button onclick="openModal('reportModal')" class="btn-primary text-sm">
-                            <i class="fas fa-plus mr-1"></i> Add Report
-                        </button>
-                        <button onclick="openGenerateReportModal()" class="btn-cyan text-sm">
-                            <i class="fas fa-chart-line mr-1"></i> Generate Report
-                        </button>
-                        <button onclick="exportAllReportsToExcel()" class="btn-success text-sm">
-                            <i class="fas fa-file-excel mr-1"></i> Excel All
-                        </button>
-                        <button onclick="exportAllReportsToPDF()" class="btn-danger text-sm">
-                            <i class="fas fa-file-pdf mr-1"></i> PDF All
-                        </button>
-                    </div>
-                </div>
-                <div class="section-card-body">
-                    <div id="reportsGrid" class="reports-grid"></div>
+            <div class="flex justify-between flex-wrap gap-3 mb-4">
+                <h2 class="text-xl font-bold">
+                    <i class="fas fa-chart-line text-purple-600 mr-2"></i>
+                    Added Reports (${reportsData.length})
+                </h2>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="openModal('reportModal')" class="btn-primary">
+                        <i class="fas fa-plus mr-1"></i> Add Report
+                    </button>
+                    <button onclick="openGenerateReportModal()" class="btn-cyan">
+                        <i class="fas fa-chart-line mr-1"></i> Generate
+                    </button>
+                    <button onclick="exportAllReportsToExcel()" class="btn-success">
+                        <i class="fas fa-file-excel mr-1"></i> Excel All
+                    </button>
+                    <button onclick="exportAllReportsToPDF()" class="btn-danger">
+                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    </button>
                 </div>
             </div>
+            <div class="reports-grid" id="reportsGrid"></div>
         `;
+
         document.getElementById('reportsPage').innerHTML = html;
 
         // ============================================================
@@ -2398,9 +2641,9 @@ async function loadReports(highlightId = null) {
         // ============================================================
         if (reportsData.length === 0) {
             document.getElementById('reportsGrid').innerHTML = `
-                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
-                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300"></i>
-                    <p class="text-sm">No added reports found</p>
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p class="text-sm">No reports found</p>
                     <p class="text-xs mt-1">Click "Add Report" to create your first report</p>
                 </div>
             `;
@@ -2409,82 +2652,84 @@ async function loadReports(highlightId = null) {
 
         let reportsHtml = '';
         for (let r of reportsData) {
+            // Skip if deleted
             if (r.is_deleted == 1) continue;
+            if (r.deleted_by_admin == 1) continue;
             
-            let sourceDeptName = 'System';
-            let isReportSent = false;
-            
-            if (r.sent_from_department) {
-                sourceDeptName = departmentNames[r.sent_from_department] || 'Unknown Department';
-                isReportSent = true;
-            } else if (r.created_by) {
-                sourceDeptName = r.created_by;
-            }
-            
-            let isNew = r._is_unviewed || false;
-            let isHighlighted = highlightId && r.id === highlightId;
-            
-            let statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
-            let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+            // Check if report is unviewed
+            const isUnviewed = r.sent_from_department && 
+                r.sent_from_department != DEPARTMENT_ID && 
+                (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+                !viewedReportIds.includes(r.id);
+
+            const isHighlighted = highlightId && r.id === highlightId;
+            const statusClass = r.status === 'sent' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400';
             
             let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
+            
+            // Source department badge
+            let sourceBadge = '';
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[r.sent_from_department] || 'Unknown';
+                sourceBadge = `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                        <i class="fas fa-paper-plane text-[8px]"></i>
+                        ${escapeHtml(deptName)}
+                    </span>
+                `;
+            }
+
+            // Check if this is the owner of the report
+            const isOwner = r.department_id == DEPARTMENT_ID;
 
             reportsHtml += `
-                <div class="report-card ${isHighlighted ? 'search-highlight' : ''}" 
+                <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
                      id="report-card-${r.id}" 
-                     onclick="viewReportDetailsModal(${r.id})" 
-                     style="cursor:pointer;">
+                     onclick="viewReportDetailsModal(${r.id})"
+                     style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
                     
-                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     
-                    <div class="card-header">
-                        <h4>${escapeHtml(r.title)}</h4>
-                        <p style="font-size:10px; opacity:0.8;">
-                            ${r.period} report 
-                            ${isReportSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}
-                        </p>
+                    <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
+                        <h4 class="font-semibold text-sm">${escapeHtml(r.title)}</h4>
+                        <div class="flex justify-between items-center mt-1">
+                            <p class="text-[9px] opacity-90">${r.period} report</p>
+                            ${sourceBadge}
+                        </div>
                     </div>
                     
                     <div class="p-3">
-                        <div class="flex justify-between items-center mb-1">
+                        <div class="flex justify-between items-center mb-2">
                             <span class="text-[9px] text-gray-400">${formatDate(r.created_at)}</span>
-                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">${statusText}</span>
-                        </div>
-                        
-                        <div class="text-[10px] mb-1">
-                            <span class="text-gray-400">Source: </span>
-                            <span class="${isReportSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                                <i class="fas ${isReportSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                                ${escapeHtml(sourceDeptName)}
-                                ${isReportSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            <span class="status-badge ${statusClass} text-[9px] px-2 py-0.5">
+                                ${r.status === 'sent' ? 'Sent' : 'Draft'}
                             </span>
                         </div>
                         
-                        <div class="report-preview text-[10px] text-gray-600 mb-2">
+                        <div class="text-[10px] text-gray-600 dark:text-gray-400 mb-2 line-clamp-3">
                             ${escapeHtml(shortContent)}
                         </div>
                         
-                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                        <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
                             <button onclick="event.stopPropagation(); viewReportDetailsModal(${r.id})" class="action-btn view">
                                 <i class="fas fa-eye"></i> View
                             </button>
-                            <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
-                                <i class="fas fa-edit"></i> Edit
-                            </button>
-                            <button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
-                        </div>
-                        
-                        <div class="user-info-line">
-                            Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTimeFull(r.created_at)}
+                            ${isOwner ? `
+                                <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
+                                    <i class="fas fa-edit"></i> Edit
+                                </button>
+                                <button onclick="event.stopPropagation(); deleteReport(${r.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
             `;
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
-        
+
+        // Highlight if needed
         if (highlightId) {
             const el = document.getElementById(`report-card-${highlightId}`);
             if (el) {
@@ -2492,137 +2737,141 @@ async function loadReports(highlightId = null) {
                 setTimeout(() => el.classList.remove('search-highlight'), 3000);
             }
         }
-    } 
+    }
+
     // ============================================================
-    // TAB 2: UPLOADED REPORTS - View + Delete ONLY (No Send)
+    // UPLOADED REPORTS TAB
     // ============================================================
     else {
         html += `
-            <div class="section-card">
-                <div class="section-card-header">
-                    <h3><i class="fas fa-file-upload text-orange-600 mr-2"></i> Uploaded Reports (${uploadedReportsData.length})</h3>
-                    <div class="flex gap-2 flex-wrap">
-                        <button onclick="openUploadReportModal()" class="btn-warning text-sm">
-                            <i class="fas fa-upload mr-1"></i> Upload Report
-                        </button>
-                        <button onclick="exportAllUploadedReportsToExcel()" class="btn-success text-sm">
-                            <i class="fas fa-file-excel mr-1"></i> Excel All
-                        </button>
-                        <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger text-sm">
-                            <i class="fas fa-file-pdf mr-1"></i> PDF All
-                        </button>
-                    </div>
-                </div>
-                <div class="section-card-body">
-                    <div id="uploadedReportsGrid" class="reports-grid"></div>
+            <div class="flex justify-between flex-wrap gap-3 mb-4">
+                <h2 class="text-xl font-bold">
+                    <i class="fas fa-file-upload text-orange-600 mr-2"></i>
+                    Uploaded Reports (${uploadedReportsData.length})
+                </h2>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="openUploadReportModal()" class="btn-warning">
+                        <i class="fas fa-upload mr-1"></i> Upload Report
+                    </button>
+                    <button onclick="exportAllUploadedReportsToExcel()" class="btn-success">
+                        <i class="fas fa-file-excel mr-1"></i> Excel All
+                    </button>
+                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger">
+                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    </button>
                 </div>
             </div>
+            <div class="reports-grid" id="uploadedReportsGrid"></div>
         `;
+
         document.getElementById('reportsPage').innerHTML = html;
 
         if (uploadedReportsData.length === 0) {
             document.getElementById('uploadedReportsGrid').innerHTML = `
-                <div class="col-span-2 text-center py-12 text-gray-400 bg-white rounded-xl border-2 border-dashed border-gray-200">
-                    <i class="fas fa-file-upload text-4xl mb-3 text-gray-300"></i>
-                    <p class="text-sm">No uploaded reports found</p>
-                    <p class="text-xs mt-1">Click "Upload Report" to add a report document</p>
+                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                    <p>No uploaded reports. Click "Upload Report" to add one.</p>
                 </div>
             `;
             return;
         }
 
-        // ============================================================
-        // BUILD UPLOADED REPORT CARDS - View + Delete ONLY (No Send)
-        // ============================================================
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
             if (doc.is_deleted == 1) continue;
             
-            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'FILE';
-            let fileIcon = 'fa-file-alt';
-            if (fileExt === 'PDF') fileIcon = 'fa-file-pdf';
-            else if (fileExt === 'DOC' || fileExt === 'DOCX') fileIcon = 'fa-file-word';
-            else if (fileExt === 'XLS' || fileExt === 'XLSX') fileIcon = 'fa-file-excel';
-            else if (fileExt === 'PNG' || fileExt === 'JPG' || fileExt === 'JPEG' || fileExt === 'GIF') fileIcon = 'fa-file-image';
+            // Check if uploaded report is unviewed
+            const isUnviewed = doc.sent_from_department && 
+                doc.sent_from_department != DEPARTMENT_ID && 
+                !viewedReportIds.includes(doc.id);
 
-            let sourceDeptName = 'System';
-            if (doc.sent_from_department) {
-                sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown Department';
-            } else if (doc.uploaded_by) {
-                sourceDeptName = doc.uploaded_by;
+            const isHighlighted = highlightId && doc.id === highlightId;
+            
+            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+            let fileIcon = getFileIconClass(doc.file_name);
+            let fileIconColor = '';
+            if (fileIcon === 'fa-file-pdf') fileIconColor = 'text-red-500';
+            else if (fileIcon === 'fa-file-image') fileIconColor = 'text-purple-500';
+            else if (fileIcon === 'fa-file-word') fileIconColor = 'text-blue-500';
+            else if (fileIcon === 'fa-file-excel') fileIconColor = 'text-green-500';
+            else fileIconColor = 'text-gray-500';
+
+            // Source department badge
+            let sourceBadge = '';
+            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+                const deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                sourceBadge = `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                        <i class="fas fa-paper-plane text-[8px]"></i>
+                        ${escapeHtml(deptName)}
+                    </span>
+                `;
             }
-            let isDocSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
-            let isNew = doc._is_unviewed || false;
-            let isHighlighted = highlightId && doc.id === highlightId;
+
+            const isOwner = doc.department_id == DEPARTMENT_ID;
 
             reportsHtml += `
-                <div class="uploaded-report-card ${isHighlighted ? 'search-highlight' : ''}" 
+                <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
                      id="uploaded-report-card-${doc.id}" 
-                     style="cursor:pointer;"
-                     onclick="viewUploadedReportDocument(${doc.id})">
+                     onclick="viewUploadedReportDocument(${doc.id})"
+                     style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
                     
-                    ${isNew ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
                     
-                    <div class="card-header" style="padding: 10px 14px;">
-                        <h4 style="font-size:13px;">
-                            <i class="fas ${fileIcon} mr-2"></i>${escapeHtml(doc.title || 'Untitled')}
-                        </h4>
-                        <p style="font-size:9px;">
-                            ${doc.file_name || 'Document'} 
-                            ${isDocSent ? '<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> From ' + escapeHtml(sourceDeptName) + '</span>' : ''}
-                        </p>
+                    <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
+                        <div class="flex items-center gap-2">
+                            <i class="fas ${fileIcon} ${fileIconColor} text-sm"></i>
+                            <h4 class="font-semibold text-sm">${escapeHtml(doc.title)}</h4>
+                        </div>
+                        <div class="flex justify-between items-center mt-1">
+                            <p class="text-[9px] opacity-90">${doc.file_name || 'Document'}</p>
+                            ${sourceBadge}
+                        </div>
                     </div>
                     
-                    <div class="p-3" style="padding: 10px 14px;">
+                    <div class="p-3">
                         <div class="flex justify-between items-start mb-2">
                             <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                            <span class="text-[9px] bg-gray-100 px-2 py-0.5 rounded">${fileExt}</span>
+                            <span class="text-[9px] bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
                         </div>
                         
-                        <div class="text-[10px] mb-2">
-                            <span class="text-gray-400">Source: </span>
-                            <span class="${isDocSent ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
-                                <i class="fas ${isDocSent ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
-                                ${escapeHtml(sourceDeptName)}
-                                ${isDocSent ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
-                            </span>
-                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2 line-clamp-2">
+                            ${escapeHtml(doc.description || 'No description')}
+                        </p>
                         
-                        <p class="text-xs text-gray-500 mb-2 line-clamp-2">${escapeHtml(doc.description || 'No description')}</p>
-                        
-                        <!-- ============================================================
-                             BUTTONS: View + Delete ONLY (No Send)
-                             ============================================================ -->
-                        <div class="flex gap-2 mt-2 pt-1 border-t">
+                        <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
                             <button onclick="event.stopPropagation(); viewUploadedReportDocument(${doc.id})" class="action-btn view">
                                 <i class="fas fa-eye"></i> View
                             </button>
-                            <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
-                            <!-- Send button REMOVED from cards -->
-                        </div>
-                        
-                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
-                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${new Date(doc.created_at).toLocaleString()}
+                            ${isOwner ? `
+                                <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
             `;
         }
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
-        
+
+        // Highlight if needed
         if (highlightId) {
             const el = document.getElementById(`uploaded-report-card-${highlightId}`);
-            if(el) {
+            if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 setTimeout(() => el.classList.remove('search-highlight'), 3000);
             }
         }
     }
-    
+
+    // ============================================================
+    // UPDATE REPORT BADGE
+    // ============================================================
     updateReportBadge();
 }
+
+
 // ============================================================
 // SEND PROJECT TO DEPARTMENT - FIXED
 // ============================================================
@@ -6811,13 +7060,130 @@ async function saveUploadedReport() {
     }
 }
 
+// ============================================================
+// DELETE UPLOADED REPORT - FIXED (Sends correct data)
+// ============================================================
 async function deleteUploadedReport(id) {
-    if(confirm('Delete this uploaded report?')) {
-        const doc = uploadedReportsData.find(d => d.id === id);
-        if(doc) await addToRecycleBin(id, 'uploaded_report', doc.title);
-        const res = await apiCall('delete_uploaded_report.php', 'POST', { id: id, deleted_by: currentUserFullName });
-        if(res.success) { showToast('Uploaded report moved to recycle bin'); await loadReports(); await loadDashboard(); }
-        else { showToast(res.message || 'Failed', true); }
+    if (!confirm('Delete this uploaded report permanently?')) return;
+    
+    console.log('🗑️ Deleting uploaded report ID:', id);
+    console.log('🗑️ Department ID:', DEPARTMENT_ID);
+    
+    // Find the report in uploadedReportsData
+    const doc = uploadedReportsData.find(d => d.id === id);
+    if (!doc) {
+        showToast('Uploaded report not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const card = document.getElementById(`uploaded-report-card-${id}`);
+    const btn = card ? card.querySelector('.action-btn.delete') : null;
+    const originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+    }
+    
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // ============================================================
+        // ADD TO RECYCLE BIN
+        // ============================================================
+        await addToRecycleBin(id, 'uploaded_report', doc.title);
+        
+        // ============================================================
+        // DELETE FROM API - WITH CORRECT FIELDS
+        // ============================================================
+        const res = await apiCall('delete_uploaded_report.php', 'POST', { 
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),  // <- MUHIMU: ID YA DEPARTMENT
+            deleted_by: CURRENT_USER || 'System',
+            is_admin: (DEPARTMENT_ID == 1) ? 1 : 0
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA - IMMEDIATELY
+        // ============================================================
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        
+        // ============================================================
+        // REMOVE FROM UI - IMMEDIATELY
+        // ============================================================
+        if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
+        
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
+        unviewedReportsCount = uploadedReportsData.filter(d => {
+            return d.sent_from_department && 
+                   d.sent_from_department != DEPARTMENT_ID && 
+                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        }).length;
+        updateReportBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast(`✅ Uploaded report "${doc.title}" deleted successfully`, false);
+            addLog(`Uploaded report deleted: ${doc.title}`);
+        } else {
+            showToast(`⚠️ Uploaded report "${doc.title}" removed from view`, false);
+        }
+        
+        // ============================================================
+        // REFRESH FROM API (BACKGROUND)
+        // ============================================================
+        setTimeout(async () => {
+            await fetchUploadedReports();
+            await loadReports();
+            await loadDashboard();
+        }, 500);
+        
+    } catch(e) {
+        console.error('❌ Delete uploaded report error:', e);
+        
+        // ============================================================
+        // FALLBACK - Remove locally anyway
+        // ============================================================
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        
+        if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 300);
+        }
+        
+        showToast('⚠️ Uploaded report removed from view', false);
+        
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
 

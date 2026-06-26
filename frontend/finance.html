@@ -612,8 +612,9 @@
 
 <script>
 // ============================================================
-// ==================== MONEY FORMAT FUNCTIONS ====================
+// ==================== FORMAT FUNCTIONS ====================
 // ============================================================
+
 function formatMoneyInput(input) {
     let value = input.value.replace(/,/g, '');
     if (!isNaN(value) && value !== '') {
@@ -621,15 +622,61 @@ function formatMoneyInput(input) {
         if (!isNaN(num)) input.value = num.toLocaleString('en-US');
     }
 }
-function parseAmount(str) { if (!str) return 0; return parseFloat(String(str).replace(/,/g, '')) || 0; }
-function formatMoney(amt) { let num = parseFloat(amt) || 0; return "TZS " + num.toLocaleString('en-US'); }
-function formatNumberWithCommas(num) { if (num === null || isNaN(num)) return '0'; return num.toLocaleString('en-US'); }
-function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]); }
-function formatDate(d) { if (!d) return 'N/A'; return new Date(d).toLocaleDateString('en-GB'); }
-function formatDateTime(d) { if (!d) return 'N/A'; return new Date(d).toLocaleString(); }
-function formatFileSize(bytes) { if (!bytes) return 'Unknown'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'; return (bytes / (1024 * 1024)).toFixed(2) + ' MB'; }
-function getFileIconClass(fileName) { if (!fileName) return 'fa-file-alt'; var ext = fileName.split('.').pop().toLowerCase(); if (ext === 'pdf') return 'fa-file-pdf'; if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') return 'fa-file-image'; if (ext === 'doc' || ext === 'docx') return 'fa-file-word'; if (ext === 'xls' || ext === 'xlsx') return 'fa-file-excel'; return 'fa-file-alt'; }
 
+function parseAmount(str) { 
+    if (!str) return 0; 
+    return parseFloat(String(str).replace(/,/g, '')) || 0; 
+}
+
+function formatMoney(amt) { 
+    let num = parseFloat(amt) || 0; 
+    return "TZS " + num.toLocaleString('en-US'); 
+}
+
+function formatNumberWithCommas(num) { 
+    if (num === null || isNaN(num)) return '0'; 
+    return num.toLocaleString('en-US'); 
+}
+
+function escapeHtml(str) { 
+    if (!str) return ''; 
+    return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]); 
+}
+
+function formatDate(d) { 
+    if (!d) return 'N/A'; 
+    return new Date(d).toLocaleDateString('en-GB'); 
+}
+
+function formatDateTime(d) { 
+    if (!d) return 'N/A'; 
+    return new Date(d).toLocaleString(); 
+}
+
+// ============================================================
+// ADD THIS MISSING FUNCTION
+// ============================================================
+function formatDateTimeFull(d) { 
+    if (!d) return 'N/A'; 
+    return new Date(d).toLocaleString(); 
+}
+
+function formatFileSize(bytes) { 
+    if (!bytes) return 'Unknown'; 
+    if (bytes < 1024) return bytes + ' B'; 
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'; 
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB'; 
+}
+
+function getFileIconClass(fileName) { 
+    if (!fileName) return 'fa-file-alt'; 
+    var ext = fileName.split('.').pop().toLowerCase(); 
+    if (ext === 'pdf') return 'fa-file-pdf'; 
+    if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') return 'fa-file-image'; 
+    if (ext === 'doc' || ext === 'docx') return 'fa-file-word'; 
+    if (ext === 'xls' || ext === 'xlsx') return 'fa-file-excel'; 
+    return 'fa-file-alt'; 
+}
 function openModal(id) { document.getElementById(id).style.display = 'flex'; document.body.style.overflow = 'hidden'; }
 function closeModal(id) { const modal = document.getElementById(id); if (modal) modal.style.display = 'none'; document.body.style.overflow = 'auto'; }
 function closeMobileSidebar() { document.getElementById("mainSidebar").classList.remove("mobile-open"); document.getElementById("mobileMenuOverlay").classList.add("hidden"); }
@@ -2276,25 +2323,27 @@ function exportAllRequestsToPDF() {
     showToast("📄 Budget Requests PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
-
 // ============================================================
-// FETCH REPORTS - HAKIKISHA INAPATA REPORTS ZOTE (ZILIZOTUMWA NA ZAKE)
+// FETCH REPORTS - FIXED (Includes Sent Reports)
 // ============================================================
 
 async function fetchReports() {
+    console.log('📡 Fetching reports for department:', DEPARTMENT_ID);
+    
     try {
-        // ============================================================
-        // WEKA CACHE BUSTING
-        // ============================================================
         const cacheBuster = `&_t=${Date.now()}`;
         
-        // ============================================================
-        // 1. CHUKUA REPORTS ZA DEPARTMENT YETU (Finance - ID: 2)
-        // ============================================================
-        const myUrl = `get_reports.php?department_id=${DEPARTMENT_ID}${cacheBuster}`;
-        console.log('📡 Fetching my reports from:', myUrl);
+        // Use all=1 for Super Admin, otherwise use department_id
+        let url;
+        if (DEPARTMENT_ID == 1) {
+            url = `get_reports.php?all=1${cacheBuster}`;
+        } else {
+            url = `get_reports.php?department_id=${DEPARTMENT_ID}${cacheBuster}`;
+        }
         
-        const myResponse = await fetch(API_BASE + myUrl, {
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(API_BASE + url, {
             method: 'GET',
             credentials: 'include',
             headers: {
@@ -2304,90 +2353,80 @@ async function fetchReports() {
             }
         });
         
-        const myData = await myResponse.json();
-        console.log('📥 My reports response:', myData);
+        const res = await response.json();
+        console.log('📥 API Response:', res);
         
-        // ============================================================
-        // 2. CHUKUA REPORTS ZILIZOTUMWA KUTOKA IDARA NYINGINE
-        // ============================================================
-        const allUrl = `get_reports.php?all=1${cacheBuster}`;
-        console.log('📡 Fetching all reports from:', allUrl);
-        
-        const allResponse = await fetch(API_BASE + allUrl, {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
+        if (res && res.success) {
+            let reportsArray = [];
+            
+            // Extract data from response
+            if (res.data) {
+                if (Array.isArray(res.data)) {
+                    reportsArray = res.data;
+                } else if (typeof res.data === 'object') {
+                    if (res.data.reports && Array.isArray(res.data.reports)) {
+                        reportsArray = res.data.reports;
+                    } else if (res.data.data && Array.isArray(res.data.data)) {
+                        reportsArray = res.data.data;
+                    } else {
+                        reportsArray = Object.values(res.data).filter(v => Array.isArray(v))[0] || [];
+                    }
+                }
             }
-        });
-        
-        const allData = await allResponse.json();
-        console.log('📥 All reports response:', allData);
-        
-        // ============================================================
-        // 3. COMBINE DATA - CHUKUA ZOTE
-        // ============================================================
-        let combinedReports = [];
-        
-        // Add my reports first
-        if (myData.success && myData.data) {
-            combinedReports = combinedReports.concat(myData.data);
+            
+            console.log('📊 Raw reports array length:', reportsArray.length);
+            console.log('📊 Sample report:', reportsArray.length > 0 ? reportsArray[0] : 'No reports');
+            
+            // Filter and process reports
+            reportsData = reportsArray
+                .filter(r => {
+                    // Skip deleted
+                    if (r.is_deleted == 1) return false;
+                    if (r.deleted_by_admin == 1) return false;
+                    if (r.deleted_by_department == 1) return false;
+                    return true;
+                })
+                .map(r => {
+                    // Ensure ID is set
+                    r.id = parseInt(r.id) || parseInt(r.sent_id) || 0;
+                    // Set source_type if not set
+                    if (!r.source_type) r.source_type = 'original';
+                    // Set unviewed flag
+                    if (r._is_unviewed === undefined) {
+                        r._is_unviewed = (r.sent_from_department && 
+                                         r.sent_from_department != DEPARTMENT_ID && 
+                                         (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null));
+                    }
+                    // Ensure title is set
+                    if (!r.title) {
+                        r.title = r.report_title || 'Untitled Report';
+                    }
+                    return r;
+                })
+                .sort((a, b) => (b.id || 0) - (a.id || 0));
+            
+            console.log(`✅ Reports loaded: ${reportsData.length}`);
+            
+            // Log sample for debugging
+            if (reportsData.length > 0) {
+                console.log('📋 Sample reports:', reportsData.slice(0, 5).map(r => ({ 
+                    id: r.id, 
+                    title: r.title, 
+                    source: r.source_type,
+                    from: r.sent_from_department,
+                    to: r.sent_to_department
+                })));
+            }
+            
+        } else {
+            console.warn('⚠️ Failed to fetch reports:', res?.message);
+            reportsData = [];
         }
         
-        // Add reports sent to this department from others
-        if (allData.success && allData.data) {
-            const sentToUs = allData.data.filter(r => 
-                r.sent_to_department == DEPARTMENT_ID && 
-                r.sent_from_department != DEPARTMENT_ID
-            );
-            combinedReports = combinedReports.concat(sentToUs);
-        }
-        
-        // ============================================================
-        // 4. REMOVE DUPLICATES (Kwa ID)
-        // ============================================================
-        const seenIds = new Set();
-        combinedReports = combinedReports.filter(r => {
-            if (seenIds.has(r.id)) return false;
-            seenIds.add(r.id);
-            return true;
-        });
-        
-        // ============================================================
-        // 5. FILTER - ONDOA ZILIZOFUTWA
-        // ============================================================
-        reportsData = combinedReports.filter(r => 
-            (!r.deleted_by_department || r.deleted_by_department != 1) && 
-            (!r.deleted_by_admin || r.deleted_by_admin != 1)
-        ).sort((a, b) => b.id - a.id);
-        
-        console.log(`📊 Total reports loaded: ${reportsData.length}`);
-        console.log(`📋 Reports:`, reportsData.map(r => ({ 
-            id: r.id, 
-            title: r.title, 
-            from: r.sent_from_department, 
-            to: r.sent_to_department,
-            dept: r.department_id
-        })));
-        
-        // ============================================================
-        // 6. HESABU YA UNVIEWED REPORTS
-        // ============================================================
-        unviewedReportsCount = reportsData.filter(r => 
-            r.sent_from_department && 
-            r.sent_from_department != DEPARTMENT_ID && 
-            (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
-            !viewedReportIds.includes(r.id)
-        ).length;
-        
-        console.log(`📊 Unviewed reports: ${unviewedReportsCount}`);
+        // Calculate unviewed count
+        unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
         updateReportBadge();
         
-        // ============================================================
-        // 7. RUDISHA DATA - USIITE loadReports() HAPA!
-        // ============================================================
         return reportsData;
         
     } catch(e) {
@@ -2398,25 +2437,108 @@ async function fetchReports() {
 }
 
 // ============================================================
-// FETCH UPLOADED REPORTS - HAKIKISHA IPO
+// FETCH UPLOADED REPORTS - WITH CACHE BUSTING
 // ============================================================
 
 async function fetchUploadedReports() {
     try {
-        const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`);
-        if (res.success && res.data) {
-            uploadedReportsData = res.data
-                .filter(d => d.is_deleted != 1)
-                .sort((a, b) => b.id - a.id);
-            console.log('📁 Uploaded reports fetched from API:', uploadedReportsData.length);
+        console.log('📡 Fetching uploaded reports...');
+        
+        // ============================================================
+        // WEKA CACHE BUSTING
+        // ============================================================
+        const cacheBuster = `&_t=${Date.now()}`;
+        const url = `get_uploaded_reports.php?department_id=${DEPARTMENT_ID}&all=1${cacheBuster}`;
+        
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(API_BASE + url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        
+        const res = await response.json();
+        console.log('📥 Uploaded reports response:', res);
+        
+        // ============================================================
+        // HAKIKISHA DATA NI ARRAY
+        // ============================================================
+        let reportsArray = [];
+        
+        if (res && res.success) {
+            if (Array.isArray(res.data)) {
+                reportsArray = res.data;
+            } else if (res.data && typeof res.data === 'object') {
+                if (Array.isArray(res.data.reports)) {
+                    reportsArray = res.data.reports;
+                } else if (Array.isArray(res.data.data)) {
+                    reportsArray = res.data.data;
+                } else {
+                    const values = Object.values(res.data);
+                    for (let val of values) {
+                        if (Array.isArray(val)) {
+                            reportsArray = val;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // ============================================================
+            // FILTER REPORTS - ONDOA ZILIZOFUTWA
+            // ============================================================
+            if (Array.isArray(reportsArray) && reportsArray.length > 0) {
+                uploadedReportsData = reportsArray
+                    .filter(d => {
+                        // Hakikisha haijafutwa
+                        if (d.is_deleted == 1) return false;
+                        if (d.deleted_at && d.deleted_at !== null) return false;
+                        
+                        // Angalia kama ni ya department hii au imetumwa kwake
+                        const isOwn = (d.department_id == DEPARTMENT_ID);
+                        const isSentToMe = (d.sent_to_department == DEPARTMENT_ID);
+                        const isFromMe = (d.sent_from_department == DEPARTMENT_ID);
+                        
+                        return isOwn || isSentToMe || isFromMe;
+                    })
+                    .map(d => {
+                        d.id = parseInt(d.id) || 0;
+                        if (!d.source_type) d.source_type = 'original';
+                        return d;
+                    })
+                    .sort((a, b) => (b.id || 0) - (a.id || 0));
+                
+                console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
+            } else {
+                uploadedReportsData = [];
+            }
         } else {
             uploadedReportsData = [];
         }
+        
+        // ============================================================
+        // HESABU UNVIEWED REPORTS
+        // ============================================================
+        unviewedReportsCount = uploadedReportsData.filter(d => {
+            return d.sent_from_department && 
+                   d.sent_from_department != DEPARTMENT_ID && 
+                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        }).length;
+        
+        updateReportBadge();
+        
+        return uploadedReportsData;
+        
     } catch(e) {
-        console.error('❌ API fetch uploaded reports error:', e);
+        console.error('❌ Fetch uploaded reports error:', e);
         uploadedReportsData = [];
+        return [];
     }
-    return uploadedReportsData;
 }
 function markReportViewed(id) { 
     if(!viewedReportIds.includes(id)) { 
@@ -2491,17 +2613,23 @@ function downloadReportFile(fileUrl, fileName) {
 }
 
 // ============================================================
-// ==================== VIEW UPLOADED REPORT - FIXED ====================
+// VIEW UPLOADED REPORT - FIXED (Download + Send Only)
 // ============================================================
 function viewUploadedReportDetail(id) { 
     const doc = uploadedReportsData.find(d => d.id === id); 
     if(doc) { 
-        if(doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && !viewedReportIds.includes(id)) { markReportViewed(id); }
+        // Mark as viewed if received from other department
+        if(doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && !viewedReportIds.includes(id)) { 
+            markReportViewed(id); 
+        }
         
         let filePath = doc.file_path || doc.file_name || '';
         let fileUrl = getFullReportPath(filePath);
         let apiDownloadUrl = API_BASE + 'download_report_document.php?id=' + doc.id;
         
+        // ============================================================
+        // BUILD SEND OPTIONS - ALL DEPARTMENTS EXCEPT OWN
+        // ============================================================
         let deptOptions = ''; 
         allDepartmentsForSend.forEach(d => { 
             if (d.id !== DEPARTMENT_ID) { 
@@ -2510,7 +2638,10 @@ function viewUploadedReportDetail(id) {
         }); 
         
         let fileIcon = getFileIconClass(doc.file_name);
-        let fileIconColor = fileIcon === 'fa-file-pdf' ? 'text-red-500' : (fileIcon === 'fa-file-image' ? 'text-purple-500' : (fileIcon === 'fa-file-word' ? 'text-blue-500' : (fileIcon === 'fa-file-excel' ? 'text-green-500' : 'text-gray-500')));
+        let fileIconColor = fileIcon === 'fa-file-pdf' ? 'text-red-500' : 
+                           (fileIcon === 'fa-file-image' ? 'text-purple-500' : 
+                           (fileIcon === 'fa-file-word' ? 'text-blue-500' : 
+                           (fileIcon === 'fa-file-excel' ? 'text-green-500' : 'text-gray-500')));
         let fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
         let fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
         let uploadedBy = doc.uploaded_by || doc.created_by || 'System';
@@ -2522,12 +2653,16 @@ function viewUploadedReportDetail(id) {
         
         // Sent from badge
         let sentFromHtml = '';
+        let isReceived = false;
         if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
             let deptName = departmentNames[doc.sent_from_department] || 'Unknown';
             sentFromHtml = `<span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> Received from: ${escapeHtml(deptName)}</span>`;
+            isReceived = true;
         }
         
-        // Build the report view - NO SCROLL, CLEAN LAYOUT
+        // ============================================================
+        // BUILD VIEW - Clean layout with Download + Send ONLY
+        // ============================================================
         document.getElementById('viewReportContent').innerHTML = `
             <div class="uploaded-report-view">
                 <!-- Title Section - Juu Kabisa -->
@@ -2579,35 +2714,32 @@ function viewUploadedReportDetail(id) {
             </div>
         `;
         
-        // Action Buttons - Download & Send
+        // ============================================================
+        // ACTION BUTTONS - Download + Send ONLY
+        // ============================================================
         let buttonsHtml = `
-            <button onclick="downloadReportFile('${fileUrl}', '${escapeHtml(fileName)}')" class="btn btn-success">
+            <!-- Download Button -->
+            <button onclick="downloadReportFile('${fileUrl}', '${escapeHtml(fileName)}')" class="btn btn-success" style="background: #10b981; color: white; padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;">
                 <i class="fas fa-download mr-1"></i> Download
             </button>
-            <button onclick="window.open('${apiDownloadUrl}', '_blank')" class="btn btn-primary">
-                <i class="fas fa-cloud-download-alt mr-1"></i> Download (API)
-            </button>
-        `;
-        
-        // Only show send button if not received
-        if (!doc.sent_from_department || doc.sent_from_department == DEPARTMENT_ID) {
-            buttonsHtml += `
-                <div class="send-dropdown">
-                    <button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')">
-                        <i class="fas fa-paper-plane mr-1"></i> Send
-                    </button>
-                    <div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content">
-                        ${deptOptions}
-                    </div>
+            
+            <!-- Send Button (Always show for all uploaded reports) -->
+            <div class="send-dropdown" style="display: inline-block; position: relative;">
+                <button class="dropdown-trigger" onclick="toggleSendDropdown('uploadedReportSendDropdown-${doc.id}')" 
+                        style="background: #8b5cf6; color: white; padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;">
+                    <i class="fas fa-paper-plane mr-1"></i> Send
+                </button>
+                <div id="uploadedReportSendDropdown-${doc.id}" class="send-dropdown-content" 
+                     style="display: none; position: absolute; right: 0; top: 100%; background: #1e293b; min-width: 180px; border-radius: 8px; z-index: 100; border: 1px solid #334155; max-height: 300px; overflow-y: auto; margin-top: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                    ${deptOptions}
                 </div>
-            `;
-        }
+            </div>
+        `;
         
         document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
         openModal('viewReportModal'); 
     } 
 }
-
 function exportUploadedReportToExcel(id) { 
     const doc = uploadedReportsData.find(d => d.id === id); 
     if(doc) { 
@@ -2644,12 +2776,18 @@ function exportAllUploadedReportsToPDF() {
 }
 
 // ============================================================
-// DELETE UPLOADED REPORT - SAFISHA DATA BAADA YA KUFUTA
+// DELETE UPLOADED REPORT - FIXED
 // ============================================================
 
 async function deleteUploadedReport(id) {
-    if (!confirm('Delete this uploaded report?')) return;
+    if (!confirm('Delete this uploaded report permanently?')) return;
     
+    console.log('🗑️ Deleting uploaded report ID:', id);
+    console.log('🗑️ Department ID:', DEPARTMENT_ID);
+    
+    // ============================================================
+    // FIND THE REPORT
+    // ============================================================
     const doc = uploadedReportsData.find(d => d.id === id);
     if (!doc) {
         showToast('Uploaded report not found', true);
@@ -2659,42 +2797,52 @@ async function deleteUploadedReport(id) {
     // ============================================================
     // SHOW LOADING
     // ============================================================
-    const btn = document.querySelector(`#uploaded-report-card-${id} .action-btn.delete`);
+    const card = document.getElementById(`uploaded-report-card-${id}`);
+    const btn = card ? card.querySelector('.action-btn.delete') : null;
     const originalText = btn ? btn.innerHTML : 'Deleting...';
+    
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span>';
         btn.disabled = true;
     }
     
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
     try {
-        // Add to recycle bin
+        // ============================================================
+        // 1. ADD TO RECYCLE BIN
+        // ============================================================
         await addToRecycleBin(id, 'uploaded_report', doc.title);
         
         // ============================================================
-        // DELETE FROM API
+        // 2. DELETE FROM DATABASE
         // ============================================================
-        const res = await apiCall('delete_uploaded_report.php', 'POST', { 
-            id: id, 
-            department_id: DEPARTMENT_ID,
-            deleted_by: CURRENT_USER
+        const res = await apiCall('delete_uploaded_report.php', 'POST', {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'System',
+            is_admin: (DEPARTMENT_ID == 1) ? 1 : 0
         });
         
-        if (res && res.success) {
-            showToast('✅ Uploaded report moved to recycle bin');
-            addLog(`Uploaded report deleted: ${doc.title}`);
-        } else {
-            console.log('⚠️ API delete failed, removing locally');
+        console.log('📤 Delete uploaded report response:', res);
+        
+        // ============================================================
+        // 3. IMMEDIATELY REMOVE FROM ALL LOCAL DATA
+        // ============================================================
+        // Remove from uploadedReportsData
+        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
+        
+        // Remove from any temporary arrays
+        if (window._allUploadedReportsData) {
+            window._allUploadedReportsData = window._allUploadedReportsData.filter(d => d.id !== id);
         }
         
         // ============================================================
-        // REMOVE FROM LOCAL DATA - IMMEDIATELY
+        // 4. IMMEDIATELY REMOVE FROM UI
         // ============================================================
-        uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
-        
-        // ============================================================
-        // REMOVE FROM UI - IMMEDIATELY
-        // ============================================================
-        const card = document.getElementById(`uploaded-report-card-${id}`);
         if (card) {
             card.style.transition = 'opacity 0.3s, transform 0.3s';
             card.style.opacity = '0';
@@ -2706,8 +2854,38 @@ async function deleteUploadedReport(id) {
             }, 300);
         }
         
+        // Also remove any other instances of this card
+        const otherCards = document.querySelectorAll(`[id="uploaded-report-card-${id}"]`);
+        otherCards.forEach(c => {
+            c.style.opacity = '0';
+            setTimeout(() => {
+                if (c.parentNode) c.parentNode.removeChild(c);
+            }, 300);
+        });
+        
         // ============================================================
-        // REFRESH FROM API (BACKGROUND)
+        // 5. UPDATE BADGE
+        // ============================================================
+        unviewedReportsCount = uploadedReportsData.filter(d => {
+            return d.sent_from_department && 
+                   d.sent_from_department != DEPARTMENT_ID && 
+                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        }).length;
+        updateReportBadge();
+        
+        // ============================================================
+        // 6. SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast(`✅ Uploaded report "${doc.title}" deleted successfully`, false);
+        } else {
+            showToast(`⚠️ Uploaded report "${doc.title}" removed from view`, false);
+        }
+        
+        addLog(`Uploaded report deleted: ${doc.title}`);
+        
+        // ============================================================
+        // 7. REFRESH FROM API (BACKGROUND)
         // ============================================================
         setTimeout(async () => {
             await fetchUploadedReports();
@@ -2716,18 +2894,25 @@ async function deleteUploadedReport(id) {
         }, 500);
         
     } catch(e) {
-        console.error('Delete uploaded report error:', e);
+        console.error('❌ Delete uploaded report error:', e);
+        
+        // ============================================================
+        // FALLBACK - Remove locally anyway
+        // ============================================================
         uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
-        const card = document.getElementById(`uploaded-report-card-${id}`);
+        
         if (card) {
             card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
             setTimeout(() => {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 300);
         }
-        showToast('Uploaded report removed from view', false);
+        
+        showToast('⚠️ Uploaded report removed from view', false);
+        
     } finally {
         if (btn) {
             btn.innerHTML = originalText;
@@ -2735,15 +2920,37 @@ async function deleteUploadedReport(id) {
         }
     }
 }
+
+
 // ============================================================
-// LOAD REPORTS - HAKIKISHA INAPANDA DATA KUTOKA API
+// LOAD REPORTS - REDESIGNED
 // ============================================================
 
 async function loadReports(highlightId = null) {
+    console.log('📊 Loading reports...');
+    
     // ============================================================
-    // FETCH REPORTS FROM API - SI LOCAL STORAGE
+    // CLEAR UI FIRST
     // ============================================================
-    await Promise.all([fetchReports(), fetchUploadedReports(), fetchUnviewedCounts()]);
+    const reportsGrid = document.getElementById('reportsGrid');
+    const uploadedGrid = document.getElementById('uploadedReportsGrid');
+    
+    if (reportsGrid) {
+        reportsGrid.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i> Loading reports...</div>';
+    }
+    if (uploadedGrid) {
+        uploadedGrid.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i> Loading uploaded reports...</div>';
+    }
+    
+    // ============================================================
+    // FETCH FRESH DATA
+    // ============================================================
+    await fetchReports();
+    await fetchUploadedReports();
+    await fetchUnviewedCounts();
+
+    console.log('📊 Reports Data:', reportsData.length);
+    console.log('📊 Uploaded Reports Data:', uploadedReportsData.length);
 
     // ============================================================
     // BUILD HTML - TAB CONTAINER
@@ -2751,10 +2958,12 @@ async function loadReports(highlightId = null) {
     let html = `
         <div class="tab-container">
             <button class="tab-button ${currentReportTab === 'added' ? 'active' : ''}" onclick="switchReportTab('added')">
-                <i class="fas fa-plus-circle mr-1"></i> Added Reports <span class="tab-count">${reportsData.length}</span>
+                <i class="fas fa-plus-circle mr-1"></i> Added Reports 
+                <span class="tab-count">${reportsData.length}</span>
             </button>
             <button class="tab-button ${currentReportTab === 'uploaded' ? 'active' : ''}" onclick="switchReportTab('uploaded')">
-                <i class="fas fa-upload mr-1"></i> Uploaded Reports <span class="tab-count">${uploadedReportsData.length}</span>
+                <i class="fas fa-upload mr-1"></i> Uploaded Reports 
+                <span class="tab-count">${uploadedReportsData.length}</span>
             </button>
         </div>
     `;
@@ -2776,12 +2985,6 @@ async function loadReports(highlightId = null) {
                     <button onclick="openGenerateReportModal()" class="btn-cyan">
                         <i class="fas fa-chart-line mr-1"></i> Generate
                     </button>
-                    <button onclick="exportAllReportsToExcel()" class="btn-success">
-                        <i class="fas fa-file-excel mr-1"></i> Excel All
-                    </button>
-                    <button onclick="exportAllReportsToPDF()" class="btn-danger">
-                        <i class="fas fa-file-pdf mr-1"></i> PDF All
-                    </button>
                 </div>
             </div>
             <div class="reports-grid" id="reportsGrid"></div>
@@ -2793,7 +2996,8 @@ async function loadReports(highlightId = null) {
             document.getElementById('reportsGrid').innerHTML = `
                 <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
                     <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
-                    <p>No reports found. Click "Add Report" to create one.</p>
+                    <p class="text-sm">No added reports found</p>
+                    <p class="text-xs mt-1">Click "Add Report" to create your first report</p>
                 </div>
             `;
             return;
@@ -2801,7 +3005,10 @@ async function loadReports(highlightId = null) {
 
         let reportsHtml = '';
         for (let r of reportsData) {
-            // Check if report is unviewed
+            if (r.is_deleted == 1) continue;
+            if (r.deleted_by_admin == 1) continue;
+            if (r.deleted_by_department == 1) continue;
+            
             const isUnviewed = r.sent_from_department && 
                 r.sent_from_department != DEPARTMENT_ID && 
                 (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
@@ -2812,18 +3019,25 @@ async function loadReports(highlightId = null) {
             
             let shortContent = (r.content || '').substring(0, 100) + ((r.content || '').length > 100 ? '...' : '');
             
-            // Source department badge
             let sourceBadge = '';
+            let sourceDeptName = 'System';
             if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
-                const deptName = departmentNames[r.sent_from_department] || 'Unknown';
+                sourceDeptName = departmentNames[r.sent_from_department] || 'Unknown';
                 sourceBadge = `
                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
                         <i class="fas fa-paper-plane text-[8px]"></i>
-                        ${escapeHtml(deptName)}
+                        ${escapeHtml(sourceDeptName)}
                     </span>
                 `;
+            } else if (r.created_by) {
+                sourceDeptName = r.created_by;
             }
 
+            const isOwner = r.department_id == DEPARTMENT_ID;
+
+            // ============================================================
+            // CARD BUTTONS: View + Delete ONLY (Excel, PDF, Send inside View)
+            // ============================================================
             reportsHtml += `
                 <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
                      id="report-card-${r.id}" 
@@ -2852,35 +3066,40 @@ async function loadReports(highlightId = null) {
                             ${escapeHtml(shortContent)}
                         </div>
                         
+                        <!-- ============================================================
+                             CARD BUTTONS: View + Delete ONLY
+                             ============================================================ -->
                         <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
                             <button onclick="event.stopPropagation(); viewReportDetails(${r.id})" class="action-btn view">
                                 <i class="fas fa-eye"></i> View
                             </button>
-                            <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
-                                <i class="fas fa-edit"></i> Edit
-                            </button>
-                            <button onclick="event.stopPropagation(); deleteReportItem(${r.id})" class="action-btn delete">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
+                            ${isOwner ? `
+                                <button onclick="event.stopPropagation(); editReport(${r.id})" class="action-btn edit">
+                                    <i class="fas fa-edit"></i> Edit
+                                </button>
+                                <button onclick="event.stopPropagation(); deleteReportItem(${r.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            ` : `
+                                <button onclick="event.stopPropagation(); deleteReportItem(${r.id})" class="action-btn delete">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            `}
+                        </div>
+                        
+                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
+                            Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)}
+                            ${r.sent_from_department ? ` | Received from: ${escapeHtml(departmentNames[r.sent_from_department] || 'Unknown')}` : ''}
                         </div>
                     </div>
                 </div>
             `;
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
-
-        // Highlight if needed
-        if (highlightId) {
-            const el = document.getElementById(`report-card-${highlightId}`);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                setTimeout(() => el.classList.remove('search-highlight'), 3000);
-            }
-        }
     }
 
     // ============================================================
-    // UPLOADED REPORTS TAB
+    // UPLOADED REPORTS TAB (Sent Reports)
     // ============================================================
     else {
         html += `
@@ -2892,12 +3111,6 @@ async function loadReports(highlightId = null) {
                 <div class="flex gap-2 flex-wrap">
                     <button onclick="openUploadReportModal()" class="btn-warning">
                         <i class="fas fa-upload mr-1"></i> Upload Report
-                    </button>
-                    <button onclick="exportAllUploadedReportsToExcel()" class="btn-success">
-                        <i class="fas fa-file-excel mr-1"></i> Excel All
-                    </button>
-                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger">
-                        <i class="fas fa-file-pdf mr-1"></i> PDF All
                     </button>
                 </div>
             </div>
@@ -2918,7 +3131,8 @@ async function loadReports(highlightId = null) {
 
         let reportsHtml = '';
         for (let doc of uploadedReportsData) {
-            // Check if uploaded report is unviewed
+            if (doc.is_deleted == 1) continue;
+            
             const isUnviewed = doc.sent_from_department && 
                 doc.sent_from_department != DEPARTMENT_ID && 
                 !viewedReportIds.includes(doc.id);
@@ -2934,18 +3148,25 @@ async function loadReports(highlightId = null) {
             else if (fileIcon === 'fa-file-excel') fileIconColor = 'text-green-500';
             else fileIconColor = 'text-gray-500';
 
-            // Source department badge
             let sourceBadge = '';
+            let sourceDeptName = 'System';
             if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-                const deptName = departmentNames[doc.sent_from_department] || 'Unknown';
+                sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown';
                 sourceBadge = `
                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
                         <i class="fas fa-paper-plane text-[8px]"></i>
-                        ${escapeHtml(deptName)}
+                        ${escapeHtml(sourceDeptName)}
                     </span>
                 `;
+            } else if (doc.uploaded_by) {
+                sourceDeptName = doc.uploaded_by;
             }
 
+            const isOwner = doc.department_id == DEPARTMENT_ID;
+
+            // ============================================================
+            // CARD BUTTONS: View + Delete ONLY
+            // ============================================================
             reportsHtml += `
                 <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
                      id="uploaded-report-card-${doc.id}" 
@@ -2975,6 +3196,9 @@ async function loadReports(highlightId = null) {
                             ${escapeHtml(doc.description || 'No description')}
                         </p>
                         
+                        <!-- ============================================================
+                             CARD BUTTONS: View + Delete ONLY
+                             ============================================================ -->
                         <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
                             <button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view">
                                 <i class="fas fa-eye"></i> View
@@ -2983,20 +3207,16 @@ async function loadReports(highlightId = null) {
                                 <i class="fas fa-trash"></i> Delete
                             </button>
                         </div>
+                        
+                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
+                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${formatDateTime(doc.created_at)}
+                            ${doc.sent_from_department ? ` | Received from: ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}` : ''}
+                        </div>
                     </div>
                 </div>
             `;
         }
         document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
-
-        // Highlight if needed
-        if (highlightId) {
-            const el = document.getElementById(`uploaded-report-card-${highlightId}`);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                setTimeout(() => el.classList.remove('search-highlight'), 3000);
-            }
-        }
     }
 
     // ============================================================
@@ -3007,24 +3227,125 @@ async function loadReports(highlightId = null) {
 
 function switchReportTab(tab) { currentReportTab = tab; loadReports(); }
 
-function viewReportDetails(id) { 
-    const r = reportsData.find(report => report.id === id); 
-    if(r) { 
-        if(r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(id)) { 
-            markReportViewed(id); 
-        }
-        let deptOptions = ''; 
-        allDepartmentsForSend.forEach(d => { 
-            if (d.id !== DEPARTMENT_ID) { 
-                deptOptions += `<a onclick="sendReportToDept(${r.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-2"></i> ${escapeHtml(d.name)}</a>`; 
-            } 
-        }); 
-        document.getElementById('viewReportContent').innerHTML = `<div class="bg-green-100 dark:bg-green-900 p-3 rounded mb-3"><strong>${escapeHtml(r.title)}</strong><span class="float-right">${r.period}</span></div><div class="generated-report whitespace-pre-wrap">${escapeHtml(r.content || 'No content available')}</div><div class="text-[10px] text-gray-400 mt-2">Created by: ${escapeHtml(r.created_by || 'System')} on ${formatDateTime(r.created_at)} | Status: ${r.status === 'sent' ? 'Sent' : 'Draft'}</div>`; 
-        document.getElementById('viewReportButtons').innerHTML = `<button onclick="exportSingleReportExcel(${r.id})" class="btn-success">Excel</button><button onclick="exportSingleReportPDF(${r.id})" class="btn-danger">PDF</button><div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')"><i class="fas fa-paper-plane mr-1"></i> Send Report</button><div id="reportSendDropdown-${r.id}" class="send-dropdown-content">${deptOptions}</div></div>`; 
-        openModal('viewReportModal'); 
-    } 
-}
+// ============================================================
+// VIEW REPORT DETAILS - REDESIGNED
+// ============================================================
 
+function viewReportDetails(id) {
+    const r = reportsData.find(report => report.id === id);
+    if (!r) {
+        showToast('Report not found', true);
+        return;
+    }
+    
+    // Mark as viewed if received from other department
+    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+        (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+        !viewedReportIds.includes(id)) {
+        markReportViewed(id);
+    }
+    
+    // ============================================================
+    // BUILD SEND OPTIONS
+    // ============================================================
+    let deptOptions = '';
+    allDepartmentsForSend.forEach(d => {
+        if (d.id !== DEPARTMENT_ID) {
+            deptOptions += `<a onclick="sendReportToDept(${r.id}, ${d.id})" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ${d.icon} mr-2"></i> ${escapeHtml(d.name)}</a>`;
+        }
+    });
+
+    // ============================================================
+    // STATUS STYLES
+    // ============================================================
+    const statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+    const statusColor = r.status === 'sent' ? '#10b981' : '#f59e0b';
+    const statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+
+    const sourceDept = r.sent_from_department ? departmentNames[r.sent_from_department] || 'Unknown' : 'This Department';
+    const isReceived = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID;
+
+    // ============================================================
+    // BUILD CONTENT HTML
+    // ============================================================
+    const contentHtml = `
+        <div style="padding: 5px 0;">
+            <!-- HEADER -->
+            <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 20px 24px; border-radius: 12px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="font-size: 20px; font-weight: 700; margin: 0;">${escapeHtml(r.title)}</h3>
+                        <p style="font-size: 12px; opacity: 0.85; margin: 4px 0 0;">
+                            <i class="fas fa-calendar-alt mr-1"></i> ${r.period} report
+                            ${isReceived ? ` · <i class="fas fa-paper-plane mr-1"></i> Received from ${escapeHtml(sourceDept)}` : ''}
+                        </p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;">${statusText}</span>
+                        <span style="background: rgba(255,255,255,0.2); padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;">#${r.id}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- METADATA -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #f8fafc; border-radius: 10px; padding: 15px 18px; margin-bottom: 18px; border: 1px solid #e5e7eb;">
+                <div>
+                    <p style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">Created By</p>
+                    <p style="font-size: 13px; font-weight: 500; margin: 2px 0 0; color: #1e293b;">${escapeHtml(r.created_by || 'System')}</p>
+                </div>
+                <div>
+                    <p style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">Created At</p>
+                    <p style="font-size: 13px; font-weight: 500; margin: 2px 0 0; color: #1e293b;">${formatDateTime(r.created_at)}</p>
+                </div>
+                <div>
+                    <p style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">Period</p>
+                    <p style="font-size: 13px; font-weight: 500; margin: 2px 0 0; color: #1e293b;">${r.period}</p>
+                </div>
+                <div>
+                    <p style="font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">Status</p>
+                    <p style="font-size: 13px; font-weight: 500; margin: 2px 0 0; color: #1e293b;">
+                        <span style="background: ${statusBg}; color: ${statusColor}; padding: 2px 12px; border-radius: 20px; font-size: 11px;">${statusText}</span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- CONTENT -->
+            <div style="background: #f1f5f9; border-radius: 10px; padding: 18px 20px; border: 1px solid #e2e8f0; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 14px; line-height: 1.8; color: #1e293b;">
+                ${escapeHtml(r.content || 'No content available')}
+            </div>
+
+            <!-- FOOTER -->
+            ${r.updated_by ? `
+            <div style="margin-top: 12px; font-size: 10px; color: #94a3b8; text-align: right; border-top: 1px solid #e5e7eb; padding-top: 8px;">
+                <i class="fas fa-edit mr-1"></i> Updated by: ${escapeHtml(r.updated_by)} on ${formatDateTime(r.updated_at)}
+            </div>` : ''}
+        </div>
+    `;
+
+    // ============================================================
+    // SET CONTENT AND BUTTONS
+    // ============================================================
+    document.getElementById('viewReportContent').innerHTML = contentHtml;
+    
+    document.getElementById('viewReportButtons').innerHTML = `
+        <button onclick="exportSingleReportExcel(${r.id})" class="btn-success" style="background:#10b981; color:white; padding:8px 18px; border-radius:8px; font-size:13px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+            <i class="fas fa-file-excel"></i> Excel
+        </button>
+        <button onclick="exportSingleReportPDF(${r.id})" class="btn-danger" style="background:#ef4444; color:white; padding:8px 18px; border-radius:8px; font-size:13px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+            <i class="fas fa-file-pdf"></i> PDF
+        </button>
+        <div class="send-dropdown" style="display:inline-block; position:relative;">
+            <button class="dropdown-trigger" onclick="toggleSendDropdown('reportSendDropdown-${r.id}')" style="background:#8b5cf6; color:white; padding:8px 18px; border-radius:8px; font-size:13px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                <i class="fas fa-paper-plane"></i> Send
+            </button>
+            <div id="reportSendDropdown-${r.id}" class="send-dropdown-content" style="display:none; position:absolute; right:0; top:100%; background:#1e293b; min-width:200px; border-radius:8px; z-index:100; border:1px solid #334155; max-height:300px; overflow-y:auto; margin-top:5px; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+                ${deptOptions}
+            </div>
+        </div>
+    `;
+    
+    openModal('viewReportModal');
+}
 // ============================================================
 // SEND REPORT - INARUHUSU FORWARDING (ONDOA KIZUIZI)
 // ============================================================
@@ -3807,6 +4128,8 @@ async function loadReportsFromAPI() {
 
 function editReport(id) { const r = reportsData.find(report => report.id === id); if(r) { document.getElementById('reportId').value = r.id; document.getElementById('reportTitle').value = r.title; document.getElementById('reportPeriod').value = r.period; document.getElementById('reportContent').value = r.content; openModal('addReportModal'); } }
 function openGenerateReportModal() { document.getElementById('genReportTitle').value = ''; document.getElementById('genPeriodType').value = 'daily'; openModal('generateReportModal'); }
+
+
 // ============================================================
 // DELETE REPORT - SAFISHA DATA BAADA YA KUFUTA
 // ============================================================
@@ -3823,44 +4146,53 @@ async function deleteReportItem(id) {
     // ============================================================
     // SHOW LOADING
     // ============================================================
-    const btn = document.querySelector(`#report-card-${id} .action-btn.delete`);
+    const card = document.getElementById(`report-card-${id}`);
+    const btn = card ? card.querySelector('.action-btn.delete') : null;
     const originalText = btn ? btn.innerHTML : 'Deleting...';
+    
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span>';
         btn.disabled = true;
     }
     
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+    }
+    
     try {
         // ============================================================
-        // DELETE FROM API
+        // 1. ADD TO RECYCLE BIN
+        // ============================================================
+        await addToRecycleBin(id, 'report', r.title);
+        
+        // ============================================================
+        // 2. DELETE FROM DATABASE
         // ============================================================
         const res = await apiCall('delete_report.php', 'POST', {
             report_id: id,
             department_id: DEPARTMENT_ID,
             deleted_by_department: 1,
-            deleted_by_admin: 0
+            deleted_by_admin: 0,
+            deleted_by: CURRENT_USER || 'System'
         });
         
-        if (res && res.success) {
-            // Add to recycle bin
-            await addToRecycleBin(id, 'report', r.title);
-            
-            showToast('✅ Report moved to recycle bin');
-            addLog(`Report deleted: ${r.title}`);
-            
-        } else {
-            console.log('⚠️ API delete failed, but removing locally');
+        console.log('📤 Delete report response:', res);
+        
+        // ============================================================
+        // 3. IMMEDIATELY REMOVE FROM ALL LOCAL DATA
+        // ============================================================
+        // Remove from reportsData
+        reportsData = reportsData.filter(report => report.id !== id);
+        
+        // Remove from any temporary arrays
+        if (window._allReportsData) {
+            window._allReportsData = window._allReportsData.filter(report => report.id !== id);
         }
         
         // ============================================================
-        // REMOVE FROM LOCAL DATA - IMMEDIATELY
+        // 4. IMMEDIATELY REMOVE FROM UI
         // ============================================================
-        reportsData = reportsData.filter(report => report.id !== id);
-        
-        // ============================================================
-        // REMOVE FROM UI - IMMEDIATELY
-        // ============================================================
-        const card = document.getElementById(`report-card-${id}`);
         if (card) {
             card.style.transition = 'opacity 0.3s, transform 0.3s';
             card.style.opacity = '0';
@@ -3872,13 +4204,38 @@ async function deleteReportItem(id) {
             }, 300);
         }
         
+        // Also remove any other instances of this card
+        const otherCards = document.querySelectorAll(`[id="report-card-${id}"]`);
+        otherCards.forEach(c => {
+            c.style.opacity = '0';
+            setTimeout(() => {
+                if (c.parentNode) c.parentNode.removeChild(c);
+            }, 300);
+        });
+        
         // ============================================================
-        // UPDATE BADGE
+        // 5. UPDATE BADGE
         // ============================================================
+        unviewedReportsCount = reportsData.filter(r => {
+            return r.sent_from_department && 
+                   r.sent_from_department != DEPARTMENT_ID && 
+                   (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        }).length;
         updateReportBadge();
         
         // ============================================================
-        // REFRESH FROM API (BACKGROUND)
+        // 6. SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast(`✅ Report "${r.title}" deleted successfully`, false);
+        } else {
+            showToast(`⚠️ Report "${r.title}" removed from view`, false);
+        }
+        
+        addLog(`Report deleted: ${r.title}`);
+        
+        // ============================================================
+        // 7. REFRESH FROM API (BACKGROUND)
         // ============================================================
         setTimeout(async () => {
             await fetchReports();
@@ -3887,19 +4244,25 @@ async function deleteReportItem(id) {
         }, 500);
         
     } catch(e) {
-        console.error('Delete report error:', e);
-        // Remove locally anyway
+        console.error('❌ Delete report error:', e);
+        
+        // ============================================================
+        // FALLBACK - Remove locally anyway
+        // ============================================================
         reportsData = reportsData.filter(report => report.id !== id);
-        const card = document.getElementById(`report-card-${id}`);
+        
         if (card) {
             card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
             setTimeout(() => {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 300);
         }
-        showToast('Report removed from view', false);
+        
+        showToast('⚠️ Report removed from view', false);
+        
     } finally {
         if (btn) {
             btn.innerHTML = originalText;
@@ -3907,6 +4270,7 @@ async function deleteReportItem(id) {
         }
     }
 }
+
 // ============================================================
 // FETCH DAILY WORK - ONGEZA HII FUNCTION
 // ============================================================
