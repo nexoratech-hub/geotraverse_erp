@@ -1019,9 +1019,203 @@ async function loadMyTransactions(highlightId = null) {
 }
 
 
-function viewTransaction(id) { const t = myTransactions.find(t => t.id === id); if(t) { document.getElementById('viewTransContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${formatDateTime(t.transaction_date)}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> <span class="font-bold text-green-600">${formatMoney(t.amount)}</span></p><p><strong>Paid:</strong> ${formatMoney(t.paid_amount || 0)}</p><p><strong>Pending:</strong> ${formatMoney((parseFloat(t.amount)||0) - (parseFloat(t.paid_amount)||0))}</p><p><strong>Status:</strong> ${t.status}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p><div class="user-info pt-2 mt-2 border-t">Created by: ${escapeHtml(t.created_by || 'System')} on ${formatDateTime(t.created_at)}</div></div>`; openModal('viewTransModal'); } }
-function editTransaction(id) { const t = myTransactions.find(t => t.id === id); if(t) { document.getElementById('transId').value = t.id; document.getElementById('transType').value = t.type; document.getElementById('transSource').value = t.source; document.getElementById('transAmount').value = formatNumberWithCommas(t.amount); document.getElementById('transDate').value = t.transaction_date; document.getElementById('transStatus').value = t.status; document.getElementById('transPaidAmount').value = formatNumberWithCommas(t.paid_amount || 0); document.getElementById('transDesc').value = t.description || ''; const partialGroup = document.getElementById('partialPaidGroup'); if(partialGroup) partialGroup.style.display = t.status === 'partial' ? 'block' : 'none'; openModal('transModal'); } }
-async function saveTransaction() { let id = document.getElementById('transId').value; let status = document.getElementById('transStatus').value; let paidAmount = parseAmount(document.getElementById('transPaidAmount').value); let amount = parseAmount(document.getElementById('transAmount').value); if (status === 'partial' && paidAmount <= 0) { showToast('Please enter partial paid amount', true); return; } if (status === 'partial' && paidAmount > amount) { showToast('Paid amount cannot exceed total amount', true); return; } let data = { type: document.getElementById('transType').value, source: document.getElementById('transSource').value, amount: amount, transaction_date: document.getElementById('transDate').value || new Date().toISOString().split('T')[0], status: status, description: document.getElementById('transDesc').value, department_id: DEPARTMENT_ID, created_by: CURRENT_USER }; if (status === 'partial') data.paid_amount = paidAmount; else data.paid_amount = amount; if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } let res = id ? await apiCall('update_transaction.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_transaction.php','POST',data); if(res.success) { showToast(id ? 'Transaction updated' : 'Transaction added'); addLog(id ? `Transaction updated: ${data.source}` : `Transaction added: ${data.source}`); closeModal('transModal'); loadMyTransactions(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
+// ============================================================
+// VIEW TRANSACTION - FIXED
+// ============================================================
+function viewTransaction(id) {
+    // Tafuta transaction katika myTransactions
+    let t = myTransactions.find(t => t.id === id);
+    
+    // Kama haipo, tafuta katika allTransactionsData
+    if (!t && typeof allTransactionsData !== 'undefined') {
+        t = allTransactionsData.find(t => t.id === id);
+    }
+    
+    // Kama bado haipo, tafuta transaction yoyote
+    if (!t) {
+        const allTrans = [...myTransactions, ...(allTransactionsData || [])];
+        t = allTrans.find(t => t.id === id);
+    }
+    
+    if (!t) {
+        showToast('Transaction not found', true);
+        return;
+    }
+    
+    // Ensure all fields exist
+    const amount = parseFloat(t.amount) || 0;
+    const paid = parseFloat(t.paid_amount) || 0;
+    const pending = amount - paid;
+    const deptName = departmentNames[t.department_id] || t.department_name || 'Unknown';
+    
+    document.getElementById('viewTransContent').innerHTML = `
+        <div class="space-y-2">
+            <div class="bg-gradient-to-r from-green-600 to-green-800 text-white p-3 rounded-lg">
+                <h3 class="text-lg font-bold">Transaction Details</h3>
+                <p class="text-xs opacity-90 mt-1">Transaction ID: #${t.id}</p>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+                <div><strong>Date:</strong></div><div>${formatDateTime(t.transaction_date)}</div>
+                <div><strong>Type:</strong></div><div><span class="status-badge ${t.type === 'income' ? 'income-badge' : 'expense-badge'}">${t.type}</span></div>
+                <div><strong>Department:</strong></div><div>${escapeHtml(deptName)}</div>
+                <div><strong>Source:</strong></div><div class="font-medium">${escapeHtml(t.source)}</div>
+                <div><strong>Amount:</strong></div><div><span class="font-bold text-green-600">${formatMoney(amount)}</span></div>
+                <div><strong>Paid:</strong></div><div>${formatMoney(paid)}</div>
+                <div><strong>Pending:</strong></div><div class="${pending > 0 ? 'text-amber-600 font-bold' : 'text-green-600'}">${formatMoney(pending)}</div>
+                <div><strong>Status:</strong></div><div><span class="status-badge ${t.status === 'paid' ? 'status-paid' : t.status === 'partial' ? 'status-partial' : 'status-pending'}">${t.status}</span></div>
+                <div class="col-span-2"><strong>Description:</strong></div>
+                <div class="col-span-2">${escapeHtml(t.description || '-')}</div>
+            </div>
+            <div class="user-info-line mt-2 pt-2 border-t">
+                <i class="fas fa-user-plus text-xs mr-1"></i> Created by: ${escapeHtml(t.created_by || 'System')} on ${formatDateTime(t.created_at)}
+                ${t.updated_by ? `<br><i class="fas fa-edit text-xs mr-1"></i> Updated by: ${escapeHtml(t.updated_by)} on ${formatDateTime(t.updated_at)}` : ''}
+            </div>
+        </div>
+    `;
+    openModal('viewTransModal');
+}
+
+// ============================================================
+// EDIT TRANSACTION - FIXED
+// ============================================================
+function editTransaction(id) {
+    // Tafuta transaction katika myTransactions
+    let t = myTransactions.find(t => t.id === id);
+    
+    // Kama haipo, tafuta katika allTransactionsData
+    if (!t && typeof allTransactionsData !== 'undefined') {
+        t = allTransactionsData.find(t => t.id === id);
+    }
+    
+    // Kama bado haipo
+    if (!t) {
+        const allTrans = [...myTransactions, ...(allTransactionsData || [])];
+        t = allTrans.find(t => t.id === id);
+    }
+    
+    if (!t) {
+        showToast('Transaction not found', true);
+        return;
+    }
+    
+    // Fill the modal
+    document.getElementById('transId').value = t.id;
+    document.getElementById('transType').value = t.type;
+    document.getElementById('transSource').value = t.source;
+    document.getElementById('transAmount').value = formatNumberWithCommas(t.amount);
+    document.getElementById('transDate').value = t.transaction_date;
+    document.getElementById('transStatus').value = t.status;
+    document.getElementById('transPaidAmount').value = formatNumberWithCommas(t.paid_amount || 0);
+    document.getElementById('transDesc').value = t.description || '';
+    
+    const partialGroup = document.getElementById('partialPaidGroup');
+    if (partialGroup) {
+        partialGroup.style.display = t.status === 'partial' ? 'block' : 'none';
+    }
+    
+    openModal('transModal');
+}
+
+// ============================================================
+// SAVE TRANSACTION - FIXED (No duplicate messages)
+// ============================================================
+async function saveTransaction() {
+    let id = document.getElementById('transId').value;
+    let type = document.getElementById('transType').value;
+    let source = document.getElementById('transSource').value.trim();
+    let amount = parseAmount(document.getElementById('transAmount').value);
+    let transaction_date = document.getElementById('transDate').value || new Date().toISOString().split('T')[0];
+    let status = document.getElementById('transStatus').value;
+    let paidAmount = parseAmount(document.getElementById('transPaidAmount').value);
+    let description = document.getElementById('transDesc').value.trim();
+    
+    // Validation
+    if (!source) { showToast('Source is required', true); return; }
+    if (amount <= 0) { showToast('Amount must be greater than 0', true); return; }
+    
+    if (status === 'partial' && paidAmount <= 0) {
+        showToast('Please enter partial paid amount', true);
+        return;
+    }
+    if (status === 'partial' && paidAmount > amount) {
+        showToast('Paid amount cannot exceed total amount', true);
+        return;
+    }
+    
+    // Build data
+    let data = {
+        type: type,
+        source: source,
+        amount: amount,
+        transaction_date: transaction_date,
+        status: status,
+        description: description,
+        department_id: DEPARTMENT_ID,
+        created_by: CURRENT_USER
+    };
+    
+    if (status === 'partial') {
+        data.paid_amount = paidAmount;
+    } else if (status === 'paid') {
+        data.paid_amount = amount;
+    } else {
+        data.paid_amount = 0;
+    }
+    
+    const sendBtn = document.querySelector('#transModal .btn-primary');
+    const originalText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+    sendBtn.disabled = true;
+    
+    try {
+        let res;
+        if (id) {
+            // Update existing transaction
+            res = await apiCall('update_transaction.php', 'POST', {
+                ...data,
+                id: parseInt(id),
+                updated_by: CURRENT_USER
+            });
+        } else {
+            // Add new transaction
+            res = await apiCall('add_transaction.php', 'POST', data);
+        }
+        
+        if (res && res.success) {
+            // Show only ONE success message
+            showToast(id ? '✅ Transaction updated' : '✅ Transaction added', false);
+            addLog(id ? `Transaction updated: ${source}` : `Transaction added: ${source}`);
+            closeModal('transModal');
+            
+            // Reset form
+            document.getElementById('transId').value = '';
+            document.getElementById('transSource').value = '';
+            document.getElementById('transAmount').value = '';
+            document.getElementById('transPaidAmount').value = '';
+            document.getElementById('transDesc').value = '';
+            
+            // Refresh data
+            await loadAllTransactions();
+            await loadAllTransactionsForDashboard();
+            await loadMyTransactions();
+            
+            // Refresh dashboard without chart error
+            await loadDashboard();
+            
+        } else {
+            showToast(res?.message || 'Failed to save transaction', true);
+        }
+    } catch(e) {
+        console.error('Save transaction error:', e);
+        showToast('❌ Network error: ' + e.message, true);
+    } finally {
+        sendBtn.innerHTML = originalText;
+        sendBtn.disabled = false;
+    }
+}
+
+
+
 async function deleteTransaction(id) { if(confirm('Delete this transaction? It will be moved to recycle bin.')) { const t = myTransactions.find(t => t.id === id); if(t) await addToRecycleBin(id, 'transaction', t.source); let res = await apiCall('delete_transaction.php','POST',{id:parseInt(id),is_deleted:1}); if(res.success) { showToast('Transaction moved to recycle bin'); addLog(`Transaction deleted: ${t?.source}`); loadMyTransactions(); loadDashboard(); } else showToast(res.message || 'Failed', true); } }
 function exportMyTransactionsToExcel() { let ws = [['Date','Type','Source','Amount','Paid','Pending','Status','Description','Created By']]; myTransactions.forEach(t => { let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0, pending = amount - paid; ws.push([formatDate(t.transaction_date), t.type, t.source, amount, paid, pending, t.status, t.description||'', t.created_by||'System']); }); let wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Transactions'); XLSX.writeFile(wb, `my_transactions_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Exported'); }
 
@@ -4139,7 +4333,7 @@ async function saveUploadedReport() {
 }
 
 // ============================================================
-// ==================== LOAD DASHBOARD - COMPLETE ====================
+// LOAD DASHBOARD - COMPLETE (With safe chart handling)
 // ============================================================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading dashboard...</span></div>';
@@ -4203,20 +4397,6 @@ async function loadDashboard() {
     // REPORTS STATS
     // ============================================================
     let totalReports = reportsData.length + uploadedReportsData.length;
-    
-    // ============================================================
-    // DEBUG - CHECK TRANSACTION #147
-    // ============================================================
-    const trans147 = allTransactionsData.find(t => t.id === 147);
-    if (trans147) {
-        console.log('✅ Transaction #147 found:', trans147);
-        console.log('   - Source:', trans147.source);
-        console.log('   - Amount:', trans147.amount);
-        console.log('   - Department:', trans147.department_id);
-        console.log('   - Department Name:', departmentNames[trans147.department_id] || 'Unknown');
-    } else {
-        console.warn('⚠️ Transaction #147 not found in allTransactionsData');
-    }
     
     // ============================================================
     // RENDER DASHBOARD
@@ -4358,52 +4538,101 @@ async function loadDashboard() {
     `;
     
     // ============================================================
-    // RENDER TRANSACTION CHART (Pie Chart)
+    // RENDER TRANSACTION CHART - SAFELY (No destroy error)
     // ============================================================
-    const ctx2 = document.getElementById('transactionChart')?.getContext('2d');
-    if(ctx2) { 
-        if(window.transactionChart) window.transactionChart.destroy(); 
-        window.transactionChart = new Chart(ctx2, { 
-            type:'doughnut', 
-            data:{ 
-                labels:['Income', 'Expenses', 'Profit'], 
-                datasets:[{ 
-                    data:[
-                        totalIncome > 0 ? totalIncome : 1,
-                        totalExpense > 0 ? totalExpense : 1,
-                        netProfit > 0 ? netProfit : 1
-                    ], 
-                    backgroundColor:['#10b981', '#ef4444', '#3b82f6'],
-                    borderWidth: 0
-                }] 
-            }, 
-            options:{ 
-                responsive:true, 
-                maintainAspectRatio:true,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            boxWidth: 12,
-                            font: { size: 10 }
+    setTimeout(() => {
+        try {
+            const canvas = document.getElementById('transactionChart');
+            if (!canvas) {
+                console.log('⚠️ transactionChart canvas not found');
+                return;
+            }
+            
+            const ctx2 = canvas.getContext('2d');
+            if (!ctx2) {
+                console.log('⚠️ Could not get canvas context');
+                return;
+            }
+            
+            // Destroy existing chart instance safely
+            if (window.transactionChart) {
+                try {
+                    if (typeof window.transactionChart.destroy === 'function') {
+                        window.transactionChart.destroy();
+                        console.log('✅ Chart destroyed successfully');
+                    } else {
+                        console.log('⚠️ transactionChart.destroy is not a function, clearing reference');
+                    }
+                } catch(e) {
+                    console.log('⚠️ Chart destroy error:', e.message);
+                }
+                window.transactionChart = null;
+            }
+            
+            // Create new chart
+            window.transactionChart = new Chart(ctx2, { 
+                type: 'doughnut', 
+                data: { 
+                    labels: ['Income', 'Expenses', 'Profit'], 
+                    datasets: [{ 
+                        data: [
+                            totalIncome > 0 ? totalIncome : 1,
+                            totalExpense > 0 ? totalExpense : 1,
+                            netProfit > 0 ? netProfit : 1
+                        ], 
+                        backgroundColor: ['#10b981', '#ef4444', '#3b82f6'],
+                        borderWidth: 0
+                    }] 
+                }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                font: { size: 10 }
+                            }
                         }
                     }
-                }
-            } 
-        }); 
-    }
+                } 
+            });
+            console.log('✅ Transaction chart created successfully');
+            
+        } catch(chartError) {
+            console.error('❌ Chart creation error:', chartError.message);
+            window.transactionChart = null;
+        }
+    }, 150);
 }
-
 // ============================================================
-// ==================== REFRESH DASHBOARD ====================
+// REFRESH DASHBOARD - FIXED
 // ============================================================
 async function refreshDashboard() {
     showToast('🔄 Refreshing data...', false);
-    await loadAllTransactions();
-    await loadDashboard();
-    showToast('✅ Dashboard refreshed', false);
+    try {
+        // Destroy chart safely before refresh
+        if (window.transactionChart && typeof window.transactionChart.destroy === 'function') {
+            try {
+                window.transactionChart.destroy();
+                window.transactionChart = null;
+            } catch(e) {
+                console.log('Chart destroy error during refresh:', e);
+                window.transactionChart = null;
+            }
+        }
+        
+        await loadAllTransactions();
+        await loadAllTransactionsForDashboard();
+        await loadDashboard();
+        await fetchUnviewedCounts();
+        showToast('✅ Dashboard refreshed', false);
+    } catch(e) {
+        console.error('Refresh error:', e);
+        showToast('⚠️ Refresh completed with errors', false);
+    }
 }
-
 // ============================================================
 // ==================== LOAD ALL TRANSACTIONS FOR DASHBOARD ====================
 // ============================================================
