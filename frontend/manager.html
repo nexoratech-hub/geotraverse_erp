@@ -5761,6 +5761,7 @@ function exportAllProjectDocsToPDF() {
     showToast("PDF preview opened - Click Print to save");
 }
 
+
 // ============================================================
 // ==================== REQUESTS SECTION ====================
 // ============================================================
@@ -5802,6 +5803,40 @@ function loadRequests(highlightId) {
                 var amount = parseFloat(r.amount) || 0;
                 var descriptionText = r.description ? (r.description.length > 50 ? r.description.substring(0, 50) + '...' : r.description) : '-';
                 var typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+                
+                // ============================================================
+                // ✅ CHECK STATUS FOR BUTTON DISPLAY
+                // ============================================================
+                var statusLower = (r.status || '').toLowerCase();
+                var canEdit = (statusLower === 'pending' || statusLower === 'draft');
+                var isApproved = (statusLower === 'approved' || statusLower === 'completed' || statusLower === 'paid');
+                var isCancelled = (statusLower === 'cancelled' || statusLower === 'rejected');
+                
+                // ============================================================
+                // BUILD ACTION BUTTONS
+                // ============================================================
+                var actionsHtml = '';
+                
+                // VIEW BUTTON - Always show
+                actionsHtml += '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>';
+                
+                // EDIT BUTTON - Only if PENDING
+                if (canEdit) {
+                    actionsHtml += '<button onclick="editRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>';
+                } else if (isApproved) {
+                    actionsHtml += '<span class="text-[8px] text-green-600 bg-green-100 px-2 py-0.5 rounded-full"><i class="fas fa-check-circle mr-1"></i> Approved</span>';
+                } else if (isCancelled) {
+                    actionsHtml += '<span class="text-[8px] text-red-600 bg-red-100 px-2 py-0.5 rounded-full"><i class="fas fa-times-circle mr-1"></i> Cancelled</span>';
+                }
+                
+                // DELETE BUTTON - Super Admin Only
+                if (DEPARTMENT_ID === 1) {
+                    actionsHtml += '<button onclick="deleteRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>';
+                }
+                
+                // ============================================================
+                // BUILD TABLE ROW
+                // ============================================================
                 html +=
                     '<tr id="req-row-' + r.id + '" class="' + (isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : '') + (isHighlighted ? ' search-highlight' : '') + '">' +
                         '<td class="date-cell">' + formatDate(r.request_date) + '</td>' +
@@ -5812,10 +5847,8 @@ function loadRequests(highlightId) {
                         '<td class="break-words" title="' + escapeHtml(r.description || '-') + '">' + escapeHtml(descriptionText) + '</td>' +
                         '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
                         '<td class="text-center">' +
-                            '<div class="flex gap-1 justify-center">' +
-                                '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>' +
-                                '<button onclick="editRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>' +
-                                '<button onclick="deleteRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>' +
+                            '<div class="flex gap-1 justify-center flex-wrap">' +
+                                actionsHtml +
                             '</div>' +
                         '</td>' +
                     '</tr>';
@@ -5834,7 +5867,6 @@ function loadRequests(highlightId) {
         updateRequestBadge();
     });
 }
-
 // ============================================================
 // ==================== OPEN ADD REQUEST MODAL ====================
 // ============================================================
@@ -5958,7 +5990,6 @@ function submitRequest() {
             }
         });
 }
-
 // ============================================================
 // ==================== VIEW REQUEST DETAILS - WITH EDIT BUTTON CHECK ====================
 // ============================================================
@@ -6089,6 +6120,7 @@ function editRequest(id) {
     
     openModal('requestModal');
 }
+
 // ============================================================
 // DELETE REQUEST - SUPER ADMIN ONLY
 // ============================================================

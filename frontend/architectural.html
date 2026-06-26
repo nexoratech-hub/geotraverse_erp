@@ -3040,9 +3040,6 @@ function exportAllProjectDocsToPDF() {
 
 
 
-// ============================================================
-// REQUESTS SECTION
-// ============================================================
 function loadRequests(highlightId) {
     highlightId = highlightId || null;
     
@@ -3072,6 +3069,29 @@ function loadRequests(highlightId) {
                 var amount = parseFloat(r.amount) || 0;
                 var typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                 
+                // ============================================================
+                // ACTIONS - DEPENDING ON STATUS
+                // ============================================================
+                var actionsHtml = '';
+                
+                if (r.status === 'approved' || r.status === 'Approved') {
+                    // APPROVED - View ONLY, no Edit, no Delete
+                    actionsHtml = 
+                        '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i> View</button>' +
+                        '<span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-check-circle mr-1"></i> Approved</span>';
+                } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+                    // CANCELLED - View ONLY, no Edit, no Delete
+                    actionsHtml = 
+                        '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i> View</button>' +
+                        '<span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full ml-1"><i class="fas fa-times-circle mr-1"></i> Cancelled</span>';
+                } else {
+                    // PENDING - View, Edit, Delete
+                    actionsHtml = 
+                        '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i> View</button>' +
+                        '<button onclick="editRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i> Edit</button>' +
+                        '<button onclick="deleteRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i> Delete</button>';
+                }
+                
                 html +=
                     '<tr id="req-row-' + r.id + '" class="' + (isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : '') + (isHighlighted ? ' search-highlight' : '') + '">' +
                         '<td class="date-cell">' + formatDate(r.request_date) + '</td>' +
@@ -3081,13 +3101,7 @@ function loadRequests(highlightId) {
                         '<td class="text-right font-bold text-orange-600 whitespace-nowrap">' + formatMoney(amount) + '</td>' +
                         '<td class="break-words">' + escapeHtml(r.description || '-') + '</td>' +
                         '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
-                        '<td class="text-center">' +
-                            '<div class="flex gap-1 justify-center">' +
-                                '<button onclick="viewRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>' +
-                                '<button onclick="editRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>' +
-                                '<button onclick="deleteRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>' +
-                            '</div>' +
-                        '</td>' +
+                        '<td class="text-center"><div class="flex gap-1 justify-center flex-wrap">' + actionsHtml + '</div></td>' +
                     '</tr>';
             });
         }
@@ -3104,7 +3118,6 @@ function loadRequests(highlightId) {
         updateRequestBadge();
     });
 }
-
 function openAddRequestModal() {
     document.getElementById('reqId').value = '';
     document.getElementById('reqDate').value = new Date().toISOString().split('T')[0];
@@ -3195,18 +3208,35 @@ function viewRequestDetails(id) {
                 '<tr><td style="padding: 10px; font-weight: 600;">📊 Status</td><td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td></tr>' +
                 '<tr><td style="padding: 10px; font-weight: 600;">👤 Requested By</td><td>' + escapeHtml(r.requested_by || CURRENT_USER) + '</td></tr>' +
             '</table>' +
-            (r.status === 'approved' ? '<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg"><i class="fas fa-check-circle text-green-600 mr-2"></i> Approved</div>' : '') +
-            (r.status === 'pending' ? '<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg"><i class="fas fa-clock text-yellow-600 mr-2"></i> Pending</div>' : '') +
+            (r.status === 'approved' ? '<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg"><i class="fas fa-check-circle text-green-600 mr-2"></i> This request has been <strong>Approved</strong></div>' : '') +
+            (r.status === 'cancelled' ? '<div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg"><i class="fas fa-times-circle text-red-600 mr-2"></i> This request has been <strong>Cancelled</strong></div>' : '') +
+            (r.status === 'pending' ? '<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg"><i class="fas fa-clock text-yellow-600 mr-2"></i> This request is <strong>Pending</strong> approval</div>' : '') +
         '</div>';
     
-    document.getElementById('viewRequestButtons').innerHTML =
+    // ============================================================
+    // MODAL BUTTONS - DEPENDING ON STATUS
+    // ============================================================
+    var buttonsHtml = 
         '<button onclick="exportSingleRequestExcel(' + r.id + ')" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>' +
         '<button onclick="exportSingleRequestPDF(' + r.id + ')" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>';
     
+    // Only show Edit and Delete if request is PENDING
+    if (r.status === 'pending' || r.status === 'Pending') {
+        buttonsHtml += 
+            '<button onclick="editRequest(' + r.id + '); closeModal(\'viewRequestModal\')" class="btn-warning"><i class="fas fa-edit"></i> Edit</button>' +
+            '<button onclick="deleteRequest(' + r.id + '); closeModal(\'viewRequestModal\')" class="btn-danger"><i class="fas fa-trash"></i> Delete</button>';
+    } else {
+        // Show status badge instead of Edit/Delete
+        var statusIcon = r.status === 'approved' ? 'fa-check-circle' : 'fa-times-circle';
+        var statusColor = r.status === 'approved' ? 'text-green-600' : 'text-red-600';
+        buttonsHtml += 
+            '<span class="text-xs ' + statusColor + ' bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-full"><i class="fas ' + statusIcon + ' mr-1"></i> ' + statusText + '</span>';
+    }
+    
+    document.getElementById('viewRequestButtons').innerHTML = buttonsHtml;
     openModal('viewRequestModal');
     loadRequests();
 }
-
 function editRequest(id) {
     var r = fundRequestsData.find(function(r) { return r.id === id; });
     if (r) {

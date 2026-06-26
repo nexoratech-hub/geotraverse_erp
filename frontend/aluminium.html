@@ -4398,7 +4398,7 @@ function exportProjectToPDFNewWindow(id, type) {
     showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
 
-// ==================== REQUESTS SECTION ====================
+// ==================== LOAD REQUESTS - WITH APPROVED STATUS ====================
 async function loadRequests() {
     await fetchRequests();
     
@@ -4449,6 +4449,48 @@ async function loadRequests() {
         let descriptionText = r.description || '-';
         let shortDescription = descriptionText.length > 60 ? descriptionText.substring(0, 60) + '...' : descriptionText;
         
+        // ============================================================
+        // BUTTONS - KULINGANA NA STATUS
+        // ============================================================
+        let actionButtons = '';
+        
+        if (r.status === 'approved' || r.status === 'Approved') {
+            // ============================================================
+            // APPROVED: View button + "Approved" text ONLY (No Edit, No Delete)
+            // ============================================================
+            actionButtons = `
+                <div class="flex gap-1 justify-center items-center">
+                    <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px;"><i class="fas fa-eye"></i></button>
+                    <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold" style="white-space: nowrap;">
+                        <i class="fas fa-check-circle mr-1"></i> Approved
+                    </span>
+                </div>
+            `;
+        } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+            // ============================================================
+            // CANCELLED: View button + "Cancelled" text ONLY
+            // ============================================================
+            actionButtons = `
+                <div class="flex gap-1 justify-center items-center">
+                    <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px;"><i class="fas fa-eye"></i></button>
+                    <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold" style="white-space: nowrap;">
+                        <i class="fas fa-times-circle mr-1"></i> Cancelled
+                    </span>
+                </div>
+            `;
+        } else {
+            // ============================================================
+            // PENDING: View + Edit + Delete
+            // ============================================================
+            actionButtons = `
+                <div class="flex gap-1 justify-center">
+                    <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px;"><i class="fas fa-eye"></i></button>
+                    <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit" style="padding: 5px 8px;"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete" style="padding: 5px 8px;"><i class="fas fa-trash"></i></button>
+                </div>
+            `;
+        }
+        
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 12px 10px; white-space: nowrap;">${formatDate(r.request_date || r.created_at)}</td>
@@ -4466,11 +4508,7 @@ async function loadRequests() {
                     </span>
                 </td>
                 <td style="padding: 12px 10px; text-align: center;">
-                    <div class="flex gap-1 justify-center">
-                        <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View" style="padding: 5px 8px;"><i class="fas fa-eye"></i></button>
-                        <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit" style="padding: 5px 8px;"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete" style="padding: 5px 8px;"><i class="fas fa-trash"></i></button>
-                    </div>
+                    ${actionButtons}
                 </td>
             </tr>
         `;
@@ -4479,7 +4517,6 @@ async function loadRequests() {
     document.getElementById('requestsTableBody').innerHTML = tableHtml;
     updateRequestBadge();
 }
-
 function openAddRequestModal() {
     document.getElementById('reqId').value = '';
     document.getElementById('reqDate').value = new Date().toISOString().split('T')[0];
@@ -4546,16 +4583,41 @@ async function viewRequestDetails(id) {
             </div>
         `;
         
-        document.getElementById('viewRequestButtons').innerHTML = `
-            <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm">Excel</button>
-            <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm">PDF</button>
-        `;
+        // ============================================================
+        // MODAL BUTTONS - APPROVED/ CANCELLED: No Edit/Delete
+        // ============================================================
+        let buttonsHtml = '';
+        
+        if (r.status === 'approved' || r.status === 'Approved') {
+            buttonsHtml = `
+                <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+                <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+                <span class="text-[12px] bg-green-100 text-green-700 px-3 py-1 rounded-full font-semibold">
+                    <i class="fas fa-check-circle mr-1"></i> Approved
+                </span>
+            `;
+        } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+            buttonsHtml = `
+                <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+                <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+                <span class="text-[12px] bg-red-100 text-red-700 px-3 py-1 rounded-full font-semibold">
+                    <i class="fas fa-times-circle mr-1"></i> Cancelled
+                </span>
+            `;
+        } else {
+            // PENDING - Show Excel, PDF only (no Edit/Delete in modal)
+            buttonsHtml = `
+                <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+                <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+            `;
+        }
+        
+        document.getElementById('viewRequestButtons').innerHTML = buttonsHtml;
         
         openModal('viewRequestModal');
         updateRequestBadge();
     }
 }
-
 function editRequest(id) { 
     const r = requestsData.find(r => r.id === id); 
     if (r) { 
