@@ -1,148 +1,236 @@
 <?php
-// Force JSON response
+// backend/api/approve_fund_request.php - COMPLETE FIX
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-// Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
 // Database connection
 $host = 'localhost';
-$user = 'root';
-$pass = '';
 $dbname = 'geotraverse_erp';
+$username = 'root';
+$password = '';
 
-$conn = new mysqli($host, $user, $pass, $dbname);
-
-if ($conn->connect_error) {
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $conn->connect_error]);
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
     exit();
 }
 
-// Get JSON input
+// Get input
 $input = file_get_contents('php://input');
 $data = json_decode($input, true);
 
-// If no JSON, try POST parameters
 if (!$data) {
-    $data = $_POST;
-}
-
-// Validate required fields
-if (!$data || !isset($data['request_id'])) {
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Request ID required',
-        'received' => $data
-    ]);
+    echo json_encode(['success' => false, 'message' => 'Invalid JSON data']);
     exit();
 }
 
-$request_id = intval($data['request_id']);
-$reviewed_by = isset($data['reviewed_by']) ? trim($data['reviewed_by']) : 'Finance Manager';
+$request_id = isset($data['request_id']) ? intval($data['request_id']) : 0;
+$department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
+$reviewed_by = isset($data['reviewed_by']) ? $data['reviewed_by'] : 'Finance';
+$admin_notes = isset($data['admin_notes']) ? $data['admin_notes'] : '';
 
-// Get the request details
-$stmt = $conn->prepare("SELECT * FROM fund_requests WHERE id = ? AND is_deleted = 0");
-if (!$stmt) {
-    echo json_encode(['success' => false, 'message' => 'Database prepare failed: ' . $conn->error]);
+if ($request_id <= 0) {
+    echo json_encode(['success' => false, 'message' => 'Invalid request ID']);
     exit();
 }
-
-$stmt->bind_param("i", $request_id);
-$stmt->execute();
-$result = $stmt->get_result();
-
-if ($result->num_rows === 0) {
-    echo json_encode(['success' => false, 'message' => 'Request not found']);
-    $stmt->close();
-    $conn->close();
-    exit();
-}
-
-$request = $result->fetch_assoc();
-$stmt->close();
-
-// Check if request is already processed
-if ($request['status'] !== 'pending') {
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Request is already ' . $request['status'],
-        'current_status' => $request['status']
-    ]);
-    $conn->close();
-    exit();
-}
-
-// Start transaction
-$conn->begin_transaction();
 
 try {
-    // 1. Update fund request status to 'approved'
-    $updateStmt = $conn->prepare("UPDATE fund_requests SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), is_viewed_by_finance = 1, viewed_at = NOW() WHERE id = ?");
-    if (!$updateStmt) {
-        throw new Exception('Prepare failed: ' . $conn->error);
-    }
-    $updateStmt->bind_param("si", $reviewed_by, $request_id);
+    // Start transaction
+    $pdo->beginTransaction();
     
-    if (!$updateStmt->execute()) {
-        throw new Exception('Failed to approve request: ' . $updateStmt->error);
-    }
-    $updateStmt->close();
+    // ============================================================
+    // 1. GET THE REQUEST
+    // ============================================================
+    $stmt = $pdo->prepare("SELECT id, title, amount, department_id, status, is_deleted, source, description FROM fund_requests WHERE id = ?");
+    $stmt->execute([$request_id]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    // 2. Add transaction (expense) - automatically PAID
-    $amount = floatval($request['amount']);
-    $transaction_date = date('Y-m-d');
+    if (!$request) {
+        $pdo->rollBack();
+        echo json_encode(['success' => false, 'message' => 'Request not found']);
+        exit();
+    }
+    
+    // ============================================================
+    // 2. CHECK IF ALREADY APPROVED
+    // ============================================================
+    if ($request['status'] === 'approved' || $request['status'] === 'Approved') {
+        $pdo->rollBack();
+        echo json_encode([
+            'success' => true, 
+            'message' => 'Request is already approved',
+            'data' => ['already_approved' => true]
+        ]);
+        exit();
+    }
+    
+    // ============================================================
+    // 3. CHECK IF DELETED
+    // ============================================================
+    if ($request['is_deleted'] == 1) {
+        $pdo->rollBack();
+        echo json_encode(['success' => false, 'message' => 'Request has been deleted']);
+        exit();
+    }
+    
+    // ============================================================
+    // 4. CHECK IF TRANSACTION ALREADY EXISTS
+    // ============================================================
     $source = 'Budget Request: ' . $request['title'];
-    $description = 'Approved fund request from department ' . ($request['department_id'] ?? 'Unknown') . ': ' . ($request['description'] ?? '');
+    $transCheck = $pdo->prepare("SELECT id FROM transactions WHERE source = ? AND amount = ? AND department_id = ? AND is_deleted = 0");
+    $transCheck->execute([$source, $request['amount'], $request['department_id']]);
+    $existingTrans = $transCheck->fetch(PDO::FETCH_ASSOC);
     
-    $transStmt = $conn->prepare("INSERT INTO transactions (type, source, amount, paid_amount, transaction_date, status, description, department_id, created_by, created_at) VALUES ('expense', ?, ?, ?, ?, 'paid', ?, 2, ?, NOW())");
-    if (!$transStmt) {
-        throw new Exception('Prepare transaction failed: ' . $conn->error);
+    if ($existingTrans) {
+        // Transaction exists, just update the request status
+        $updateStmt = $pdo->prepare("UPDATE fund_requests SET 
+            status = 'approved', 
+            reviewed_by = :reviewed_by,
+            reviewed_at = NOW(),
+            admin_notes = :admin_notes,
+            updated_at = NOW()
+            WHERE id = :id");
+        
+        $updateStmt->execute([
+            ':id' => $request_id,
+            ':reviewed_by' => $reviewed_by,
+            ':admin_notes' => $admin_notes ?: 'Approved by Finance Department (Transaction already existed)'
+        ]);
+        
+        $pdo->commit();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Request approved (transaction already existed)',
+            'data' => [
+                'id' => $request_id,
+                'status' => 'approved',
+                'transaction_exists' => true,
+                'transaction_id' => $existingTrans['id']
+            ]
+        ]);
+        exit();
     }
-    $transStmt->bind_param("sddsss", $source, $amount, $amount, $transaction_date, $description, $reviewed_by);
     
-    if (!$transStmt->execute()) {
-        throw new Exception('Failed to add transaction: ' . $transStmt->error);
-    }
-    $transaction_id = $conn->insert_id;
-    $transStmt->close();
+    // ============================================================
+    // 5. UPDATE REQUEST STATUS
+    // ============================================================
+    $updateStmt = $pdo->prepare("UPDATE fund_requests SET 
+        status = 'approved', 
+        reviewed_by = :reviewed_by,
+        reviewed_at = NOW(),
+        admin_notes = :admin_notes,
+        updated_at = NOW()
+        WHERE id = :id AND status != 'approved'");
     
-    // 3. Add notification for the department that made the request
-    try {
-        $notifStmt = $conn->prepare("INSERT INTO notifications (department_id, item_type, item_id, from_department_id, item_title, message, created_at) VALUES (?, 'fund_request', ?, 2, ?, CONCAT('Your fund request \"', ?, '\" has been APPROVED and paid'), NOW())");
-        if ($notifStmt) {
-            $notifStmt->bind_param("iiss", $request['department_id'], $request_id, $request['title'], $request['title']);
-            $notifStmt->execute();
-            $notifStmt->close();
-        }
-    } catch (Exception $e) {
-        // Notification failed, but transaction succeeded
-    }
-    
-    // Commit transaction
-    $conn->commit();
-    
-    echo json_encode([
-        'success' => true, 
-        'message' => 'Request approved and added as expense transaction',
-        'request_id' => $request_id,
-        'transaction_id' => $transaction_id,
-        'amount' => $amount
+    $updateResult = $updateStmt->execute([
+        ':id' => $request_id,
+        ':reviewed_by' => $reviewed_by,
+        ':admin_notes' => $admin_notes ?: 'Approved by Finance Department'
     ]);
     
-} catch (Exception $e) {
-    // Rollback transaction on error
-    $conn->rollback();
+    if (!$updateResult || $updateStmt->rowCount() == 0) {
+        $pdo->rollBack();
+        echo json_encode(['success' => false, 'message' => 'Failed to update request status']);
+        exit();
+    }
+    
+    // ============================================================
+    // 6. CREATE TRANSACTION - AUTOMATIC
+    // ============================================================
+    $amount = floatval($request['amount']);
+    $transDescription = 'Approved budget request: ' . $request['title'] . ' from department ' . $request['department_id'];
+    
+    // Check if source field exists (if not, use title)
+    $sourceField = $request['source'] ?: $request['title'];
+    
+    $transStmt = $pdo->prepare("INSERT INTO transactions 
+        (department_id, amount, type, source, status, paid_amount, transaction_date, description, created_by, created_at) 
+        VALUES (?, ?, 'expense', ?, 'paid', ?, NOW(), ?, ?, NOW())");
+    
+    $transResult = $transStmt->execute([
+        $request['department_id'],
+        $amount,
+        'Budget Request: ' . $request['title'],
+        $amount,
+        $transDescription,
+        $reviewed_by
+    ]);
+    
+    if (!$transResult) {
+        $pdo->rollBack();
+        echo json_encode(['success' => false, 'message' => 'Failed to create transaction']);
+        exit();
+    }
+    
+    $transaction_id = $pdo->lastInsertId();
+    
+    // ============================================================
+    // 7. ADD NOTIFICATION
+    // ============================================================
+    try {
+        $notifStmt = $pdo->prepare("INSERT INTO notifications 
+            (department_id, from_department_id, item_type, item_id, item_title, message, created_at, is_viewed) 
+            VALUES (?, ?, 'fund_request', ?, ?, ?, NOW(), 0)");
+        
+        $notifStmt->execute([
+            $request['department_id'],
+            $department_id,
+            $request_id,
+            $request['title'],
+            'Your fund request "' . $request['title'] . '" has been approved by Finance Department and added to transactions.'
+        ]);
+    } catch(PDOException $e) {
+        // Log but don't fail
+        error_log("Notification insert failed: " . $e->getMessage());
+    }
+    
+    // ============================================================
+    // 8. COMMIT TRANSACTION
+    // ============================================================
+    $pdo->commit();
+    
     echo json_encode([
-        'success' => false, 
-        'message' => $e->getMessage()
+        'success' => true,
+        'message' => 'Budget request approved and added to transactions successfully',
+        'data' => [
+            'id' => $request_id,
+            'title' => $request['title'],
+            'amount' => $amount,
+            'approved_by' => $reviewed_by,
+            'status' => 'approved',
+            'transaction_id' => $transaction_id,
+            'transaction_created' => true
+        ]
+    ]);
+    
+} catch(PDOException $e) {
+    $pdo->rollBack();
+    error_log("Approve fund request error: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Database error: ' . $e->getMessage()
+    ]);
+} catch(Exception $e) {
+    $pdo->rollBack();
+    error_log("Approve fund request error: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage()
     ]);
 }
-
-$conn->close();
 ?>

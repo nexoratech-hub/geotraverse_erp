@@ -932,14 +932,26 @@ async function loadAllTransactions() {
     } else { myTransactions = []; }
 }
 
+// ============================================================
+// ==================== LOAD ALL TRANSACTIONS - FULL ACCESS ====================
+// ============================================================
 async function loadMyTransactions(highlightId = null) {
-    await loadAllTransactions();
+    // Load all transactions
+    await loadAllTransactionsForDashboard();
+    
     let totalIncome = 0, totalExpense = 0, pendingAmount = 0;
-    myTransactions.forEach(t => { let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0; 
-        if (t.type === 'income') { totalIncome += paid; if (t.status !== 'paid') pendingAmount += (amount - paid); } 
-        else { totalExpense += paid; if (t.status !== 'paid') pendingAmount += (amount - paid); }
+    allTransactionsData.forEach(t => { 
+        let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0; 
+        if (t.type === 'income') { 
+            totalIncome += paid; 
+            if (t.status !== 'paid') pendingAmount += (amount - paid); 
+        } else { 
+            totalExpense += paid; 
+            if (t.status !== 'paid') pendingAmount += (amount - paid); 
+        }
     });
     let netProfit = totalIncome - totalExpense;
+    
     let html = `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Total Income</p><p class="text-base font-bold">${formatMoney(totalIncome)}</p></div>
@@ -947,22 +959,63 @@ async function loadMyTransactions(highlightId = null) {
             <div class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Net Profit</p><p class="text-base font-bold">${formatMoney(netProfit)}</p></div>
             <div class="bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-xl p-3 text-white"><p class="text-[10px] opacity-80">Pending Payment</p><p class="text-base font-bold">${formatMoney(pendingAmount)}</p></div>
         </div>
-        <div class="flex justify-between flex-wrap gap-3 mb-4"><h2 class="text-xl font-bold"><i class="fas fa-exchange-alt text-green-600 mr-2"></i>My Transactions (${myTransactions.length})</h2><div class="flex gap-2"><button onclick="openModal('transModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Transaction</button><button onclick="exportMyTransactionsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel</button><button onclick="exportMyTransactionsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF</button></div></div>
-        <div class="trans-table-container"><table class="data-table"><thead><tr><th style="width:12%">Date</th><th style="width:8%">Type</th><th style="width:20%">Source</th><th style="width:15%" class="text-right">Amount</th><th style="width:12%" class="text-right">Paid</th><th style="width:12%" class="text-right">Pending</th><th style="width:10%">Status</th><th style="width:20%">Description</th><th style="width:10%" class="text-center">Actions</th></tr></thead><tbody id="transactionsTableBody"></tbody></table></div>`;
+        <div class="flex justify-between flex-wrap gap-3 mb-4">
+            <h2 class="text-xl font-bold"><i class="fas fa-exchange-alt text-green-600 mr-2"></i>All Transactions (${allTransactionsData.length})</h2>
+            <div class="flex gap-2">
+                <button onclick="openModal('transModal')" class="btn-primary"><i class="fas fa-plus mr-1"></i> Add Transaction</button>
+                <button onclick="exportAllTransactionsToExcel()" class="btn-success"><i class="fas fa-file-excel mr-1"></i> Excel</button>
+                <button onclick="exportAllTransactionsToPDF()" class="btn-danger"><i class="fas fa-file-pdf mr-1"></i> PDF</button>
+            </div>
+        </div>
+        <div class="trans-table-container"><table class="data-table"><thead><tr><th style="width:10%">Date</th><th style="width:7%">Type</th><th style="width:12%">Department</th><th style="width:15%">Source</th><th style="width:10%" class="text-right">Amount</th><th style="width:10%" class="text-right">Paid</th><th style="width:10%" class="text-right">Pending</th><th style="width:8%">Status</th><th style="width:13%">Description</th><th style="width:10%" class="text-center">Actions</th></tr></thead><tbody id="transactionsTableBody"></tbody></table></div>`;
+    
     document.getElementById('transactionsPage').innerHTML = html;
-    if (myTransactions.length === 0) { document.getElementById('transactionsTableBody').innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one.</td></tr>'; return; }
+    
+    if (allTransactionsData.length === 0) { 
+        document.getElementById('transactionsTableBody').innerHTML = '<tr><td colspan="10" class="text-center py-8 text-gray-400">No transactions found. Click "Add Transaction" to create one.</td></tr>'; 
+        return; 
+    }
+    
     let tableHtml = '';
-    for (let t of myTransactions) { 
+    for (let t of allTransactionsData) { 
         let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0, pending = t.status !== 'paid' ? amount - paid : 0;
         let isHighlighted = highlightId && t.id === highlightId;
         let rowClass = t.type === 'income' ? 'income-row' : 'expense-row';
         if (isHighlighted) rowClass += ' search-highlight';
         let typeClass = t.type === 'income' ? 'income-badge' : 'expense-badge';
         let statusClass = t.status === 'paid' ? 'status-paid' : (t.status === 'partial' ? 'status-partial' : 'status-pending');
-        tableHtml += `<tr id="trans-row-${t.id}" class="${rowClass}"><td class="date-cell">${formatDate(t.transaction_date)}</td><td><span class="status-badge ${typeClass}">${t.type}</span></td><td class="break-words">${escapeHtml(t.source)}</td><td class="text-right font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">${formatMoney(amount)}</td><td class="text-right text-blue-600">${formatMoney(paid)}</td><td class="text-right ${pending > 0 ? 'text-amber-600 font-bold' : 'text-green-600'}">${formatMoney(pending)}</td><td><span class="status-badge ${statusClass}">${t.status}</span></td><td class="break-words max-w-[200px]" title="${escapeHtml(t.description||'')}">${escapeHtml((t.description||'').substring(0,50))}${(t.description||'').length > 50 ? '...' : ''}</td><td class="text-center"><div class="flex gap-1 justify-center"><button onclick="viewTransaction(${t.id})" class="action-btn view"><i class="fas fa-eye"></i></button><button onclick="editTransaction(${t.id})" class="action-btn edit"><i class="fas fa-edit"></i></button><button onclick="deleteTransaction(${t.id})" class="action-btn delete"><i class="fas fa-trash"></i></button></div></td></tr>`;
+        let deptName = departmentNames[t.department_id] || t.department_name || 'Unknown';
+        
+        // ✅ ALLOW EDIT AND DELETE FOR ALL TRANSACTIONS
+        tableHtml += `<tr id="trans-row-${t.id}" class="${rowClass}">
+            <td class="date-cell">${formatDate(t.transaction_date)}</td>
+            <td><span class="status-badge ${typeClass}">${t.type}</span></td>
+            <td><span class="text-xs">${escapeHtml(deptName)}</span></td>
+            <td class="break-words">${escapeHtml(t.source)}</td>
+            <td class="text-right font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">${formatMoney(amount)}</td>
+            <td class="text-right text-blue-600">${formatMoney(paid)}</td>
+            <td class="text-right ${pending > 0 ? 'text-amber-600 font-bold' : 'text-green-600'}">${formatMoney(pending)}</td>
+            <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+            <td class="break-words max-w-[150px]" title="${escapeHtml(t.description||'')}">${escapeHtml((t.description||'').substring(0,40))}${(t.description||'').length > 40 ? '...' : ''}</td>
+            <td class="text-center">
+                <div class="flex gap-1 justify-center">
+                    <button onclick="viewTransaction(${t.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                    <button onclick="editTransaction(${t.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteTransaction(${t.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                </div>
+            </td>
+        </tr>`;
     }
     document.getElementById('transactionsTableBody').innerHTML = tableHtml;
-    if (highlightId) { const el = document.getElementById(`trans-row-${highlightId}`); if(el) { el.classList.add('search-highlight'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.classList.remove('search-highlight'), 2000); } }
+    
+    if (highlightId) { 
+        const el = document.getElementById(`trans-row-${highlightId}`); 
+        if(el) { 
+            el.classList.add('search-highlight'); 
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            setTimeout(() => el.classList.remove('search-highlight'), 2000); 
+        } 
+    }
 }
 
 function viewTransaction(id) { const t = myTransactions.find(t => t.id === id); if(t) { document.getElementById('viewTransContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${formatDateTime(t.transaction_date)}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> <span class="font-bold text-green-600">${formatMoney(t.amount)}</span></p><p><strong>Paid:</strong> ${formatMoney(t.paid_amount || 0)}</p><p><strong>Pending:</strong> ${formatMoney((parseFloat(t.amount)||0) - (parseFloat(t.paid_amount)||0))}</p><p><strong>Status:</strong> ${t.status}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p><div class="user-info pt-2 mt-2 border-t">Created by: ${escapeHtml(t.created_by || 'System')} on ${formatDateTime(t.created_at)}</div></div>`; openModal('viewTransModal'); } }
@@ -1321,68 +1374,180 @@ function markRequestAsViewed(requestId) {
     }
 }
 
+// ============================================================
+// ==================== APPROVE REQUEST - FIXED ====================
+// ============================================================
 async function approveRequest(requestId) {
     if (!confirm('Approve this budget request? This will add it as an expense transaction.')) return;
+    
     const request = requestsData.find(r => r.id === requestId);
-    if (!request) { showToast('Request not found', true); return; }
+    if (!request) { 
+        showToast('Request not found', true); 
+        return; 
+    }
+    
+    // ============================================================
+    // ✅ CHECK IF ALREADY APPROVED
+    // ============================================================
+    if (request.status === 'approved' || request.status === 'Approved') {
+        showToast('⚠️ This request is already approved', false);
+        updateRequestUI(requestId);
+        return;
+    }
+    
+    // ============================================================
+    // ✅ CHECK IF TRANSACTION ALREADY EXISTS
+    // ============================================================
+    const source = `Budget Request: ${request.title}`;
+    const existingTrans = allTransactionsData.find(t => 
+        t.source === source && 
+        t.amount == request.amount
+    );
+    
+    if (existingTrans) {
+        // Transaction exists, just update the request status
+        showToast('⚠️ Transaction already exists. Updating request status...', false);
+        
+        try {
+            // Update request status to approved
+            const updateRes = await apiCall('approve_fund_request.php', 'POST', { 
+                request_id: requestId, 
+                department_id: DEPARTMENT_ID,
+                reviewed_by: CURRENT_USER,
+                admin_notes: `Approved by ${CURRENT_USER} on ${new Date().toLocaleString()} (Transaction already existed)`
+            });
+            
+            if (updateRes && updateRes.success) {
+                request.status = 'approved';
+                request.reviewed_by = CURRENT_USER;
+                request.reviewed_at = new Date().toISOString();
+                
+                showToast('✅ Request approved (transaction already existed)', false);
+                addLog(`Budget request approved: ${request.title} (transaction already existed)`);
+                
+                updateRequestUI(requestId);
+                await loadRequests();
+                await loadDashboard();
+                return;
+            } else {
+                // Try direct database update
+                await forceApproveRequest(requestId);
+                return;
+            }
+        } catch(e) {
+            console.error('❌ Error updating request status:', e);
+            // Try direct database update
+            await forceApproveRequest(requestId);
+            return;
+        }
+    }
+    
+    // ============================================================
+    // ✅ NO EXISTING TRANSACTION - PROCEED WITH NORMAL APPROVAL
+    // ============================================================
     markRequestAsViewed(requestId);
+    
     const btn = document.querySelector(`#request-row-${requestId} .action-btn.approve`);
     const originalText = btn ? btn.innerHTML : 'Approving...';
-    if (btn) btn.innerHTML = '<span class="loading-spinner"></span>';
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+    }
+    
     try {
         const updateRes = await apiCall('approve_fund_request.php', 'POST', { 
             request_id: requestId, 
             department_id: DEPARTMENT_ID,
             reviewed_by: CURRENT_USER,
-            admin_notes: 'Approved by Finance Department'
+            admin_notes: `Approved by ${CURRENT_USER} on ${new Date().toLocaleString()}`
         });
-        if (!updateRes.success) throw new Error(updateRes.message || 'Failed to approve request');
-        const amount = parseFloat(request.amount) || 0;
-        const expenseData = {
-            type: 'expense',
-            source: `Budget Request: ${request.title}`,
-            amount: amount,
-            paid_amount: amount,
-            transaction_date: new Date().toISOString().split('T')[0],
-            status: 'paid',
-            description: `Approved budget request from ${departmentNames[request.department_id] || request.department_name}: ${request.description || ''}`,
-            department_id: DEPARTMENT_ID,
-            created_by: CURRENT_USER
-        };
-        const transRes = await apiCall('add_transaction.php', 'POST', expenseData);
-        if (transRes.success) {
-            showToast('✅ Request approved and added as expense transaction (PAID)');
-            addLog(`Budget request approved: ${request.title} from ${departmentNames[request.department_id] || request.department_name}`);
-            await loadAllTransactions();
+        
+        console.log('📤 Approve response:', updateRes);
+        
+        if (updateRes && updateRes.success) {
+            if (updateRes.data && updateRes.data.already_approved) {
+                showToast('⚠️ Request is already approved', false);
+            } else {
+                showToast('✅ Request approved and added to transactions', false);
+                addLog(`Budget request approved: ${request.title} from ${departmentNames[request.department_id] || request.department_name}`);
+            }
+            
+            request.status = 'approved';
+            request.reviewed_by = CURRENT_USER;
+            request.reviewed_at = new Date().toISOString();
+            request.payment_status = 'paid';
+            
+            await loadAllTransactionsForDashboard();
+            updateRequestUI(requestId);
+            await loadRequests();
+            await loadDashboard();
+            await fetchNotifications();
+            await fetchUnviewedCounts();
+            
         } else {
-            showToast('✅ Request approved (but transaction could not be added automatically)');
-            const newTransaction = { id: Date.now(), ...expenseData, created_at: new Date().toISOString(), is_deleted: 0 };
-            myTransactions.unshift(newTransaction);
+            // ============================================================
+            // ✅ FALLBACK: If API fails, try direct update
+            // ============================================================
+            if (updateRes && updateRes.message && updateRes.message.includes('already approved')) {
+                showToast('⚠️ Request is already approved', false);
+                request.status = 'approved';
+                updateRequestUI(requestId);
+                await loadRequests();
+                return;
+            }
+            
+            // Try direct database update
+            await forceApproveRequest(requestId);
         }
-        request.status = 'approved';
-        request.reviewed_by = CURRENT_USER;
-        request.reviewed_at = new Date().toISOString();
-        request.payment_status = 'paid';
-        await apiCall('add_notification.php', 'POST', {
-            department_id: request.department_id,
-            item_type: 'fund_request',
-            item_id: request.id,
-            item_title: request.title,
-            message: `Your fund request "${request.title}" has been approved by Finance Department`,
-            from_department_id: DEPARTMENT_ID
-        });
-        await loadRequests();
-        await loadMyTransactions();
-        await loadDashboard();
-        await fetchNotifications();
+        
     } catch(e) { 
-        console.error('Approve error:', e); 
-        showToast('Error approving request: ' + e.message, true); 
+        console.error('❌ Approve error:', e); 
+        // Try direct database update
+        await forceApproveRequest(requestId);
     } finally {
-        if (btn) btn.innerHTML = originalText;
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
 
+
+
+// ============================================================
+// ==================== UPDATE REQUEST UI ====================
+// ============================================================
+function updateRequestUI(requestId) {
+    const row = document.getElementById(`request-row-${requestId}`);
+    if (!row) return;
+    
+    // Update status badge
+    const statusBadge = row.querySelector('td:last-child .status-badge');
+    if (statusBadge) {
+        statusBadge.style.background = '#d1fae5';
+        statusBadge.style.color = '#059669';
+        statusBadge.textContent = 'Approved';
+    }
+    
+    // Replace buttons with "Approved" badge
+    const actionsCell = row.querySelector('td:last-child');
+    if (actionsCell) {
+        actionsCell.innerHTML = `
+            <button onclick="viewRequestDetail(${requestId})" class="action-btn view" title="View">
+                <i class="fas fa-eye"></i>
+            </button>
+            <button onclick="deleteRequestItem(${requestId})" class="action-btn delete" title="Delete">
+                <i class="fas fa-trash"></i>
+            </button>
+            <span class="text-[8px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                <i class="fas fa-check-circle mr-1"></i> Approved
+            </span>
+        `;
+    }
+    
+    // Remove yellow background for unviewed
+    row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+}
 async function cancelRequest(requestId) {
     if (!confirm('Cancel this budget request?')) return;
     const request = requestsData.find(r => r.id === requestId);
@@ -3885,28 +4050,58 @@ async function saveUploadedReport() {
 }
 
 // ============================================================
-// ==================== DASHBOARD WITH REQUEST SUMMARIES ====================
+// ==================== LOAD DASHBOARD - COMPLETE ====================
 // ============================================================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading dashboard...</span></div>';
     
-    await Promise.all([loadAllTransactions(), fetchBudgetRequests(), fetchReports(), fetchUploadedReports(), fetchNotifications()]);
+    // ============================================================
+    // ✅ FETCH ALL DATA
+    // ============================================================
+    await loadAllTransactionsForDashboard();
+    await fetchBudgetRequests();
+    await fetchReports();
+    await fetchUploadedReports();
+    await fetchNotifications();
+    await fetchUnviewedCounts();
     
-    // ===== TRANSACTIONS STATS =====
+    // ============================================================
+    // CALCULATE TRANSACTIONS STATS - FROM ALL DEPARTMENTS
+    // ============================================================
     let totalIncome = 0, totalExpense = 0, pendingAmount = 0;
-    myTransactions.forEach(t => { 
-        let amount = parseFloat(t.amount)||0, paid = parseFloat(t.paid_amount)||0; 
+    let incomeCount = 0, expenseCount = 0;
+    let totalPaid = 0, totalPendingPayment = 0;
+    
+    allTransactionsData.forEach(t => { 
+        let amount = parseFloat(t.amount)||0; 
+        let paid = parseFloat(t.paid_amount)||0; 
+        let pending = amount - paid;
+        
         if (t.type === 'income') { 
             totalIncome += paid; 
-            if (t.status !== 'paid') pendingAmount += (amount - paid); 
+            incomeCount++;
+            totalPaid += paid;
+            if (t.status !== 'paid') {
+                pendingAmount += pending;
+                totalPendingPayment += pending;
+            }
         } else { 
             totalExpense += paid; 
-            if (t.status !== 'paid') pendingAmount += (amount - paid); 
+            expenseCount++;
+            totalPaid += paid;
+            if (t.status !== 'paid') {
+                pendingAmount += pending;
+                totalPendingPayment += pending;
+            }
         } 
     });
-    let netProfit = totalIncome - totalExpense;
     
-    // ===== REQUESTS STATS =====
+    let netProfit = totalIncome - totalExpense;
+    let totalAmount = totalIncome + totalExpense;
+    
+    // ============================================================
+    // REQUESTS STATS
+    // ============================================================
     let totalRequests = requestsData.length;
     let pendingRequests = requestsData.filter(r => r.status === 'pending' || r.status === 'Pending').length;
     let approvedRequests = requestsData.filter(r => r.status === 'approved' || r.status === 'Approved').length;
@@ -3915,28 +4110,58 @@ async function loadDashboard() {
     let pendingRequestAmount = requestsData.filter(r => r.status === 'pending' || r.status === 'Pending').reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     let approvedRequestAmount = requestsData.filter(r => r.status === 'approved' || r.status === 'Approved').reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
     
-    // ===== REPORTS STATS =====
+    // ============================================================
+    // REPORTS STATS
+    // ============================================================
     let totalReports = reportsData.length + uploadedReportsData.length;
     
+    // ============================================================
+    // DEBUG - CHECK TRANSACTION #147
+    // ============================================================
+    const trans147 = allTransactionsData.find(t => t.id === 147);
+    if (trans147) {
+        console.log('✅ Transaction #147 found:', trans147);
+        console.log('   - Source:', trans147.source);
+        console.log('   - Amount:', trans147.amount);
+        console.log('   - Department:', trans147.department_id);
+        console.log('   - Department Name:', departmentNames[trans147.department_id] || 'Unknown');
+    } else {
+        console.warn('⚠️ Transaction #147 not found in allTransactionsData');
+    }
+    
+    // ============================================================
+    // RENDER DASHBOARD
+    // ============================================================
     document.getElementById('dashboardPage').innerHTML = `
-        <!-- Page Title -->
-        <div class="mb-4">
-            <h2 class="text-xl font-bold text-gray-800">Finance Dashboard</h2>
-            <p class="text-xs text-gray-500">Financial Management System</p>
+        <div class="mb-4 flex justify-between items-center flex-wrap gap-3">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">Finance Dashboard</h2>
+                <p class="text-xs text-gray-500">Financial Management System</p>
+                <div class="flex flex-wrap gap-3 mt-1">
+                    <span class="text-xs text-green-600">✅ All Transactions: ${allTransactionsData.length}</span>
+                    <span class="text-xs text-blue-600">💰 Income: ${formatMoney(totalIncome)}</span>
+                    <span class="text-xs text-red-600">💸 Expenses: ${formatMoney(totalExpense)}</span>
+                </div>
+            </div>
+            <button onclick="refreshDashboard()" class="btn-primary text-sm py-1.5 px-4">
+                <i class="fas fa-sync-alt mr-1"></i> Refresh
+            </button>
         </div>
         
-        <!-- ===== MAIN STAT CARDS (Transactions) - ROW 1 ===== -->
+        <!-- ===== MAIN STAT CARDS ===== -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div class="stat-card card-profit cursor-pointer" onclick="showPage('transactions')" style="background: linear-gradient(135deg, #1e40af, #1e3a8a); color: white; border: none;">
                 <div class="stat-icon" style="background: rgba(255,255,255,0.2);"><i class="fas fa-chart-line text-xl"></i></div>
                 <p class="stat-label" style="color: rgba(255,255,255,0.85);">Net Profit</p>
                 <p class="stat-number" style="color: white; font-size: 22px;">${formatMoney(netProfit)}</p>
+                <p class="text-[9px] text-blue-300 mt-1">Income: ${formatMoney(totalIncome)}</p>
             </div>
             <div class="stat-card card-requests cursor-pointer" onclick="showPage('requests')" style="background: linear-gradient(135deg, #059669, #047857); color: white; border: none;">
                 <div class="stat-icon" style="background: rgba(255,255,255,0.2);"><i class="fas fa-hand-holding-usd text-xl"></i></div>
                 <p class="stat-label" style="color: rgba(255,255,255,0.85);">Budget Requests</p>
                 <p class="stat-number" style="color: white; font-size: 22px;">${totalRequests}</p>
                 <p class="text-[9px] text-red-300 mt-1">Pending: ${pendingRequests}</p>
+                <p class="text-[9px] text-green-300">Approved: ${approvedRequests}</p>
             </div>
             <div class="stat-card card-reports cursor-pointer" onclick="showPage('reports')" style="background: linear-gradient(135deg, #d97706, #b45309); color: white; border: none;">
                 <div class="stat-icon" style="background: rgba(255,255,255,0.2);"><i class="fas fa-chart-line text-xl"></i></div>
@@ -3947,41 +4172,46 @@ async function loadDashboard() {
             <div class="stat-card card-pending cursor-pointer" onclick="showPage('transactions')" style="background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; border: none;">
                 <div class="stat-icon" style="background: rgba(255,255,255,0.2);"><i class="fas fa-clock text-xl"></i></div>
                 <p class="stat-label" style="color: rgba(255,255,255,0.85);">Pending Payment</p>
-                <p class="stat-number" style="color: white; font-size: 22px;">${formatMoney(pendingAmount)}</p>
+                <p class="stat-number" style="color: white; font-size: 22px;">${formatMoney(totalPendingPayment)}</p>
+                <p class="text-[9px] text-yellow-300 mt-1">${allTransactionsData.filter(t => t.status !== 'paid').length} pending</p>
             </div>
         </div>
         
-        <!-- ===== REQUEST SUMMARY CARDS - ROW 2 (Chini ya Main Cards) ===== -->
+        <!-- ===== TRANSACTION SUMMARY CARDS ===== -->
         <div class="request-summary-grid mb-6">
-            <div class="request-summary-item total">
-                <div class="number">${totalRequests}</div>
-                <div class="label">📋 Total Requests</div>
-                <div class="sub-text">${formatMoney(totalRequestAmount)}</div>
+            <div class="request-summary-item total" style="border-top: 3px solid #059669;">
+                <div class="number" style="color: #059669;">${allTransactionsData.length}</div>
+                <div class="label">📋 Total Transactions</div>
+                <div class="sub-text">${formatMoney(totalAmount)}</div>
             </div>
-            <div class="request-summary-item pending">
-                <div class="number">${pendingRequests}</div>
-                <div class="label">⏳ Pending</div>
-                <div class="sub-text">${formatMoney(pendingRequestAmount)}</div>
+            <div class="request-summary-item" style="border-top: 3px solid #10b981;">
+                <div class="number" style="color: #10b981;">${incomeCount}</div>
+                <div class="label">💰 Income Transactions</div>
+                <div class="sub-text">${formatMoney(totalIncome)}</div>
             </div>
-            <div class="request-summary-item approved">
-                <div class="number">${approvedRequests}</div>
-                <div class="label">✅ Approved</div>
-                <div class="sub-text">${formatMoney(approvedRequestAmount)}</div>
+            <div class="request-summary-item" style="border-top: 3px solid #ef4444;">
+                <div class="number" style="color: #ef4444;">${expenseCount}</div>
+                <div class="label">💸 Expense Transactions</div>
+                <div class="sub-text">${formatMoney(totalExpense)}</div>
             </div>
-            <div class="request-summary-item cancelled">
-                <div class="number">${cancelledRequests}</div>
-                <div class="label">❌ Cancelled</div>
+            <div class="request-summary-item" style="border-top: 3px solid #8b5cf6;">
+                <div class="number" style="color: #8b5cf6;">${allTransactionsData.filter(t => t.status === 'paid').length}</div>
+                <div class="label">✅ Paid Transactions</div>
+                <div class="sub-text">${formatMoney(totalPaid)}</div>
             </div>
         </div>
         
-        <!-- ===== CHARTS & QUICK ACTIONS - ROW 3 (BACKGROUND WHITE) ===== -->
+        <!-- ===== CHARTS & QUICK ACTIONS ===== -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-            <!-- Revenue Trend - WHITE BACKGROUND -->
             <div class="bg-white dark:bg-white rounded-xl p-4 shadow-sm border border-gray-200">
-                <h3 class="font-semibold text-sm mb-3 text-gray-700"><i class="fas fa-chart-line text-green-600 mr-2"></i>Revenue Trend</h3>
-                <canvas id="revenueChart" height="180"></canvas>
+                <h3 class="font-semibold text-sm mb-3 text-gray-700"><i class="fas fa-chart-pie text-green-600 mr-2"></i>Transaction Summary</h3>
+                <canvas id="transactionChart" height="180"></canvas>
+                <div class="flex justify-center gap-4 mt-3 text-xs">
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-1"></span> Income: ${formatMoney(totalIncome)}</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-1"></span> Expenses: ${formatMoney(totalExpense)}</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-blue-500 mr-1"></span> Profit: ${formatMoney(netProfit)}</span>
+                </div>
             </div>
-            <!-- Quick Actions - WHITE BACKGROUND -->
             <div class="bg-white dark:bg-white rounded-xl p-4 shadow-sm border border-gray-200">
                 <h3 class="font-semibold text-sm mb-3 text-gray-700"><i class="fas fa-bolt text-orange-600 mr-2"></i>Quick Actions</h3>
                 <div class="grid grid-cols-2 gap-3">
@@ -4001,17 +4231,30 @@ async function loadDashboard() {
             </div>
         </div>
         
-        <!-- ===== QUICK ACTION BUTTONS - ROW 4 ===== -->
-        <div class="grid grid-cols-2 gap-3 mb-5">
-            <button onclick="openModal('transModal')" class="bg-green-600 text-white py-2.5 rounded-lg text-sm hover:bg-green-700 transition flex items-center justify-center gap-2">
-                <i class="fas fa-plus-circle"></i> Add Transaction
-            </button>
-            <button onclick="showPage('requests')" class="bg-orange-600 text-white py-2.5 rounded-lg text-sm hover:bg-orange-700 transition flex items-center justify-center gap-2">
-                <i class="fas fa-hand-holding-usd"></i> View Requests
-            </button>
+        <!-- ===== RECENT TRANSACTIONS ===== -->
+        <div class="bg-white dark:bg-white rounded-xl p-4 shadow-sm border border-gray-200 mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-exchange-alt text-green-600 mr-1"></i>Recent Transactions</h3>
+                <button onclick="showPage('transactions')" class="text-green-600 text-xs hover:underline">View All</button>
+            </div>
+            <div id="recentTransactions" class="space-y-1 max-h-40 overflow-y-auto">
+                ${allTransactionsData.slice(0,8).map(t => `
+                    <div class="py-1.5 border-b border-gray-100 flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-medium text-gray-700">${escapeHtml(t.source)}</span>
+                            <span class="text-[8px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">${departmentNames[t.department_id] || t.department_name || 'Unknown'}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs ${t.type === 'income' ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(t.amount)}</span>
+                            <span class="text-[8px] ${t.status === 'paid' ? 'text-green-500' : 'text-yellow-500'}">${t.status}</span>
+                        </div>
+                    </div>
+                `).join('')}
+                ${allTransactionsData.length === 0 ? '<div class="text-center py-4 text-gray-400 text-xs">No transactions yet</div>' : ''}
+            </div>
         </div>
         
-        <!-- ===== RECENT ACTIVITY - ROW 5 (WHITE BACKGROUND) ===== -->
+        <!-- ===== RECENT ACTIVITY ===== -->
         <div class="bg-white dark:bg-white rounded-xl p-4 shadow-sm border border-gray-200">
             <div class="flex justify-between items-center mb-2">
                 <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-history text-green-600 mr-1"></i>Recent Activity</h3>
@@ -4025,32 +4268,24 @@ async function loadDashboard() {
         </div>
     `;
     
-    // ===== REVENUE CHART =====
-    const monthlyData = { Jan:0, Feb:0, Mar:0, Apr:0, May:0, Jun:0, Jul:0, Aug:0, Sep:0, Oct:0, Nov:0, Dec:0 };
-    myTransactions.forEach(t => { 
-        if(t.type==='income' && t.status==='paid') { 
-            const month = new Date(t.transaction_date).toLocaleString('default', { month: 'short' }); 
-            if(monthlyData[month]!==undefined) monthlyData[month] += parseFloat(t.amount)/1000000; 
-        } 
-    });
-    const ctx = document.getElementById('revenueChart')?.getContext('2d');
-    if(ctx) { 
-        if(revenueChart) revenueChart.destroy(); 
-        revenueChart = new Chart(ctx, { 
-            type:'line', 
+    // ============================================================
+    // RENDER TRANSACTION CHART (Pie Chart)
+    // ============================================================
+    const ctx2 = document.getElementById('transactionChart')?.getContext('2d');
+    if(ctx2) { 
+        if(window.transactionChart) window.transactionChart.destroy(); 
+        window.transactionChart = new Chart(ctx2, { 
+            type:'doughnut', 
             data:{ 
-                labels:Object.keys(monthlyData), 
+                labels:['Income', 'Expenses', 'Profit'], 
                 datasets:[{ 
-                    label:'Revenue (TZS M)', 
-                    data:Object.values(monthlyData), 
-                    borderColor:'#059669', 
-                    backgroundColor:'rgba(5,150,105,0.08)',
-                    fill:true, 
-                    tension:0.3,
-                    pointBackgroundColor:'#059669',
-                    pointBorderColor:'#fff',
-                    pointBorderWidth:2,
-                    pointRadius:4
+                    data:[
+                        totalIncome > 0 ? totalIncome : 1,
+                        totalExpense > 0 ? totalExpense : 1,
+                        netProfit > 0 ? netProfit : 1
+                    ], 
+                    backgroundColor:['#10b981', '#ef4444', '#3b82f6'],
+                    borderWidth: 0
                 }] 
             }, 
             options:{ 
@@ -4058,25 +4293,10 @@ async function loadDashboard() {
                 maintainAspectRatio:true,
                 plugins: {
                     legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: 'rgba(0,0,0,0.06)'
-                        },
-                        ticks: {
-                            color: '#6b7280'
-                        }
-                    },
-                    x: {
-                        grid: {
-                            display: false
-                        },
-                        ticks: {
-                            color: '#6b7280'
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            font: { size: 10 }
                         }
                     }
                 }
@@ -4084,6 +4304,58 @@ async function loadDashboard() {
         }); 
     }
 }
+
+// ============================================================
+// ==================== REFRESH DASHBOARD ====================
+// ============================================================
+async function refreshDashboard() {
+    showToast('🔄 Refreshing data...', false);
+    await loadAllTransactions();
+    await loadDashboard();
+    showToast('✅ Dashboard refreshed', false);
+}
+
+// ============================================================
+// ==================== LOAD ALL TRANSACTIONS FOR DASHBOARD ====================
+// ============================================================
+let allTransactionsData = [];
+
+async function loadAllTransactionsForDashboard() {
+    try {
+        // ============================================================
+        // ✅ FETCH ALL TRANSACTIONS - NO DEPARTMENT FILTER
+        // ============================================================
+        const cacheBuster = `&_t=${Date.now()}`;
+        const url = `get_transactions.php?all=1${cacheBuster}`;
+        
+        console.log('📡 Fetching ALL transactions from:', url);
+        
+        const res = await apiCall(url);
+        
+        console.log('📥 All transactions response:', res);
+        
+        if (res.success && res.data) {
+            allTransactionsData = res.data
+                .filter(t => t.is_deleted !== 1)
+                .sort((a, b) => {
+                    return (b.id || 0) - (a.id || 0);
+                });
+            
+            console.log(`✅ All transactions loaded: ${allTransactionsData.length}`);
+            console.log('📋 Latest transactions:', allTransactionsData.slice(0, 5));
+        } else {
+            console.warn('⚠️ No transactions data or API error');
+            allTransactionsData = [];
+        }
+        
+        return allTransactionsData;
+    } catch(e) {
+        console.error('❌ Error loading all transactions:', e);
+        allTransactionsData = [];
+        return [];
+    }
+}
+
 // ============================================================
 // ==================== SETTINGS ====================
 // ============================================================

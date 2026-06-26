@@ -5522,7 +5522,7 @@ async function viewBudgetRequestDetails(id) {
 }
 
 // ============================================================
-// ==================== DELETE BUDGET REQUEST - COMPLETE FIX ====================
+// ==================== DELETE BUDGET REQUEST - WITH DEPARTMENT ====================
 // ============================================================
 async function deleteBudgetRequest(id) {
     if (!confirm('Delete this budget request? It will be moved to recycle bin.')) {
@@ -5535,10 +5535,32 @@ async function deleteBudgetRequest(id) {
         return;
     }
     
+    // Check if user is Super Admin
+    var isSuperAdmin = (DEPARTMENT_ID == 1);
+    var isFinance = (DEPARTMENT_ID == 2);
+    var isOwnDepartment = (DEPARTMENT_ID == r.department_id);
+    
+    // Build confirmation message based on who is deleting
+    var confirmMsg = 'Delete this budget request?';
+    if (isSuperAdmin) {
+        confirmMsg = '⚠️ Delete this budget request? This will permanently remove it for ALL departments (Super Admin delete).';
+    } else if (isFinance) {
+        confirmMsg = '⚠️ Delete this budget request? This will remove it from the system (Finance delete).';
+    } else if (isOwnDepartment) {
+        confirmMsg = '⚠️ Delete this budget request? This will only remove it from YOUR department\'s view.';
+    } else {
+        confirmMsg = '⚠️ You do not have permission to delete this request.';
+        showToast('❌ You do not have permission to delete this request', true);
+        return;
+    }
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
     // Show loading
     showToast('⏳ Deleting request...', false);
     
-    // Get the row for animation
     var row = document.getElementById('req-row-' + id);
     var deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
     var originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
@@ -5548,32 +5570,32 @@ async function deleteBudgetRequest(id) {
     }
     
     try {
-        // Call API to delete
+        // ============================================================
+        // CALL API WITH DEPARTMENT ID
+        // ============================================================
         var res = await apiCall('delete_fund_request.php', 'POST', { 
             id: parseInt(id), 
             is_deleted: 1,
-            deleted_by: CURRENT_USER || 'System'
+            deleted_by: CURRENT_USER || 'System',
+            department_id: DEPARTMENT_ID,
+            is_admin: isSuperAdmin ? 1 : 0
         });
         
         console.log('📤 Delete response:', res);
         
         // ============================================================
-        // ✅ REMOVE FROM ALL ARRAYS IMMEDIATELY
+        // REMOVE FROM ALL ARRAYS
         // ============================================================
-        
-        // 1. Remove from budgetRequests
         budgetRequests = budgetRequests.filter(function(req) {
             return req.id !== id;
         });
         
-        // 2. Also remove from any other arrays (if they exist)
         if (typeof fundRequestsData !== 'undefined') {
             fundRequestsData = fundRequestsData.filter(function(req) {
                 return req.id !== id;
             });
         }
         
-        // 3. Remove from requestsData (if used elsewhere)
         if (typeof requestsData !== 'undefined') {
             requestsData = requestsData.filter(function(req) {
                 return req.id !== id;
@@ -5581,7 +5603,7 @@ async function deleteBudgetRequest(id) {
         }
         
         // ============================================================
-        // ✅ REMOVE FROM UI WITH ANIMATION
+        // REMOVE ROW FROM UI
         // ============================================================
         if (row) {
             row.style.transition = 'all 0.3s ease';
@@ -5597,7 +5619,6 @@ async function deleteBudgetRequest(id) {
                 if (row.parentNode) {
                     row.remove();
                     
-                    // Check if table is empty
                     var tbody = row.closest('tbody');
                     if (tbody && tbody.children.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No requests found. Click "Add Request" to create one.</td></tr>';
@@ -5607,48 +5628,38 @@ async function deleteBudgetRequest(id) {
         }
         
         // ============================================================
-        // ✅ REMOVE FROM DASHBOARD
+        // UPDATE COUNTS
         // ============================================================
-        // Re-run dashboard load to remove from stats
-        // But we need to make sure the request is gone from all data first
-        
-        // Update counts
         unviewedRequestsCount = budgetRequests.filter(function(req) {
             return req.is_viewed_by_admin == 0 && viewedRequestIds.indexOf(req.id) === -1;
         }).length;
         updateRequestBadge();
         
         // ============================================================
-        // ✅ SHOW TOAST
+        // SHOW TOAST
         // ============================================================
         if (res && res.success) {
-            showToast('✅ Budget request moved to recycle bin', false);
-            addToActionHistory('Budget request deleted: ' + r.title, CURRENT_USER);
+            var msg = res.message || 'Budget request deleted successfully';
+            showToast('✅ ' + msg, false);
+            addToActionHistory('Budget request deleted: ' + r.title + ' (ID: ' + r.id + ')', CURRENT_USER);
         } else {
             showToast('⚠️ Request removed from view', false);
         }
         
         // ============================================================
-        // ✅ REFRESH ALL VIEWS
+        // REFRESH VIEWS
         // ============================================================
-        // Reload requests page (if currently visible)
         var requestsPage = document.getElementById('requestsPage');
         if (requestsPage && !requestsPage.classList.contains('hidden')) {
             await loadRequests();
         }
         
-        // Reload dashboard to remove from stats
         await loadDashboard();
-        
-        // Also reload any other affected views
-        if (typeof loadProjects === 'function') {
-            await loadProjects();
-        }
         
     } catch(error) {
         console.error('❌ Delete error:', error);
         
-        // Still remove from all arrays even on error
+        // Still remove from all arrays
         budgetRequests = budgetRequests.filter(function(req) {
             return req.id !== id;
         });
@@ -5663,7 +5674,6 @@ async function deleteBudgetRequest(id) {
             });
         }
         
-        // Remove row
         if (row) {
             row.style.transition = 'all 0.3s ease';
             row.style.opacity = '0';
@@ -5682,7 +5692,6 @@ async function deleteBudgetRequest(id) {
         
         showToast('⚠️ Request removed from view', false);
         
-        // Refresh views
         var requestsPage = document.getElementById('requestsPage');
         if (requestsPage && !requestsPage.classList.contains('hidden')) {
             await loadRequests();
@@ -5696,6 +5705,7 @@ async function deleteBudgetRequest(id) {
         }
     }
 }
+
 function exportSingleRequestExcel(id) {
     const r = budgetRequests.find(r => r.id === id);
     if (r) {
