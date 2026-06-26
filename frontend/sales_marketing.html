@@ -13,7 +13,7 @@
     <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
     
     <style>
-        /* ====== ALL STYLES FROM PREVIOUS VERSION ====== */
+        /* ====== ALL STYLES ====== */
         * { font-family: 'Inter', sans-serif; }
         body { background: #f0f2f5; transition: background 0.3s ease; font-size: 14px; }
         
@@ -496,7 +496,7 @@
 <div id="viewDailyworkModal" class="modal"><div class="modal-content"><div class="modal-header-custom"><h3><i class="fas fa-calendar-day mr-2"></i>Daily Work Details</h3><button onclick="closeModal('viewDailyworkModal')">&times;</button></div><div class="modal-body-custom"><div id="viewDailyworkContent"></div></div></div></div>
 
 <!-- FUND REQUEST MODAL -->
-<div id="fundRequestModal" class="modal"><div class="modal-content"><div class="modal-header-custom"><h3><i class="fas fa-hand-holding-usd mr-2"></i><span id="fundRequestModalTitle">Add Fund Request</span></h3><button onclick="closeModal('fundRequestModal')">&times;</button></div><div class="modal-body-custom"><input type="hidden" id="frId"><div class="form-group"><label>Title *</label><input type="text" id="frTitle" placeholder="Request title" required></div><div class="form-group"><label>Date *</label><input type="date" id="frDate"></div><div class="form-group"><label>Type</label><select id="frType"><option value="expense" selected>Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="frSource" placeholder="e.g., Marketing, Advertising" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="frAmount" class="money-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="frDesc" rows="3" placeholder="Reason for request..."></textarea></div><div class="flex gap-3"><button onclick="submitFundRequest()" id="submitFrBtn" class="flex-1 btn-primary py-2 rounded-lg">Submit Request</button><button onclick="closeModal('fundRequestModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div></div>
+<div id="fundRequestModal" class="modal"><div class="modal-content"><div class="modal-header-custom"><h3><i class="fas fa-hand-holding-usd mr-2"></i><span id="fundRequestModalTitle">Add Fund Request</span></h3><button onclick="closeModal('fundRequestModal')">&times;</button></div><div class="modal-body-custom"><input type="hidden" id="frId"><div class="form-group"><label>Title *</label><input type="text" id="frTitle" placeholder="Request title" required></div><div class="form-group"><label>Date *</label><input type="date" id="frDate"></div><div class="form-group"><label>Type</label><select id="frType"><option value="expense" selected>Expense</option><option value="income">Income</option></select></div><div class="form-group"><label>Source/Category *</label><input type="text" id="frSource" placeholder="Office" value="Office" required></div><div class="form-group"><label>Amount (TZS) *</label><input type="text" id="frAmount" class="money-input" placeholder="0" required></div><div class="form-group"><label>Description</label><textarea id="frDesc" rows="3" placeholder="Reason for request..."></textarea></div><div class="flex gap-3"><button onclick="submitFundRequest()" id="submitFrBtn" class="flex-1 btn-primary py-2 rounded-lg">Submit Request</button><button onclick="closeModal('fundRequestModal')" class="flex-1 bg-gray-200 py-2 rounded-lg">Cancel</button></div></div></div></div>
 
 <div id="viewFundRequestModal" class="modal"><div class="modal-content"><div class="modal-header-custom"><h3><i class="fas fa-hand-holding-usd mr-2"></i>Fund Request Details</h3><button onclick="closeModal('viewFundRequestModal')">&times;</button></div><div class="modal-body-custom"><div id="viewFundRequestContent"></div><div id="viewFundRequestButtons" class="detail-buttons"></div></div></div></div>
 
@@ -686,18 +686,94 @@ function setupMoneyInputs() {
     });
 }
 
+// ============================================================
+// FIX: fetchUnviewedCounts - USIENDELEE COUNT ZA ZAMANI
+// ============================================================
 function fetchUnviewedCounts() {
     return apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID)
     .then(function(res) {
+        console.log('📥 fetchUnviewedCounts response:', res);
+        
         if (res.success && res.data) {
+            // ============================================================
+            // HESABU KUTOKA FUNDREQUESTS ARRAY (HALISI)
+            // ============================================================
+            var realCount = fundRequests.filter(function(r) { 
+                return r._is_unviewed === true; 
+            }).length;
+            
+            console.log('📊 Real count from fundRequests:', realCount);
+            console.log('📊 Count from server:', res.data.fund_requests);
+            
+            // ============================================================
+            // TUMIA COUNT HALISI, SI KUTOKA SERVER
+            // ============================================================
+            unviewedRequestsCount = realCount;
+            
+            // Update other counts from server (campaigns, reports)
             unviewedCampaignsCount = parseInt(res.data.campaigns) || 0;
             unviewedReportsCount = parseInt(res.data.reports) || 0;
-            unviewedRequestsCount = parseInt(res.data.fund_requests) || 0;
+            
+            // Update badges
             updateCampaignBadge();
             updateReportBadge();
             updateRequestBadge();
+            
+            console.log('📊 Final unviewedRequestsCount:', unviewedRequestsCount);
+            
+            return res.data;
         }
+        return null;
     })
+    .catch(function(e) {
+        console.error('❌ fetchUnviewedCounts error:', e);
+        return null;
+    });
+}
+
+function updateRequestBadge() { 
+    var badge = document.getElementById('requestBadge'); 
+    if(!badge) {
+        console.warn('⚠️ requestBadge element not found!');
+        return;
+    }
+    
+    // ============================================================
+    // HESABU KUTOKA FUNDREQUESTS ARRAY - HALISI
+    // ============================================================
+    var countFromArray = fundRequests.filter(function(r) { 
+        return r._is_unviewed === true; 
+    }).length;
+    
+    // ============================================================
+    // TUMIA COUNT KUTOKA ARRAY (HALISI) - IGNORE GLOBAL
+    // ============================================================
+    var finalCount = countFromArray;
+    
+    console.log('🔔 Updating request badge:');
+    console.log('  - From _is_unviewed:', countFromArray);
+    console.log('  - Final count:', finalCount);
+    
+    // ============================================================
+    // UPDATE GLOBAL VARIABLE KUWA HALISI
+    // ============================================================
+    unviewedRequestsCount = finalCount;
+    
+    // ============================================================
+    // UPDATE BADGE
+    // ============================================================
+    if(finalCount > 0) { 
+        badge.classList.remove('hidden'); 
+        badge.innerText = finalCount > 99 ? '99+' : finalCount; 
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+    } else { 
+        badge.classList.add('hidden'); 
+        badge.style.display = 'none';
+        badge.innerText = '0';
+    } 
+    
+    return finalCount;
 }
 
 function markNotificationViewed(itemType, itemId) {
@@ -734,62 +810,25 @@ function updateReportBadge() {
 
 function updateRequestBadge() { 
     var badge = document.getElementById('requestBadge'); 
-    if(!badge) {
-        console.warn('⚠️ requestBadge element not found!');
-        return;
-    }
+    if(!badge) return;
     
-    // ============================================================
-    // HESABU KUTOKA FUNDREQUESTS ARRAY
-    // ============================================================
-    var countFromArray = fundRequests.filter(function(r) { 
+    // HESABU KUTOKA FUNDREQUESTS ARRAY PEKEE
+    var count = fundRequests.filter(function(r) { 
         return r._is_unviewed === true; 
     }).length;
     
-    // ============================================================
-    // HESABU KUTOKA VIEWEDREQUESTIDS
-    // ============================================================
-    var countFromIds = fundRequests.filter(function(r) {
-        return r.sent_from_department && 
-               parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID) && 
-               (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
-               viewedRequestIds.indexOf(r.id) === -1;
-    }).length;
+    // UPDATE GLOBAL VARIABLE
+    unviewedRequestsCount = count;
     
-    // ============================================================
-    // HESABU KUTOKA GLOBAL VARIABLE
-    // ============================================================
-    var countFromGlobal = unviewedRequestsCount || 0;
-    
-    // ============================================================
-    // TUMIA COUNT KUBWA ZAIDI (SAFETY)
-    // ============================================================
-    var finalCount = Math.max(countFromArray, countFromIds, countFromGlobal);
-    
-    console.log('🔔 Updating request badge:');
-    console.log('  - From _is_unviewed:', countFromArray);
-    console.log('  - From viewedRequestIds:', countFromIds);
-    console.log('  - From global variable:', countFromGlobal);
-    console.log('  - Final count:', finalCount);
-    
-    // ============================================================
-    // UPDATE BADGE
-    // ============================================================
-    if(finalCount > 0) { 
+    if(count > 0) { 
         badge.classList.remove('hidden'); 
-        badge.innerText = finalCount > 99 ? '99+' : finalCount; 
+        badge.innerText = count > 99 ? '99+' : count; 
         badge.style.display = 'block';
-        badge.style.visibility = 'visible';
     } else { 
         badge.classList.add('hidden'); 
         badge.style.display = 'none';
         badge.innerText = '0';
     } 
-    
-    // Update global variable
-    unviewedRequestsCount = finalCount;
-    
-    return finalCount;
 }
 function markCampaignViewed(id) {
     if(viewedCampaignIds.indexOf(id) === -1) {
@@ -811,6 +850,9 @@ function markReportViewed(id) {
     }
 }
 
+// ============================================================
+// ✅ FIXED: markRequestViewed - SASISHA FUNDREQUESTS NA BADGE
+// ============================================================
 function markRequestViewed(id) {
     console.log('🔔 markRequestViewed called for ID:', id);
     console.log('🔔 Current viewedRequestIds:', viewedRequestIds);
@@ -820,21 +862,42 @@ function markRequestViewed(id) {
         viewedRequestIds.push(id);
         localStorage.setItem('sales_viewedRequestIds', JSON.stringify(viewedRequestIds));
         
-        // Update count
-        unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
-        console.log('🔔 New unviewedRequestsCount:', unviewedRequestsCount);
+        // ============================================================
+        // PIA SASISHA FUNDREQUESTS ARRAY
+        // ============================================================
+        for (var i = 0; i < fundRequests.length; i++) {
+            if (fundRequests[i].id === id) {
+                fundRequests[i]._is_unviewed = false;
+                fundRequests[i].is_viewed_by_department = 1;
+                console.log('📋 Updated fundRequests[' + i + '] _is_unviewed to false');
+                break;
+            }
+        }
         
-        // Update badge
+        // ============================================================
+        // HESABU MPYA
+        // ============================================================
+        var newCount = fundRequests.filter(function(r) { 
+            return r._is_unviewed === true; 
+        }).length;
+        unviewedRequestsCount = newCount;
+        
+        console.log('📊 New unviewed count after markRequestViewed:', unviewedRequestsCount);
+        
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
         updateRequestBadge();
         
-        // Mark notification as viewed in database
+        // ============================================================
+        // CALL API
+        // ============================================================
         markNotificationViewed('fund_request', id);
         
-        // Also update from server
-        fetchUnviewedCounts().then(function() {
-            console.log('🔔 After server sync, count:', unviewedRequestsCount);
-            updateRequestBadge();
-        });
+        // ============================================================
+        // SYNC WITH SERVER
+        // ============================================================
+        fetchUnviewedCounts();
     } else {
         console.log('🔔 Request already viewed:', id);
     }
@@ -1844,7 +1907,7 @@ function openFundRequestModal() {
     document.getElementById('frTitle').value = '';
     document.getElementById('frDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('frType').value = 'expense';
-    document.getElementById('frSource').value = '';
+    document.getElementById('frSource').value = 'Office';  // ✅ Default "Office"
     document.getElementById('frAmount').value = '';
     document.getElementById('frDesc').value = '';
     document.getElementById('fundRequestModalTitle').innerHTML = 'Add Fund Request';
@@ -1852,13 +1915,12 @@ function openFundRequestModal() {
     openModal('fundRequestModal');
 }
 
-
 function submitFundRequest() {
     var id = document.getElementById('frId').value;
     var title = document.getElementById('frTitle').value.trim();
     var request_date = document.getElementById('frDate').value || new Date().toISOString().split('T')[0];
     var type = document.getElementById('frType').value;
-    var source = document.getElementById('frSource').value.trim();
+    var source = document.getElementById('frSource').value.trim() || 'Office';  // ✅ Default "Office" kama haijajazwa
     var amount = parseMoneyValue(document.getElementById('frAmount').value);
     var description = document.getElementById('frDesc').value;
     
@@ -1867,9 +1929,7 @@ function submitFundRequest() {
         return; 
     }
     
-    // ============================================================
-    // CHECK IF EDITING AN APPROVED REQUEST
-    // ============================================================
+    // Check if editing an approved request
     if (id) {
         var existing = fundRequests.find(function(r) { return r.id == id; });
         if (existing && (existing.status === 'approved' || existing.status === 'Approved')) {
@@ -1908,6 +1968,9 @@ function submitFundRequest() {
         }
     });
 }
+// ============================================================
+// ✅ FIXED: fetchFundRequests - HESABU _is_unviewed VIZURI
+// ============================================================
 function fetchFundRequests() {
     return apiCall('get_fund_requests.php?department_id=' + DEPARTMENT_ID)
     .then(function(res) {
@@ -1970,39 +2033,19 @@ function fetchFundRequests() {
         return [];
     });
 }
-// ============================================================
-// ✅ DEBUG FUNCTION - Angalia badge status
-// ============================================================
-function checkBadgeStatus() {
-    var badge = document.getElementById('requestBadge');
-    var count = fundRequests.filter(function(r) { return r._is_unviewed; }).length;
-    
-    console.log('🔍 BADGE STATUS CHECK:');
-    console.log('  - Badge element:', badge);
-    console.log('  - Badge classes:', badge ? badge.className : 'NOT FOUND');
-    console.log('  - Badge display:', badge ? badge.style.display : 'N/A');
-    console.log('  - Badge innerText:', badge ? badge.innerText : 'N/A');
-    console.log('  - Unviewed count:', count);
-    console.log('  - viewedRequestIds:', viewedRequestIds);
-    console.log('  - fundRequests length:', fundRequests.length);
-    
-    // Show all requests with unviewed status
-    fundRequests.forEach(function(r) {
-        if (r._is_unviewed) {
-            console.log('  - UNVIEWED Request #' + r.id + ': ' + (r.title || r.source));
-        }
-    });
-    
-    return count;
-}
 
-// Call this from browser console to check:
-// checkBadgeStatus()
-
+// ============================================================
+// ✅ FIXED: loadFundRequests - HAKIKISHA BADGE INASASISHWA
+// ============================================================
 function loadFundRequests(highlightId) {
     highlightId = highlightId || null;
+    
+    console.log('📊 loadFundRequests called');
+    
     fetchFundRequests().then(function() {
-        fetchUnviewedCounts();
+        console.log('📊 After fetchFundRequests, fundRequests length:', fundRequests.length);
+        console.log('📊 Unviewed count:', unviewedRequestsCount);
+        
         var totalAmount = 0, pendingCount = 0, approvedCount = 0, cancelledCount = 0;
         for (var i = 0; i < fundRequests.length; i++) {
             var r = fundRequests[i];
@@ -2042,9 +2085,7 @@ function loadFundRequests(highlightId) {
             
             actionsHtml = '<button onclick="viewFundRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>';
             
-            // ============================================================
             // EDIT BUTTON - ONLY FOR PENDING REQUESTS (NOT APPROVED)
-            // ============================================================
             if (!isApproved) {
                 actionsHtml += '<button onclick="editFundRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>';
             } else {
@@ -2052,9 +2093,7 @@ function loadFundRequests(highlightId) {
                 actionsHtml += '<span class="text-[8px] text-green-600 bg-green-100 px-2 py-0.5 rounded-full" title="This request has been approved and cannot be edited"><i class="fas fa-check-circle mr-1"></i> Approved</span>';
             }
             
-            // ============================================================
             // DELETE BUTTON - SUPER ADMIN ONLY
-            // ============================================================
             if (DEPARTMENT_ID === 1) {
                 actionsHtml += '<button onclick="deleteFundRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>';
             }
@@ -2079,11 +2118,21 @@ function loadFundRequests(highlightId) {
                 setTimeout(function() { el.classList.remove('search-highlight'); }, 3000); 
             } 
         }
+        
+        // Update badge again
         updateRequestBadge();
     });
 }
 
+// ============================================================
+// ✅ FIXED: viewFundRequestDetails - SASISHA BADGE BAADA YA KUVIEW
+// ============================================================
 function viewFundRequestDetails(id) {
+    console.log('🔍 viewFundRequestDetails called for ID:', id);
+    
+    // ============================================================
+    // TAFUTA REQUEST KATIKA FUNDREQUESTS ARRAY
+    // ============================================================
     var r = null;
     for (var i = 0; i < fundRequests.length; i++) {
         if (fundRequests[i].id === id) {
@@ -2091,134 +2140,117 @@ function viewFundRequestDetails(id) {
             break;
         }
     }
-    if(r) {
-        // ============================================================
-        // CHECK IF UNVIEWED
-        // ============================================================
-        if (r._is_unviewed) {
-            console.log('🔔 Marking request as viewed:', id);
-            
-            // Mark as viewed
-            markRequestViewed(id);
-            r._is_unviewed = false;
-            r.is_viewed_by_department = 1;
-            
-            // Remove yellow background
-            var card = document.getElementById('fr-row-' + id);
-            if (card) { 
-                card.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
-            }
-            
-            // ============================================================
-            // ✅ FORCE UPDATE BADGE - DIRECT MANIPULATION
-            // ============================================================
-            // 1. Update local count
-            unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
-            
-            // 2. Update badge directly
-            updateRequestBadge();
-            
-            // 3. Force update from server
-            fetchUnviewedCounts().then(function() {
-                console.log('✅ Badge updated from server, new count:', unviewedRequestsCount);
-                updateRequestBadge();
-            });
-            
-            // 4. Update localStorage counts
-            localStorage.setItem('sales_unviewedRequestsCount', unviewedRequestsCount);
-        }
-        
-        // ============================================================
-        // SHOW MODAL
-        // ============================================================
-        var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
-        var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
-        var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
-        var typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
-        var typeColor = r.type === 'income' ? '#059669' : '#dc2626';
-        var reviewInfo = '';
-        if (r.reviewed_by) { reviewInfo = '<div class="text-xs text-gray-500 mt-2 pt-2 border-t">Reviewed by: ' + escapeHtml(r.reviewed_by) + ' on ' + formatDateTime(r.reviewed_at) + '</div>'; }
-        
-        var isApproved = (r.status === 'approved' || r.status === 'Approved');
-        
-        document.getElementById('viewFundRequestContent').innerHTML = 
-            '<div class="space-y-2">' +
-                '<div class="bg-gradient-to-r from-orange-600 to-orange-800 text-white p-3 rounded-lg">' +
-                    '<h3 class="text-lg font-bold">' + escapeHtml(r.title || r.source) + '</h3>' +
-                    '<p class="text-xs opacity-90 mt-1">Request #' + r.id + ' · ' + formatDateTime(r.request_date || r.created_at) + '</p>' +
-                    (isApproved ? '<p class="text-xs text-green-300 mt-1"><i class="fas fa-check-circle mr-1"></i> This request has been APPROVED</p>' : '') +
-                '</div>' +
-                '<p><strong>Type:</strong> <span style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;background:' + typeBg + ';color:' + typeColor + ';">' + r.type + '</span></p>' +
-                '<p><strong>Source:</strong> ' + escapeHtml(r.source) + '</p>' +
-                '<p><strong>Amount:</strong> <span class="font-bold text-orange-600">' + formatMoney(r.amount) + '</span></p>' +
-                '<p><strong>Description:</strong> ' + escapeHtml(r.description || '-') + '</p>' +
-                '<p><strong>Status:</strong> <span style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span></p>' +
-                '<div class="user-info">Submitted by: ' + escapeHtml(r.requested_by || r.created_by || CURRENT_USER) + ' on ' + formatDateTime(r.created_at) + '</div>' +
-                reviewInfo + 
-            '</div>';
-        
-        // Buttons
-        var buttonsHtml = 
-            '<button onclick="exportSingleFundRequestExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
-            '<button onclick="exportSingleFundRequestPDF(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>';
-        
-        if (!isApproved) {
-            buttonsHtml += '<button onclick="editFundRequest(' + r.id + ')" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-edit mr-1"></i> Edit</button>';
-        } else {
-            buttonsHtml += '<span class="text-sm text-green-600 bg-green-100 px-3 py-1.5 rounded-full"><i class="fas fa-check-circle mr-1"></i> Approved - Cannot Edit</span>';
-        }
-        
-        if (DEPARTMENT_ID === 1) {
-            buttonsHtml += '<button onclick="deleteFundRequest(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-trash mr-1"></i> Delete</button>';
-        }
-        
-        document.getElementById('viewFundRequestButtons').innerHTML = buttonsHtml;
-        openModal('viewFundRequestModal');
+    
+    if(!r) {
+        showToast('Request not found', true);
+        return;
     }
+    
+    console.log('🔍 Request found:', r.id, r.title, '_is_unviewed:', r._is_unviewed);
+    
+    // ============================================================
+    // MARK AS VIEWED KAMA HAJAVIEW
+    // ============================================================
+    if (r._is_unviewed) {
+        console.log('🔔 Marking request as viewed:', id);
+        
+        // Add to viewed list
+        if(viewedRequestIds.indexOf(id) === -1) {
+            viewedRequestIds.push(id);
+            localStorage.setItem('sales_viewedRequestIds', JSON.stringify(viewedRequestIds));
+        }
+        
+        // Update local object
+        r._is_unviewed = false;
+        r.is_viewed_by_department = 1;
+        
+        // ============================================================
+        // RECALCULATE COUNT KUTOKA FUNDREQUESTS
+        // ============================================================
+        var newCount = fundRequests.filter(function(req) { 
+            return req._is_unviewed === true; 
+        }).length;
+        unviewedRequestsCount = newCount;
+        
+        console.log('📊 New unviewed count:', unviewedRequestsCount);
+        
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
+        updateRequestBadge();
+        
+        // ============================================================
+        // CALL API TO MARK VIEWED
+        // ============================================================
+        markNotificationViewed('fund_request', id);
+        
+        // ============================================================
+        // REMOVE YELLOW BACKGROUND
+        // ============================================================
+        var card = document.getElementById('fr-row-' + id);
+        if (card) { 
+            card.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+        }
+        
+        // ============================================================
+        // REMOVE NEW BADGE IF EXISTS
+        // ============================================================
+        var badgeElement = card ? card.querySelector('.new-badge') : null;
+        if (badgeElement) badgeElement.remove();
+    }
+    
+    // ============================================================
+    // SHOW MODAL
+    // ============================================================
+    var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
+    var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
+    var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
+    var typeBg = r.type === 'income' ? '#d1fae5' : '#fee2e2';
+    var typeColor = r.type === 'income' ? '#059669' : '#dc2626';
+    var reviewInfo = '';
+    if (r.reviewed_by) { reviewInfo = '<div class="text-xs text-gray-500 mt-2 pt-2 border-t">Reviewed by: ' + escapeHtml(r.reviewed_by) + ' on ' + formatDateTime(r.reviewed_at) + '</div>'; }
+    
+    var isApproved = (r.status === 'approved' || r.status === 'Approved');
+    
+    document.getElementById('viewFundRequestContent').innerHTML = 
+        '<div class="space-y-2">' +
+            '<div class="bg-gradient-to-r from-orange-600 to-orange-800 text-white p-3 rounded-lg">' +
+                '<h3 class="text-lg font-bold">' + escapeHtml(r.title || r.source) + '</h3>' +
+                '<p class="text-xs opacity-90 mt-1">Request #' + r.id + ' · ' + formatDateTime(r.request_date || r.created_at) + '</p>' +
+                (isApproved ? '<p class="text-xs text-green-300 mt-1"><i class="fas fa-check-circle mr-1"></i> This request has been APPROVED</p>' : '') +
+            '</div>' +
+            '<p><strong>Type:</strong> <span style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;background:' + typeBg + ';color:' + typeColor + ';">' + r.type + '</span></p>' +
+            '<p><strong>Source:</strong> ' + escapeHtml(r.source) + '</p>' +
+            '<p><strong>Amount:</strong> <span class="font-bold text-orange-600">' + formatMoney(r.amount) + '</span></p>' +
+            '<p><strong>Description:</strong> ' + escapeHtml(r.description || '-') + '</p>' +
+            '<p><strong>Status:</strong> <span style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span></p>' +
+            '<div class="user-info">Submitted by: ' + escapeHtml(r.requested_by || r.created_by || CURRENT_USER) + ' on ' + formatDateTime(r.created_at) + '</div>' +
+            reviewInfo + 
+        '</div>';
+    
+    // ============================================================
+    // BUTTONS - NO EDIT BUTTON FOR APPROVED REQUESTS
+    // ============================================================
+    var buttonsHtml = 
+        '<button onclick="exportSingleFundRequestExcel(' + r.id + ')" class="btn-success text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-excel mr-1"></i> Excel</button>' +
+        '<button onclick="exportSingleFundRequestPDF(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-file-pdf mr-1"></i> PDF</button>';
+    
+    // EDIT BUTTON - ONLY IF NOT APPROVED
+    if (!isApproved) {
+        buttonsHtml += '<button onclick="editFundRequest(' + r.id + ')" class="btn-warning text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-edit mr-1"></i> Edit</button>';
+    } else {
+        buttonsHtml += '<span class="text-sm text-green-600 bg-green-100 px-3 py-1.5 rounded-full"><i class="fas fa-check-circle mr-1"></i> Approved - Cannot Edit</span>';
+    }
+    
+    // DELETE BUTTON - SUPER ADMIN ONLY
+    if (DEPARTMENT_ID === 1) {
+        buttonsHtml += '<button onclick="deleteFundRequest(' + r.id + ')" class="btn-danger text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-trash mr-1"></i> Delete</button>';
+    }
+    
+    document.getElementById('viewFundRequestButtons').innerHTML = buttonsHtml;
+    openModal('viewFundRequestModal');
 }
 
-// ============================================================
-// ✅ NEW FUNCTION: UPDATE SINGLE REQUEST ROW
-// ============================================================
-function updateRequestRow(id) {
-    var row = document.getElementById('fr-row-' + id);
-    if (!row) return;
-    
-    // Find the request in data
-    var r = fundRequests.find(function(req) { return req.id === id; });
-    if (!r) return;
-    
-    // Update status badge
-    var statusCell = row.querySelector('td:nth-child(7)');
-    if (statusCell) {
-        var statusBg = (r.status === 'pending' || r.status === 'Pending') ? '#fef3c7' : (r.status === 'approved' || r.status === 'Approved') ? '#d1fae5' : '#fee2e2';
-        var statusColor = (r.status === 'pending' || r.status === 'Pending') ? '#d97706' : (r.status === 'approved' || r.status === 'Approved') ? '#059669' : '#dc2626';
-        var statusText = (r.status === 'pending' || r.status === 'Pending') ? 'Pending' : (r.status === 'approved' || r.status === 'Approved') ? 'Approved' : 'Cancelled';
-        statusCell.innerHTML = '<span style="display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';">' + statusText + '</span>';
-    }
-    
-    // Update actions
-    var actionsCell = row.querySelector('td:last-child');
-    if (actionsCell) {
-        var isApproved = (r.status === 'approved' || r.status === 'Approved');
-        var actionsHtml = '<button onclick="viewFundRequestDetails(' + r.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>';
-        
-        if (!isApproved) {
-            actionsHtml += '<button onclick="editFundRequest(' + r.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>';
-        } else {
-            actionsHtml += '<span class="text-[8px] text-green-600 bg-green-100 px-2 py-0.5 rounded-full" title="This request has been approved and cannot be edited"><i class="fas fa-check-circle mr-1"></i> Approved</span>';
-        }
-        
-        if (DEPARTMENT_ID === 1) {
-            actionsHtml += '<button onclick="deleteFundRequest(' + r.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>';
-        }
-        
-        actionsCell.innerHTML = '<div class="flex gap-1 justify-center flex-wrap">' + actionsHtml + '</div>';
-    }
-    
-    // Remove unviewed background
-    row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
-}
 function editFundRequest(id) {
     var r = null;
     for (var i = 0; i < fundRequests.length; i++) {
@@ -2233,17 +2265,6 @@ function editFundRequest(id) {
         // ============================================================
         if (r.status === 'approved' || r.status === 'Approved') {
             showToast('❌ This request has been approved and cannot be edited.', true);
-            // Highlight the row
-            var row = document.getElementById('fr-row-' + id);
-            if (row) {
-                row.style.transition = 'all 0.3s ease';
-                row.style.borderLeft = '3px solid #ef4444';
-                row.style.background = '#fee2e2';
-                setTimeout(function() {
-                    row.style.background = '';
-                    row.style.borderLeft = '';
-                }, 3000);
-            }
             return;
         }
         
@@ -2251,7 +2272,7 @@ function editFundRequest(id) {
         document.getElementById('frTitle').value = r.title || r.source;
         document.getElementById('frDate').value = r.request_date || r.transaction_date || new Date().toISOString().split('T')[0];
         document.getElementById('frType').value = r.type;
-        document.getElementById('frSource').value = r.source;
+        document.getElementById('frSource').value = r.source || 'Office';  // ✅ Weka default ikiwa source ipo
         document.getElementById('frAmount').value = r.amount;
         document.getElementById('frDesc').value = r.description || '';
         document.getElementById('fundRequestModalTitle').innerHTML = 'Edit Fund Request';
@@ -2260,9 +2281,6 @@ function editFundRequest(id) {
     }
 }
 
-// ============================================================
-// DELETE FUND REQUEST - SUPER ADMIN ONLY
-// ============================================================
 async function deleteFundRequest(id) {
     // Tafuta request
     const r = fundRequests.find(req => req.id === id);
