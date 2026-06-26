@@ -1109,9 +1109,6 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 // NOTIFICATIONS SYSTEM - FIXED
 // ============================================================
 
-// ============================================================
-// FETCH UNVIEWED COUNTS - FIXED
-// ============================================================
 async function fetchUnviewedCounts() {
     try {
         const url = API_BASE + 'get_unviewed_count.php?department_id=' + DEPARTMENT_ID;
@@ -1129,10 +1126,11 @@ async function fetchUnviewedCounts() {
         
         if (!response.ok) {
             console.warn('⚠️ get_unviewed_count.php returned status:', response.status);
-            // Set default values
-            unviewedProjectsCount = 0;
-            unviewedReportsCount = 0;
-            unviewedRequestsCount = 0;
+            // Tumia local data
+            updateRequestBadge();
+            updateProjectBadge();
+            updateReportBadge();
+            updateDashboardBadges();
             return;
         }
         
@@ -1144,23 +1142,33 @@ async function fetchUnviewedCounts() {
             unviewedReportsCount = parseInt(result.data.reports) || 0;
             unviewedRequestsCount = parseInt(result.data.fund_requests) || 0;
         } else {
-            unviewedProjectsCount = 0;
-            unviewedReportsCount = 0;
-            unviewedRequestsCount = 0;
+            // Tumia local data
+            updateRequestBadge();
+            updateProjectBadge();
+            updateReportBadge();
+            updateDashboardBadges();
+            return;
         }
         
-        // Update badges
-        updateBadgesDirectly();
+        // ============================================================
+        // UPDATE ALL BADGES - DIRECTLY
+        // ============================================================
+        updateRequestBadge();
+        updateProjectBadge();
+        updateReportBadge();
+        updateDashboardBadges();
+        
+        console.log('✅ Badges updated - Requests:', unviewedRequestsCount);
         
     } catch (error) {
         console.warn('⚠️ Error fetching unviewed counts:', error);
-        // Set default values on error
-        unviewedProjectsCount = 0;
-        unviewedReportsCount = 0;
-        unviewedRequestsCount = 0;
+        // Tumia local data
+        updateRequestBadge();
+        updateProjectBadge();
+        updateReportBadge();
+        updateDashboardBadges();
     }
 }
-
 // ============================================================
 // UPDATE BADGES DIRECTLY - BILA DEPENDENCIES
 // ============================================================
@@ -1198,14 +1206,12 @@ function updateBadgesDirectly() {
         }
     }
 }
-// ============================================================
-// UPDATE DASHBOARD BADGES
-// ============================================================
 function updateDashboardBadges() {
     const projectBadge = document.getElementById('projectNewBadge');
     const reportBadge = document.getElementById('reportNewBadge');
     const requestBadge = document.getElementById('requestNewBadge');
 
+    // Project badge on dashboard
     if (projectBadge) {
         if (unviewedProjectsCount > 0) {
             projectBadge.style.display = 'block';
@@ -1215,6 +1221,7 @@ function updateDashboardBadges() {
         }
     }
 
+    // Report badge on dashboard
     if (reportBadge) {
         if (unviewedReportsCount > 0) {
             reportBadge.style.display = 'block';
@@ -1224,6 +1231,7 @@ function updateDashboardBadges() {
         }
     }
 
+    // Request badge on dashboard
     if (requestBadge) {
         if (unviewedRequestsCount > 0) {
             requestBadge.style.display = 'block';
@@ -1233,10 +1241,6 @@ function updateDashboardBadges() {
         }
     }
 }
-
-// ============================================================
-// MARK NOTIFICATION VIEWED - FIXED
-// ============================================================
 async function markNotificationViewed(itemType, itemId) {
     try {
         console.log(`📡 Marking ${itemType} #${itemId} as viewed...`);
@@ -1249,9 +1253,6 @@ async function markNotificationViewed(itemType, itemId) {
         
         console.log('📤 Payload:', payload);
         
-        // ============================================================
-        // DIRECT FETCH - KWA DEBUGGING
-        // ============================================================
         const response = await fetch(API_BASE + 'mark_notification_viewed.php', {
             method: 'POST',
             headers: {
@@ -1269,77 +1270,31 @@ async function markNotificationViewed(itemType, itemId) {
         if (result && result.success) {
             console.log(`✅ Notification marked as viewed: ${itemType} #${itemId}`);
             
-            // Punguiza unviewed count
-            if (itemType === 'project') {
-                unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
-                updateProjectBadge();
+            // ============================================================
+            // UPDATE LOCAL COUNTS
+            // ============================================================
+            if (itemType === 'fund_request') {
+                unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
+                updateRequestBadge();
                 updateDashboardBadges();
                 
-                // Update local project
-                const project = projectsData.find(p => p.id === parseInt(itemId));
-                if (project) {
-                    project.is_viewed_by_department = 1;
-                    project._is_unviewed = 0;
-                    
-                    const card = document.getElementById(`proj-card-${itemId}`);
-                    if (card) {
-                        const badge = card.querySelector('.new-badge');
-                        if (badge) badge.remove();
-                    }
+                // Remove yellow highlight from row
+                const row = document.getElementById(`req-row-${itemId}`);
+                if (row) {
+                    row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
                 }
             }
             
             return result;
         } else {
             console.warn('⚠️ Failed to mark notification as viewed:', result?.message);
-            
-            // Even if API fails, update locally
-            if (itemType === 'project') {
-                unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
-                updateProjectBadge();
-                updateDashboardBadges();
-                
-                const project = projectsData.find(p => p.id === parseInt(itemId));
-                if (project) {
-                    project.is_viewed_by_department = 1;
-                    project._is_unviewed = 0;
-                    
-                    const card = document.getElementById(`proj-card-${itemId}`);
-                    if (card) {
-                        const badge = card.querySelector('.new-badge');
-                        if (badge) badge.remove();
-                    }
-                }
-            }
-            
             return result;
         }
     } catch (error) {
         console.error('❌ Error marking notification viewed:', error);
-        
-        // Even on network error, update locally
-        if (itemType === 'project') {
-            unviewedProjectsCount = Math.max(0, unviewedProjectsCount - 1);
-            updateProjectBadge();
-            updateDashboardBadges();
-            
-            const project = projectsData.find(p => p.id === parseInt(itemId));
-            if (project) {
-                project.is_viewed_by_department = 1;
-                project._is_unviewed = 0;
-                
-                const card = document.getElementById(`proj-card-${itemId}`);
-                if (card) {
-                    const badge = card.querySelector('.new-badge');
-                    if (badge) badge.remove();
-                }
-            }
-        }
-        
         return { success: false, message: error.message };
     }
 }
-
 // ============================================================
 // ADD NOTIFICATION - FIXED
 // ============================================================
@@ -3751,15 +3706,35 @@ function updateReportBadge() {
 
 function updateRequestBadge() {
     const badge = document.getElementById('requestBadge');
-    if (badge) {
-        if (unviewedRequestsCount > 0) {
-            badge.classList.remove('hidden');
-            badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount;
-        } else {
-            badge.classList.add('hidden');
-        }
+    if (!badge) {
+        console.log('ℹ️ Request badge element not found');
+        return;
+    }
+    
+    // ============================================================
+    // HESABU UNVIEWED REQUESTS - KWA LOCAL DATA
+    // ============================================================
+    const unviewedCount = requestsData.filter(r => {
+        return (r.status === 'pending' || r.status === 'Pending') && 
+               !viewedRequestIds.includes(r.id);
+    }).length;
+    
+    // Update global variable
+    unviewedRequestsCount = unviewedCount;
+    
+    console.log('🔔 Request badge update - Unviewed:', unviewedCount);
+    
+    if (unviewedCount > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.innerText = unviewedCount > 99 ? '99+' : unviewedCount;
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.innerText = '0';
     }
 }
+
 // ============================================================
 // RENDER PROJECTS - WITH TAB SWITCHING SUPPORT - COMPLETE
 // ============================================================
@@ -4925,12 +4900,13 @@ function exportDailyWorkToPDF() {
     showToast("📄 Daily Work PDF preview opened - Click 'Save as PDF' to download", false);
 }
 
-// ============================================================
-// REQUESTS SECTION
-// ============================================================
 async function loadRequests(highlightId = null) {
     await fetchRequests();
     await fetchUnviewedCounts();
+    
+        updateRequestBadge();
+    updateDashboardBadges();
+    
     const requestsSection = document.getElementById('requestsSection');
     if (!requestsSection) return;
     let html = `
@@ -4973,6 +4949,43 @@ async function loadRequests(highlightId = null) {
         let amount = parseFloat(r.amount) || 0;
         let descriptionText = r.description ? (r.description.length > 40 ? r.description.substring(0, 40) + '...' : r.description) : '-';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+        
+        // ============================================================
+        // CHECK IF REQUEST IS APPROVED - DISABLE EDIT
+        // ============================================================
+        const isApproved = r.status === 'approved' || r.status === 'Approved';
+        const isPending = r.status === 'pending' || r.status === 'Pending';
+        
+        // ============================================================
+        // ACTIONS - HIDE EDIT FOR APPROVED REQUESTS
+        // ============================================================
+        let actionsHtml = '';
+        
+        if (isApproved) {
+            // Approved - Show only View, NO Edit, NO Delete
+            actionsHtml = `
+                <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                <span class="text-[8px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full" title="Approved requests cannot be edited">
+                    <i class="fas fa-check-circle mr-1"></i> Approved
+                </span>
+            `;
+        } else if (isPending) {
+            // Pending - Show View, Edit, Delete
+            actionsHtml = `
+                <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+            `;
+        } else {
+            // Cancelled - Show View only
+            actionsHtml = `
+                <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
+                <span class="text-[8px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full" title="Cancelled requests cannot be edited">
+                    <i class="fas fa-times-circle mr-1"></i> Cancelled
+                </span>
+            `;
+        }
+        
         tableHtml += `<tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}">
             <td class="date-cell">${formatDisplayDate(r.request_date)}</td>
             <td><span class="status-badge ${typeClass}">${r.type}</span></td>
@@ -4982,9 +4995,7 @@ async function loadRequests(highlightId = null) {
             <td><span class="status-badge ${statusClass}">${statusText}</span></td>
             <td class="text-center">
                 <div class="flex gap-1 justify-center">
-                    <button onclick="viewRequestDetails(${r.id})" class="action-btn view"><i class="fas fa-eye"></i></button>
-                    <button onclick="editRequest(${r.id})" class="action-btn edit"><i class="fas fa-edit"></i></button>
-                    <button onclick="deleteRequest(${r.id})" class="action-btn delete"><i class="fas fa-trash"></i></button>
+                    ${actionsHtml}
                 </div>
             </td>
         </tr>`;
@@ -4996,7 +5007,6 @@ async function loadRequests(highlightId = null) {
     }
     updateRequestBadge();
 }
-
 async function submitRequest() {
     let id = document.getElementById('reqId').value;
     let request_date = document.getElementById('reqDate').value || new Date().toISOString().split('T')[0];
@@ -5042,14 +5052,86 @@ async function submitRequest() {
 async function viewRequestDetails(id) {
     const r = requestsData.find(r => r.id == id);
     if(r) {
+        // ============================================================
+        // MARK AS VIEWED - IKIWA HAJAVIEW
+        // ============================================================
         if(!viewedRequestIds.includes(id)) {
             viewedRequestIds.push(id);
             localStorage.setItem('townplanning_viewedRequestIds', JSON.stringify(viewedRequestIds));
+            
+            // ============================================================
+            // PUNGUZA UNVIEWED COUNT NA UPDATE BADGE
+            // ============================================================
+            unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1);
+            
+            // Update badge immediately
+            updateRequestBadge();
+            
+            // Also update dashboard badges
+            updateDashboardBadges();
+            
+            // Call API to mark as viewed
+            try {
+                const res = await apiCall('mark_notification_viewed.php', 'POST', {
+                    item_type: 'fund_request',
+                    item_id: parseInt(id),
+                    department_id: DEPARTMENT_ID
+                });
+                console.log('✅ Marked request as viewed:', res);
+            } catch(e) {
+                console.log('Error marking request viewed:', e);
+            }
+            
+            // Refresh unviewed counts from server
             await fetchUnviewedCounts();
         }
+        
         let statusClass = r.status === 'approved' ? 'status-approved' : r.status === 'cancelled' ? 'status-cancelled' : 'status-pending';
         let statusText = r.status === 'approved' ? 'Approved' : r.status === 'cancelled' ? 'Cancelled' : 'Pending';
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+        
+        const isApproved = r.status === 'approved' || r.status === 'Approved';
+        const isPending = r.status === 'pending' || r.status === 'Pending';
+        
+        let statusMessage = '';
+        if (isApproved) {
+            statusMessage = `
+                <div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg text-center">
+                    <i class="fas fa-check-circle text-green-600 text-xl mr-2"></i>
+                    <span class="text-sm font-semibold text-green-700 dark:text-green-400">
+                        ✅ This request has been APPROVED
+                    </span>
+                    <p class="text-xs text-green-600 dark:text-green-400 mt-1">
+                        Approved requests cannot be edited. Please contact Finance if you need changes.
+                    </p>
+                </div>
+            `;
+        } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+            statusMessage = `
+                <div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg text-center">
+                    <i class="fas fa-times-circle text-red-600 text-xl mr-2"></i>
+                    <span class="text-sm font-semibold text-red-700 dark:text-red-400">
+                        ❌ This request has been CANCELLED
+                    </span>
+                    <p class="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Cancelled requests cannot be edited.
+                    </p>
+                </div>
+            `;
+        } else {
+            statusMessage = `
+                <div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg text-center">
+                    <i class="fas fa-clock text-yellow-600 text-xl mr-2"></i>
+                    <span class="text-sm font-semibold text-yellow-700 dark:text-yellow-400">
+                        ⏳ This request is PENDING approval
+                    </span>
+                    <p class="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                        You can edit this request until it is approved.
+                    </p>
+                </div>
+            `;
+        }
+        
         document.getElementById('viewRequestContent').innerHTML = `
             <div class="space-y-2">
                 <p><strong>Date:</strong> ${formatDisplayDate(r.request_date)}</p>
@@ -5059,20 +5141,86 @@ async function viewRequestDetails(id) {
                 <p><strong>Description:</strong> ${escapeHtml(r.description||'-')}</p>
                 <p><strong>Status:</strong> <span class="status-badge ${statusClass}">${statusText}</span></p>
                 <div class="user-info">Submitted by: ${escapeHtml(r.requested_by || CURRENT_USER)} on ${formatDateTime(r.created_at)}</div>
+                ${statusMessage}
             </div>
         `;
-        document.getElementById('viewRequestButtons').innerHTML = `
+        
+        let buttonsHtml = `
             <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
             <button onclick="exportSingleRequestPDFWindow(${r.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>
         `;
+        
+        if (isPending) {
+            buttonsHtml += `
+                <button onclick="editRequest(${r.id}); closeModal('viewRequestModal')" class="btn-warning">
+                    <i class="fas fa-edit"></i> Edit
+                </button>
+            `;
+        } else {
+            buttonsHtml += `
+                <span class="text-[10px] text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full" title="Cannot edit approved/cancelled requests">
+                    <i class="fas fa-lock mr-1"></i> Cannot Edit
+                </span>
+            `;
+        }
+        
+        document.getElementById('viewRequestButtons').innerHTML = buttonsHtml;
         openModal('viewRequestModal');
-        loadRequests();
+        
+        // ============================================================
+        // REFRESH DATA
+        // ============================================================
+        await loadRequests();
+        await renderDashboard();
     }
 }
 
 function editRequest(id) { 
     const r = requestsData.find(r => r.id == id); 
     if(r) { 
+        // ============================================================
+        // CHECK IF REQUEST IS APPROVED - BLOCK EDITING
+        // ============================================================
+        if (r.status === 'approved' || r.status === 'Approved') {
+            showToast('⚠️ This request has been approved and cannot be edited.', true);
+            
+            // Show additional alert with explanation
+            setTimeout(() => {
+                alert(
+                    '🚫 Edit Not Allowed\n\n' +
+                    'This fund request has already been APPROVED.\n\n' +
+                    'Approved requests cannot be edited because:\n' +
+                    '• They have been processed by Finance/Super Admin\n' +
+                    '• Changing the amount or details would affect financial records\n' +
+                    '• The approval process is complete\n\n' +
+                    'If you need to make changes, please:\n' +
+                    '• Contact Finance Department\n' +
+                    '• Create a new request with corrections\n' +
+                    '• Contact Super Admin for assistance'
+                );
+            }, 500);
+            return;
+        }
+        
+        // ============================================================
+        // CHECK IF REQUEST IS CANCELLED - BLOCK EDITING
+        // ============================================================
+        if (r.status === 'cancelled' || r.status === 'Cancelled') {
+            showToast('⚠️ This request has been cancelled and cannot be edited.', true);
+            setTimeout(() => {
+                alert(
+                    '🚫 Edit Not Allowed\n\n' +
+                    'This fund request has been CANCELLED.\n\n' +
+                    'Cancelled requests cannot be edited.\n\n' +
+                    'Please create a new request if you need to submit again.'
+                );
+            }, 500);
+            return;
+        }
+        
+        // ============================================================
+        // ONLY PENDING REQUESTS CAN BE EDITED
+        // ============================================================
         document.getElementById('reqId').value = r.id; 
         document.getElementById('reqDate').value = r.request_date; 
         document.getElementById('reqType').value = r.type; 

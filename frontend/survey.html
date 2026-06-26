@@ -4912,7 +4912,7 @@ function switchProjectTab(tab) {
 }
 
 // ============================================================
-// REQUESTS SECTION - USING fund_requests TABLE
+// LOAD REQUESTS - FULL FUNCTION (With Edit & Delete Restrictions)
 // ============================================================
 async function loadRequests(highlightId = null) {
     await fetchRequests();
@@ -4963,6 +4963,14 @@ async function loadRequests(highlightId = null) {
         let titleText = r.title || r.source || '-';
         let shortTitle = titleText.length > 40 ? titleText.substring(0, 40) + '...' : titleText;
         
+        // ============================================================
+        // CHECK STATUS - AMUA KAMA REQUEST INAWEZA KUHARIRIWA
+        // ============================================================
+        const isPending = (r.status === 'pending' || r.status === 'Pending');
+        const isApproved = (r.status === 'approved' || r.status === 'Approved');
+        const isCancelled = (r.status === 'cancelled' || r.status === 'Cancelled');
+        const isReadOnly = isApproved || isCancelled;
+        
         tableHtml += `
             <tr id="req-row-${r.id}" class="${isNew ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''} ${isHighlighted ? 'search-highlight' : ''}" style="border-bottom:1px solid #e5e7eb;">
                 <td style="padding:12px 10px;white-space:nowrap;">${formatDate(r.request_date || r.created_at)}</td>
@@ -4971,11 +4979,34 @@ async function loadRequests(highlightId = null) {
                 <td style="padding:12px 10px;text-align:right;font-weight:700;color:#ea580c;white-space:nowrap;">${formatCurrency(amount)}</td>
                 <td style="padding:12px 10px;word-break:break-word;" title="${escapeHtml(r.description || '-')}">${escapeHtml((r.description || '-').substring(0, 60))}${(r.description || '').length > 60 ? '...' : ''}</td>
                 <td style="padding:12px 10px;"><span class="status-badge ${statusClass}" style="padding:4px 10px;border-radius:20px;font-size:11px;display:inline-block;">${statusText}</span></td>
+                
+                <!-- ============================================================
+                     ACTIONS COLUMN - FIXED
+                     ============================================================ -->
                 <td style="padding:12px 10px;text-align:center;">
                     <div class="flex gap-1 justify-center">
+                        <!-- VIEW BUTTON - Always visible -->
                         <button onclick="viewRequestDetails(${r.id})" class="action-btn view" title="View"><i class="fas fa-eye"></i></button>
-                        <button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                        
+                        <!-- ============================================================
+                             EDIT BUTTON - ONLY FOR PENDING REQUESTS
+                             ============================================================ -->
+                        ${isPending ? 
+                            `<button onclick="editRequest(${r.id})" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button>` : 
+                            `<span class="text-[8px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full" title="${statusText} - Read Only">
+                                <i class="fas fa-lock mr-0.5"></i> ${statusText}
+                             </span>`
+                        }
+                        
+                        <!-- ============================================================
+                             DELETE BUTTON - ONLY FOR SUPER ADMIN
+                             ============================================================ -->
+                        ${DEPARTMENT_ID === 1 ? 
+                            `<button onclick="deleteRequest(${r.id})" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button>` : 
+                            `<span class="text-[8px] text-gray-400 px-1.5 py-0.5" title="Only Super Admin can delete">
+                                <i class="fas fa-lock mr-0.5"></i>
+                             </span>`
+                        }
                     </div>
                 </td>
             </tr>
@@ -4992,7 +5023,6 @@ async function loadRequests(highlightId = null) {
     }
     updateRequestBadge();
 }
-
 // ============================================================
 // FUNCTIONS FOR REQUESTS (INCOME/EXPENSE)
 // ============================================================
@@ -5015,6 +5045,20 @@ async function submitRequest() {
     let description = document.getElementById('reqDesc').value;
     
     if (!title || amount <= 0) { showToast('Title/Source and amount required', true); return; }
+    
+    // ============================================================
+    // CHECK IF REQUEST IS APPROVED/CANCELLED - ZUIA UPDATE
+    // ============================================================
+    if (id) {
+        const existing = requestsData.find(r => r.id === parseInt(id));
+        if (existing && (existing.status === 'approved' || existing.status === 'Approved' ||
+                         existing.status === 'cancelled' || existing.status === 'Cancelled')) {
+            const statusText = existing.status === 'approved' || existing.status === 'Approved' ? 'APPROVED' : 'CANCELLED';
+            showToast(`⛔ Cannot update a ${statusText} request. Only pending requests can be edited.`, true);
+            closeModal('requestModal');
+            return;
+        }
+    }
     
     let data = { 
         title: title,
@@ -5062,15 +5106,44 @@ async function viewRequestDetails(id) {
         let typeClass = r.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
         let amount = parseFloat(r.amount) || 0;
         
+        // ============================================================
+        // CHECK IF REQUEST IS APPROVED/CANCELLED - ONYESHA READ ONLY
+        // ============================================================
+        const isApproved = r.status === 'approved' || r.status === 'Approved';
+        const isCancelled = r.status === 'cancelled' || r.status === 'Cancelled';
+        const isReadOnly = isApproved || isCancelled;
+        
         let actionHtml = '';
         if (r.requested_by) actionHtml += `<div><i class="fas fa-user-plus text-xs mr-1"></i> Requested by: ${escapeHtml(r.requested_by)} | ${formatDateTime(r.created_at)}</div>`;
         if (r.reviewed_by) actionHtml += `<div><i class="fas fa-check-circle text-xs mr-1"></i> Reviewed by: ${escapeHtml(r.reviewed_by)} | ${formatDateTime(r.reviewed_at)}</div>`;
+        
+        // ============================================================
+        // READ ONLY BADGE KWA APPROVED/CANCELLED
+        // ============================================================
+        let readOnlyBadge = '';
+        if (isApproved) {
+            readOnlyBadge = `<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center gap-2">
+                <i class="fas fa-check-circle text-green-600 text-lg"></i>
+                <div><strong>✅ Approved</strong><br><span class="text-xs text-gray-600 dark:text-gray-400">This request has been approved and cannot be edited.</span></div>
+            </div>`;
+        } else if (isCancelled) {
+            readOnlyBadge = `<div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center gap-2">
+                <i class="fas fa-times-circle text-red-600 text-lg"></i>
+                <div><strong>❌ Cancelled</strong><br><span class="text-xs text-gray-600 dark:text-gray-400">This request has been cancelled and cannot be edited.</span></div>
+            </div>`;
+        } else {
+            readOnlyBadge = `<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center gap-2">
+                <i class="fas fa-clock text-yellow-600 text-lg"></i>
+                <div><strong>⏳ Pending</strong><br><span class="text-xs text-gray-600 dark:text-gray-400">This request is pending approval. You can edit it if needed.</span></div>
+            </div>`;
+        }
         
         document.getElementById('viewRequestContent').innerHTML = `
             <div class="space-y-2">
                 <div class="bg-gradient-to-r from-orange-600 to-orange-800 text-white p-4 rounded-lg">
                     <h3 class="text-lg font-bold">Fund Request #${r.id}</h3>
                     <p class="text-xs opacity-90 mt-1">Submitted: ${formatDateTime(r.created_at)}</p>
+                    ${isReadOnly ? `<p class="text-xs opacity-80 mt-1"><i class="fas fa-lock mr-1"></i> Read Only - ${statusText}</p>` : ''}
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div><span class="font-semibold">Date:</span></div><div>${formatDateTime(r.request_date)}</div>
@@ -5081,24 +5154,63 @@ async function viewRequestDetails(id) {
                     <div><span class="font-semibold">Status:</span></div><div><span class="status-badge ${statusClass}">${statusText}</span></div>
                     <div><span class="font-semibold">Requested By:</span></div><div>${escapeHtml(r.requested_by || r.created_by || CURRENT_USER)}</div>
                 </div>
+                ${readOnlyBadge}
                 ${actionHtml ? `<div class="action-history text-xs text-gray-400 mt-2 pt-2 border-t">${actionHtml}</div>` : ''}
-                ${r.status === 'approved' ? `<div class="mt-3 p-3 bg-green-100 dark:bg-green-900/30 rounded-lg"><i class="fas fa-check-circle text-green-600 mr-2"></i> This request has been approved</div>` : ''}
-                ${r.status === 'pending' ? `<div class="mt-3 p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg"><i class="fas fa-clock text-yellow-600 mr-2"></i> This request is pending approval</div>` : ''}
-                ${r.status === 'cancelled' ? `<div class="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg"><i class="fas fa-times-circle text-red-600 mr-2"></i> This request has been cancelled</div>` : ''}
             </div>
         `;
-        document.getElementById('viewRequestButtons').innerHTML = `
+        
+        // ============================================================
+        // BUTTONS - ZUIA EDIT BUTTON KWA APPROVED/CANCELLED
+        // ============================================================
+        let buttonsHtml = `
             <button onclick="exportSingleRequestExcel(${r.id})" class="btn-success"><i class="fas fa-file-excel"></i> Excel</button>
             <button onclick="exportSingleRequestPDF(${r.id})" class="btn-danger"><i class="fas fa-file-pdf"></i> PDF</button>
         `;
+        
+        // ============================================================
+        // EDIT BUTTON - ONLY FOR PENDING REQUESTS
+        // ============================================================
+        if (!isReadOnly) {
+            buttonsHtml += `<button onclick="editRequest(${r.id})" class="btn-warning"><i class="fas fa-edit"></i> Edit</button>`;
+        } else {
+            buttonsHtml += `<span class="text-[8px] bg-gray-100 text-gray-500 px-2 py-1 rounded-full"><i class="fas fa-lock mr-1"></i> Read Only</span>`;
+        }
+        
+        document.getElementById('viewRequestButtons').innerHTML = buttonsHtml;
         openModal('viewRequestModal');
         loadRequests();
     }
 }
-
 function editRequest(id) { 
     const r = requestsData.find(req => req.id === id); 
     if(r) { 
+        // ============================================================
+        // ZUIA EDITING KWA REQUESTS ZILIZOAPPROVED AU CANCELLED
+        // ============================================================
+        if (r.status === 'approved' || r.status === 'Approved' || 
+            r.status === 'cancelled' || r.status === 'Cancelled') {
+            
+            const statusText = r.status === 'approved' || r.status === 'Approved' ? 'APPROVED' : 'CANCELLED';
+            showToast(`⛔ Cannot edit a ${statusText} request. Only pending requests can be edited.`, true);
+            
+            setTimeout(() => {
+                alert(
+                    `🚫 EDIT NOT ALLOWED\n\n` +
+                    `This request has been ${statusText.toLowerCase()}.\n\n` +
+                    `❌ You cannot edit ${statusText.toLowerCase()} requests.\n\n` +
+                    `✅ You can only edit PENDING requests.\n\n` +
+                    `📋 Request: ${r.title || r.source}\n` +
+                    `📊 Status: ${statusText}\n` +
+                    `💰 Amount: ${formatCurrency(r.amount)}\n\n` +
+                    `👁️ You can still view the request details.`
+                );
+            }, 500);
+            return;
+        }
+        
+        // ============================================================
+        // RUHUSA EDITING KWA PENDING REQUESTS TU
+        // ============================================================
         document.getElementById('reqId').value = r.id; 
         document.getElementById('reqDate').value = r.request_date; 
         document.getElementById('reqType').value = r.type; 
@@ -5108,7 +5220,6 @@ function editRequest(id) {
         openModal('requestModal'); 
     } 
 }
-
 // ============================================================
 // DELETE REQUEST - SUPER ADMIN ONLY
 // ============================================================
