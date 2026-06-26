@@ -3625,22 +3625,221 @@ function editFundRequest(id) {
     }
 }
 
-function deleteFundRequest(id) {
-    if (confirm("Delete this fund request?")) {
-        var r = requestsData.find(function(req) { return req.id === id; });
-        if (r) {
-            addToRecycleBin(id, 'budget_request', r.title).then(function() {
-                apiCall('delete_fund_request.php', 'POST', { request_id: parseInt(id), is_deleted: 1 }).then(function(res) {
-                    if (res.success) {
-                        showToast("Fund request moved to recycle bin");
-                        fetchRequests();
-                        loadRequests();
-                        loadDashboard();
-                    } else {
-                        showToast(res.message || "Failed", true);
+// ============================================================
+// DELETE FUND REQUEST - SUPER ADMIN ONLY
+// ============================================================
+async function deleteFundRequest(id) {
+    // Tafuta request
+    const r = requestsData.find(req => req.id === id);
+    if (!r) {
+        showToast('❌ Request not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // ANGALIA KAMA NI SUPER ADMIN (DEPARTMENT_ID === 1)
+    // ============================================================
+    if (DEPARTMENT_ID !== 1) {
+        // ============================================================
+        // HATIMILIKI DEPARTMENT - HAKUNA RUHUSA YA KUFUTA
+        // ============================================================
+        const deptName = departmentNames[DEPARTMENT_ID] || 'Hatimiliki Department';
+        
+        showToast('⛔ Access Denied: Only Super Admin can delete fund requests.', true);
+        
+        setTimeout(() => {
+            alert(
+                '🚫 PERMISSION DENIED\n\n' +
+                'You are logged in as: ' + deptName + ' (ID: ' + DEPARTMENT_ID + ')\n\n' +
+                '❌ You do NOT have permission to delete fund requests.\n\n' +
+                '🔑 Only Super Admin has permission to delete fund requests.\n\n' +
+                '✅ What you CAN do:\n' +
+                '  • View fund requests\n' +
+                '  • Create new fund requests\n' +
+                '  • Edit your own fund requests (if not yet approved)\n\n' +
+                '📞 Please contact Super Admin if you need a request deleted.'
+            );
+        }, 500);
+        return;
+    }
+    
+    // ============================================================
+    // SUPER ADMIN - PERMANENT DELETE
+    // ============================================================
+    
+    // CONFIRM - FIRST
+    const confirmMsg = 
+        `⚠️ PERMANENT DELETE - SUPER ADMIN\n\n` +
+        `You are about to PERMANENTLY DELETE this fund request from the ENTIRE SYSTEM:\n\n` +
+        `📋 Title: ${r.title || r.source}\n` +
+        `🏢 Department: ${departmentNames[r.department_id] || 'Hatimiliki'}\n` +
+        `💰 Amount: ${formatMoney(r.amount)}\n` +
+        `📊 Status: ${r.status}\n` +
+        `📅 Created: ${formatDateTime(r.created_at)}\n\n` +
+        `⚠️ This will DELETE the request from ALL dashboards:\n` +
+        `   • Super Admin Dashboard\n` +
+        `   • Finance Dashboard\n` +
+        `   • Hatimiliki Dashboard\n\n` +
+        `⚠️ This action CANNOT be undone!\n` +
+        `The request will be permanently removed from the database.\n\n` +
+        `Are you sure you want to continue?`;
+    
+    if (!confirm(confirmMsg)) {
+        showToast('❌ Delete cancelled', false);
+        return;
+    }
+    
+    // ============================================================
+    // SECOND CONFIRMATION - TYPE "DELETE"
+    // ============================================================
+    const secondConfirm = prompt(
+        `⚠️ TYPE "DELETE" TO CONFIRM PERMANENT DELETION\n\n` +
+        `Request ID: #${r.id}\n` +
+        `Title: ${r.title || r.source}\n` +
+        `Department: ${departmentNames[r.department_id] || 'Hatimiliki'}\n` +
+        `Amount: ${formatMoney(r.amount)}\n\n` +
+        `⚠️ This will delete it from ALL dashboards!\n` +
+        `⚠️ This action is IRREVERSIBLE!\n\n` +
+        `Type "DELETE" to confirm:`
+    );
+    
+    if (secondConfirm !== "DELETE") {
+        showToast('❌ Delete cancelled - incorrect confirmation', true);
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const row = document.getElementById(`req-row-${id}`);
+    const deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
+    const originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span> Deleting...';
+        deleteBtn.disabled = true;
+    }
+    
+    try {
+        console.log(`🗑️ Super Admin: Permanently deleting fund request ${id} from Hatimiliki dashboard...`);
+        
+        // ============================================================
+        // CALL API - PERMANENT DELETE
+        // ============================================================
+        const res = await apiCall('delete_fund_request.php', 'POST', {
+            request_id: parseInt(id),
+            id: parseInt(id),
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'Super Admin',
+            department_id: DEPARTMENT_ID, // = 1 (Super Admin)
+            is_admin: 1,
+            permanent_delete: 1
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        if (res && res.success) {
+            // ============================================================
+            // REMOVE FROM LOCAL DATA
+            // ============================================================
+            requestsData = requestsData.filter(req => req.id !== id);
+            
+            // Remove from other arrays if they exist
+            if (typeof budgetRequests !== 'undefined') {
+                budgetRequests = budgetRequests.filter(req => req.id !== id);
+            }
+            if (typeof fundRequestsData !== 'undefined') {
+                fundRequestsData = fundRequestsData.filter(req => req.id !== id);
+            }
+            
+            // ============================================================
+            // REMOVE ROW FROM UI
+            // ============================================================
+            if (row) {
+                row.style.transition = 'all 0.4s ease';
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                row.style.height = '0';
+                row.style.padding = '0';
+                row.style.overflow = 'hidden';
+                row.style.margin = '0';
+                row.style.border = 'none';
+                
+                setTimeout(() => {
+                    if (row.parentNode) {
+                        row.remove();
+                        
+                        const tbody = row.closest('tbody');
+                        if (tbody && tbody.children.length === 0) {
+                            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No fund requests found.</td></tr>';
+                        }
                     }
-                });
-            });
+                }, 400);
+            }
+            
+            // ============================================================
+            // UPDATE COUNTS
+            // ============================================================
+            unviewedRequestsCount = requestsData.filter(req => {
+                return (req.status === 'pending' || req.status === 'Pending') && 
+                       !viewedRequestIds.includes(req.id);
+            }).length;
+            updateRequestBadge();
+            
+            // ============================================================
+            // SHOW SUCCESS
+            // ============================================================
+            showToast(`✅ Fund request #${r.id} permanently deleted from ALL dashboards`, false);
+            addLog(`🗑️ Super Admin permanently deleted fund request: "${r.title || r.source}" (ID: ${r.id})`);
+            
+            // ============================================================
+            // REFRESH DATA - SYNC ALL DASHBOARDS
+            // ============================================================
+            setTimeout(async () => {
+                // Refresh data
+                await fetchRequests();
+                await loadRequests();
+                await loadDashboard();
+                await getUnviewedNotificationsCount();
+                
+                console.log('✅ Data synced - Request removed from all dashboards');
+            }, 500);
+            
+        } else {
+            showToast(res?.message || '❌ Failed to delete request', true);
+        }
+        
+    } catch(error) {
+        console.error('❌ Delete error:', error);
+        
+        // ============================================================
+        // FALLBACK - Remove from UI anyway
+        // ============================================================
+        requestsData = requestsData.filter(req => req.id !== id);
+        
+        if (row) {
+            row.style.transition = 'all 0.3s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        
+        unviewedRequestsCount = requestsData.filter(req => {
+            return (req.status === 'pending' || req.status === 'Pending') && 
+                   !viewedRequestIds.includes(req.id);
+        }).length;
+        updateRequestBadge();
+        
+        showToast('⚠️ Request removed from view', false);
+        
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
         }
     }
 }
