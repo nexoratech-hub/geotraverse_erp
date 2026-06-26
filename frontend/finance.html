@@ -2783,13 +2783,155 @@ function exportAllUploadedReportsToExcel() {
     let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'UploadedReports'); XLSX.writeFile(wb, `uploaded_reports_${new Date().toISOString().slice(0,10)}.xlsx`); showToast('Exported'); 
 }
 
-function exportAllUploadedReportsToPDF() { 
-    if(uploadedReportsData.length===0){ showToast('No reports',true); return; } 
-    let rows = uploadedReportsData.map(d => `<div style="margin-bottom:20px;"><h3>${escapeHtml(d.title)}</h3><p><strong>File:</strong> ${d.file_name}</p><p><strong>Period:</strong> ${d.period}</p><p><strong>Description:</strong> ${escapeHtml(d.description||'')}</p><p><strong>Uploaded By:</strong> ${escapeHtml(d.uploaded_by||'System')}</p><p><strong>Uploaded At:</strong> ${new Date(d.created_at).toLocaleString()}</p><p><strong>File Size:</strong> ${d.file_size ? formatFileSize(d.file_size) : 'Unknown'}</p><hr/></div>`).join(''); 
-    let w=window.open('','_blank'); 
-    w.document.write(`<!DOCTYPE html><html><head><title>All Uploaded Reports</title><style>body{font-family:Arial;padding:20px;}</style></head><body><h1>All Uploaded Reports</h1><p>Generated: ${new Date().toLocaleString()}</p>${rows}<div class="print-btn" style="text-align:center;margin-top:20px;"><button onclick="window.print();setTimeout(()=>window.close(),1000);">Save as PDF</button></div></body></html>`); 
-    w.document.close(); 
-    showToast("PDF preview opened - Click Print to save"); 
+// ============================================================
+// DOWNLOAD ALL UPLOADED REPORTS - EACH REPORT INDIVIDUALLY
+// ============================================================
+
+async function exportAllUploadedReportsToPDF() {
+    if (uploadedReportsData.length === 0) {
+        showToast('No uploaded reports to download', true);
+        return;
+    }
+
+    // Show loading
+    showToast('📄 Downloading ' + uploadedReportsData.length + ' reports...', false);
+
+    let totalReports = uploadedReportsData.length;
+    let downloadedCount = 0;
+    let hasErrors = false;
+
+    for (let d of uploadedReportsData) {
+        try {
+            // ============================================================
+            // BUILD FILE URL - SAME AS VIEW MODAL DOWNLOAD BUTTON
+            // ============================================================
+            let filePath = d.file_path || d.file_name || '';
+            let fileUrl = getFullReportPath(filePath);
+            
+            // If no file path, try API download
+            if (!fileUrl || fileUrl === '') {
+                fileUrl = API_BASE + 'download_report_document.php?id=' + d.id;
+            }
+
+            // ============================================================
+            // DOWNLOAD THE FILE DIRECTLY
+            // ============================================================
+            let fileName = d.file_name || 'report_' + d.id + '.pdf';
+            
+            // Use fetch to download the file
+            let response = await fetch(fileUrl, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                // Try alternative download method
+                let altUrl = API_BASE + 'download_report_document.php?file=' + encodeURIComponent(d.file_name || '');
+                response = await fetch(altUrl, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+            }
+
+            if (response.ok) {
+                // Get the blob
+                let blob = await response.blob();
+                
+                // Create download link
+                let link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Revoke URL after a short delay
+                setTimeout(function() {
+                    URL.revokeObjectURL(link.href);
+                }, 1000);
+
+                downloadedCount++;
+                console.log('✅ Downloaded: ' + fileName);
+            } else {
+                // ============================================================
+                // FALLBACK: Use window.open for the file
+                // ============================================================
+                console.warn('⚠️ Fetch failed for ' + fileName + ', trying window.open fallback');
+                window.open(fileUrl, '_blank');
+                downloadedCount++;
+            }
+
+            // Small delay between downloads to prevent browser blocking
+            await sleep(300);
+
+        } catch(e) {
+            console.error('❌ Error downloading report ' + d.id, e);
+            hasErrors = true;
+            
+            // Try window.open fallback
+            try {
+                let filePath = d.file_path || d.file_name || '';
+                let fileUrl = getFullReportPath(filePath);
+                if (fileUrl) {
+                    window.open(fileUrl, '_blank');
+                    downloadedCount++;
+                }
+            } catch(e2) {
+                console.error('Fallback also failed:', e2);
+            }
+        }
+    }
+
+    // ============================================================
+    // SHOW FINAL RESULT
+    // ============================================================
+    if (downloadedCount === totalReports && !hasErrors) {
+        showToast('✅ All ' + totalReports + ' reports downloaded successfully!', false);
+    } else if (downloadedCount > 0) {
+        showToast('⚠️ Downloaded ' + downloadedCount + ' of ' + totalReports + ' reports. Some may have errors.', true);
+    } else {
+        showToast('❌ Failed to download reports. Please try again.', true);
+    }
+}
+
+// ============================================================
+// GET FULL REPORT PATH - SAME AS VIEW MODAL
+// ============================================================
+
+function getFullReportPath(filePath) {
+    if (!filePath) return null;
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+    if (filePath.startsWith('data:')) return filePath;
+    
+    let cleanPath = filePath;
+    while (cleanPath.startsWith('../')) cleanPath = cleanPath.substring(3);
+    while (cleanPath.startsWith('./')) cleanPath = cleanPath.substring(2);
+    
+    if (cleanPath.includes('assets/uploads/reports/')) {
+        if (cleanPath.startsWith('/geotraverse/')) return cleanPath;
+        return '/geotraverse/' + cleanPath;
+    }
+    
+    if (!cleanPath.includes('/')) {
+        return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath;
+    }
+    
+    let fileName = cleanPath.split('/').pop();
+    if (fileName && !fileName.includes('\\')) {
+        return '/geotraverse/frontend/assets/uploads/reports/' + fileName;
+    }
+    
+    return '/geotraverse/frontend/assets/uploads/reports/' + cleanPath;
+}
+
+// ============================================================
+// SLEEP FUNCTION FOR DELAY BETWEEN DOWNLOADS
+// ============================================================
+
+function sleep(ms) {
+    return new Promise(function(resolve) {
+        setTimeout(resolve, ms);
+    });
 }
 
 // ============================================================
@@ -2939,7 +3081,7 @@ async function deleteUploadedReport(id) {
 }
 
 // ============================================================
-// LOAD REPORTS - COMPLETE WITH EXCEL ALL & PDF ALL
+// LOAD REPORTS - COMPLETE WITH UPLOAD + DOWNLOAD ALL
 // ============================================================
 
 async function loadReports(highlightId = null) {
@@ -3115,7 +3257,7 @@ async function loadReports(highlightId = null) {
     }
 
     // ============================================================
-    // UPLOADED REPORTS TAB - WITH Excel All & PDF All
+    // UPLOADED REPORTS TAB - Upload + Download All ONLY
     // ============================================================
     else {
         html += `
@@ -3128,11 +3270,8 @@ async function loadReports(highlightId = null) {
                     <button onclick="openUploadReportModal()" class="btn-warning">
                         <i class="fas fa-upload mr-1"></i> Upload Report
                     </button>
-                    <button onclick="exportAllUploadedReportsToExcel()" class="btn-success">
-                        <i class="fas fa-file-excel mr-1"></i> Excel All
-                    </button>
-                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-danger">
-                        <i class="fas fa-file-pdf mr-1"></i> PDF All
+                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-success" style="background:#059669; color:white; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s;">
+                        <i class="fas fa-download mr-1"></i> Download All
                     </button>
                 </div>
             </div>
@@ -3238,7 +3377,6 @@ async function loadReports(highlightId = null) {
     // ============================================================
     updateReportBadge();
 }
-
 function switchReportTab(tab) { currentReportTab = tab; loadReports(); }
 
 // ============================================================
@@ -3832,100 +3970,8 @@ function exportAllRequestsToExcel() {
     showToast('Exported to Excel');
 }
 
-// ============================================================
-// ==================== EXPORT TO PDF FUNCTIONS ====================
-// ============================================================
 
-/**
- * Export all reports to PDF
- */
-function exportAllReportsToPDF() {
-    if (reportsData.length === 0) {
-        showToast('No reports to export', true);
-        return;
-    }
-    
-    let rows = reportsData.map(r => {
-        let content = r.content || 'No content available';
-        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
-        let deptName = departmentNames[r.sent_from_department] || 'Finance Department';
-        
-        return `
-            <div style="margin-bottom: 25px; border: 2px solid #059669; border-radius: 12px; overflow: hidden; page-break-inside: avoid;">
-                <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 15px 20px;">
-                    <h3 style="margin: 0; font-size: 16px; font-weight: 700;">${escapeHtml(r.title)}</h3>
-                    <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">${escapeHtml(r.period)} · ${escapeHtml(deptName)} · Status: ${statusText}</p>
-                </div>
-                <div style="padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #475569;">
-                    <strong>Created:</strong> ${formatDateTime(r.created_at)} by ${escapeHtml(r.created_by || 'System')}
-                </div>
-                <div style="padding: 18px 20px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: #1e293b;">
-                    ${escapeHtml(content)}
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    let printWindow = window.open('', '_blank');
-    if (!printWindow) {
-        showToast('Please allow popups to generate PDF', true);
-        return;
-    }
-    
-    printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>All Reports - Finance Department</title>
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
-                .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #059669; }
-                .header { background: linear-gradient(135deg, #059669, #047857); color: white; padding: 25px; text-align: center; }
-                .header h1 { font-size: 24px; margin: 0; }
-                .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
-                .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; font-size: 12px; flex-wrap: wrap; gap: 10px; }
-                .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-                .summary-card { background: white; border-radius: 12px; padding: 15px; text-align: center; border: 1px solid #e5e7eb; }
-                .summary-card .label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
-                .summary-card .value { font-size: 18px; font-weight: 800; margin-top: 8px; }
-                .reports-section { padding: 20px 25px; }
-                .footer { text-align: center; font-size: 9px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-                .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
-                .print-btn button { background: #059669; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-                @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #059669 !important; -webkit-print-color-adjust: exact; } }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📊 All Reports Report</h1>
-                    <p>Finance Department - Complete Reports Overview</p>
-                </div>
-                <div class="info-bar">
-                    <span><strong>Department ID:</strong> ${DEPARTMENT_ID}</span>
-                    <span><strong>Total Reports:</strong> ${reportsData.length}</span>
-                    <span><strong>Generated By:</strong> ${CURRENT_USER}</span>
-                    <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
-                </div>
-                <div class="summary-cards">
-                    <div class="summary-card"><div class="label">📋 Total Reports</div><div class="value">${reportsData.length}</div></div>
-                    <div class="summary-card"><div class="label">✅ Sent</div><div class="value">${reportsData.filter(r => r.status === 'sent').length}</div></div>
-                    <div class="summary-card"><div class="label">✏️ Draft</div><div class="value">${reportsData.filter(r => r.status === 'draft').length}</div></div>
-                    <div class="summary-card"><div class="label">📝 Total Characters</div><div class="value">${reportsData.reduce((sum, r) => sum + (r.content ? r.content.length : 0), 0).toLocaleString()}</div></div>
-                </div>
-                <div class="reports-section">${rows}</div>
-                <div class="footer">GeoTraverse ERP System - Finance Department | Official All Reports Report</div>
-                <div class="print-btn"><button onclick="window.print(); setTimeout(() => window.close(), 1000);">🖨️ Save as PDF / Print</button></div>
-            </div>
-        </body>
-        </html>
-    `);
-    
-    printWindow.document.close();
-    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
-}
+
 function exportSingleReportExcel(id) { const r = reportsData.find(report=>report.id===id); if(r) { let ws=[['Title','Period','Content','Created','Status','Created By']]; ws.push([r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System']); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Report'); XLSX.writeFile(wb, `report_${r.id}.xlsx`); showToast('Exported'); } }
 
 function exportSingleReportPDF(id) {
@@ -3947,11 +3993,388 @@ function exportSingleReportPDF(id) {
 
 function exportAllReportsToExcel() { let ws=[['ID','Title','Period','Content','Created','Status','Created By','Sent From']]; reportsData.forEach(r => ws.push([r.id, r.title, r.period, r.content, r.created_at, r.status, r.created_by||'System', departmentNames[r.sent_from_department] || 'Finance'])); let wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ws), 'Reports'); XLSX.writeFile(wb, `all_reports.xlsx`); showToast('Exported'); }
 
-function exportAllReportsToPDF() {
-    if (reportsData.length === 0) { showToast('No reports to export', true); return; }
-    showToast('PDF generation started');
-}
+// ============================================================
+// EXPORT ALL ADDED REPORTS TO PDF - SINGLE PDF FILE
+// ============================================================
 
+function exportAllReportsToPDF() {
+    if (reportsData.length === 0) {
+        showToast('No reports to export', true);
+        return;
+    }
+
+    showToast('📄 Generating PDF with ' + reportsData.length + ' reports...', false);
+
+    // Get sidebar color from localStorage
+    const sidebarColor = localStorage.getItem('sidebar_color') || '#059669';
+    const sidebarColorDark = sidebarColor;
+
+    // ============================================================
+    // CALCULATE STATISTICS
+    // ============================================================
+    let totalReports = reportsData.length;
+    let sentCount = 0, draftCount = 0;
+    let totalChars = 0;
+    let periodCounts = {};
+    let deptCounts = {};
+
+    for (let r of reportsData) {
+        if (r.status === 'sent') sentCount++;
+        else if (r.status === 'draft') draftCount++;
+        if (r.content) totalChars += r.content.length;
+        
+        let period = r.period || 'unknown';
+        periodCounts[period] = (periodCounts[period] || 0) + 1;
+        
+        let deptName = departmentNames[r.department_id] || 'Unknown';
+        deptCounts[deptName] = (deptCounts[deptName] || 0) + 1;
+    }
+
+    // ============================================================
+    // BUILD PERIOD SUMMARY ROWS
+    // ============================================================
+    let periodRows = '';
+    let periodOrder = ['daily', 'weekly', 'monthly', 'quarterly', 'annual'];
+    for (let period of periodOrder) {
+        let count = periodCounts[period] || 0;
+        if (count > 0) {
+            let percentage = ((count / totalReports) * 100).toFixed(1);
+            periodRows += `
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 8px 12px; text-transform: capitalize;">${escapeHtml(period)}</td>
+                    <td style="padding: 8px 12px; text-align: center; font-weight: 600;">${count}</td>
+                    <td style="padding: 8px 12px; text-align: center; color: ${sidebarColor}; font-weight: 600;">${percentage}%</td>
+                </tr>
+            `;
+        }
+    }
+
+    // ============================================================
+    // BUILD DEPARTMENT SUMMARY ROWS
+    // ============================================================
+    let deptRows = '';
+    let sortedDepts = Object.keys(deptCounts).sort();
+    for (let dept of sortedDepts) {
+        let count = deptCounts[dept];
+        let percentage = ((count / totalReports) * 100).toFixed(1);
+        deptRows += `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 8px 12px;">${escapeHtml(dept)}</td>
+                <td style="padding: 8px 12px; text-align: center; font-weight: 600;">${count}</td>
+                <td style="padding: 8px 12px; text-align: center; color: ${sidebarColor}; font-weight: 600;">${percentage}%</td>
+            </tr>
+        `;
+    }
+
+    // ============================================================
+    // BUILD REPORT ROWS
+    // ============================================================
+    let rows = '';
+    for (let r of reportsData) {
+        let statusText = r.status === 'sent' ? 'Sent' : 'Draft';
+        let statusColor = r.status === 'sent' ? '#059669' : '#d97706';
+        let statusBg = r.status === 'sent' ? '#d1fae5' : '#fef3c7';
+        let fullContent = r.content || 'No content available';
+        let wordCount = fullContent.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+        let charCount = fullContent.length;
+        let sourceDept = 'System';
+        if (r.sent_from_department) {
+            sourceDept = departmentNames[r.sent_from_department] || 'Unknown';
+        } else if (r.created_by) {
+            sourceDept = r.created_by;
+        }
+        let isSent = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID;
+
+        rows += `
+            <div style="margin-bottom: 25px; border: 2px solid ${sidebarColor}; border-radius: 12px; overflow: visible; page-break-inside: avoid; background: white;">
+                <div style="background: linear-gradient(135deg, ${sidebarColor}, ${sidebarColorDark}); color: white; padding: 14px 18px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 700;">${escapeHtml(r.title)}</h3>
+                            <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">
+                                <i class="fas fa-calendar"></i> ${r.period} 
+                                | <i class="fas ${isSent ? 'fa-paper-plane' : 'fa-user'}"></i> Source: ${escapeHtml(sourceDept)}
+                                ${isSent ? ' <span style="color: #6ee7b7;"><i class="fas fa-check-circle"></i> Sent</span>' : ''}
+                            </p>
+                        </div>
+                        <span style="background: ${statusBg}; color: ${statusColor}; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;">${statusText}</span>
+                    </div>
+                </div>
+                <div style="padding: 12px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-wrap: wrap; gap: 15px; font-size: 12px; color: #475569;">
+                    <span><strong>📅 Created:</strong> ${formatDateTime(r.created_at)} by ${escapeHtml(r.created_by || 'System')}</span>
+                    ${r.updated_by ? `<span><strong>✏️ Updated:</strong> ${formatDateTime(r.updated_at)} by ${escapeHtml(r.updated_by)}</span>` : ''}
+                    <span><strong>📊 Status:</strong> ${statusText}</span>
+                    <span><strong>📝 Words:</strong> ${wordCount.toLocaleString()} | <strong>Chars:</strong> ${charCount.toLocaleString()}</span>
+                </div>
+                <div style="padding: 16px 18px; background: white; font-size: 13px; line-height: 1.7; color: #1e293b; white-space: pre-wrap; word-wrap: break-word; max-height: 500px; overflow-y: auto;">
+                    ${escapeHtml(fullContent)}
+                </div>
+                <div style="padding: 8px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; text-align: right;">
+                    Report #${r.id} | Generated: ${new Date().toLocaleString()}
+                </div>
+            </div>
+        `;
+    }
+
+    // ============================================================
+    // BUILD COMPLETE HTML
+    // ============================================================
+    const currentDate = new Date().toLocaleString();
+    const currentUser = CURRENT_USER || 'Finance Manager';
+
+    let fullHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>All Reports - Finance Department</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            background: #f0f2f5;
+            padding: 30px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border: 2px solid ${sidebarColor};
+        }
+        .header {
+            background: linear-gradient(135deg, ${sidebarColor}, ${sidebarColorDark});
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        .header h1 { font-size: 24px; margin: 0; }
+        .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+        .info-bar {
+            background: #f8fafc;
+            padding: 12px 25px;
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            padding: 20px 25px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .summary-card {
+            background: white;
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid #e5e7eb;
+        }
+        .summary-card .label {
+            font-size: 10px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .summary-card .value {
+            font-size: 16px;
+            font-weight: 800;
+            margin-top: 5px;
+        }
+        .summary-card.total .value { color: ${sidebarColor}; }
+        .summary-card.sent .value { color: #059669; }
+        .summary-card.draft .value { color: #d97706; }
+        .summary-card.chars .value { color: #3b82f6; }
+        .summary-card.periods .value { color: #06b6d4; }
+        .summary-tables {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 15px 25px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .summary-table-wrapper {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
+        .summary-table-wrapper h4 {
+            background: ${sidebarColor + '15'};
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            margin: 0;
+            border-bottom: 1px solid #e5e7eb;
+            color: ${sidebarColor};
+        }
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .summary-table th {
+            background: #f8fafc;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 1px solid #e5e7eb;
+            color: #475569;
+        }
+        .summary-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #334155;
+        }
+        .summary-table tr:last-child td { border-bottom: none; }
+        .summary-table th:nth-child(2), .summary-table td:nth-child(2) { text-align: center; }
+        .summary-table th:nth-child(3), .summary-table td:nth-child(3) { text-align: center; }
+        .reports-section { padding: 0 25px 25px 25px; }
+        .reports-title {
+            margin: 25px 0 18px 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: ${sidebarColor};
+            border-bottom: 3px solid ${sidebarColor};
+            padding-bottom: 10px;
+            display: inline-block;
+        }
+        .footer {
+            text-align: center;
+            font-size: 9px;
+            color: #6b7280;
+            padding: 15px;
+            border-top: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+        .print-btn {
+            text-align: center;
+            padding: 15px;
+            background: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+        }
+        .print-btn button {
+            background: ${sidebarColor};
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 5px;
+        }
+        .print-btn button:hover { opacity: 0.85; }
+        .print-btn button.close-btn { background: #6b7280; }
+        .print-btn button.close-btn:hover { background: #4b5563; }
+        @media print {
+            .print-btn { display: none; }
+            body { background: white; padding: 0; }
+            .header { background: ${sidebarColor} !important; -webkit-print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 All Reports</h1>
+            <p>Finance Department - Complete Reports Overview</p>
+        </div>
+        <div class="info-bar">
+            <span><strong>Department:</strong> Finance</span>
+            <span><strong>Total Reports:</strong> ${totalReports}</span>
+            <span><strong>Generated By:</strong> ${escapeHtml(currentUser)}</span>
+            <span><strong>Generated:</strong> ${currentDate}</span>
+        </div>
+
+        <div class="summary-cards">
+            <div class="summary-card total">
+                <div class="label">📋 Total Reports</div>
+                <div class="value">${totalReports}</div>
+            </div>
+            <div class="summary-card sent">
+                <div class="label">✅ Sent Reports</div>
+                <div class="value">${sentCount}</div>
+            </div>
+            <div class="summary-card draft">
+                <div class="label">✏️ Draft Reports</div>
+                <div class="value">${draftCount}</div>
+            </div>
+            <div class="summary-card chars">
+                <div class="label">📝 Total Characters</div>
+                <div class="value">${totalChars.toLocaleString()}</div>
+            </div>
+            <div class="summary-card periods">
+                <div class="label">📆 Period Types</div>
+                <div class="value">${Object.keys(periodCounts).length}</div>
+            </div>
+        </div>
+
+        <div class="summary-tables">
+            <div class="summary-table-wrapper">
+                <h4><i class="fas fa-chart-pie"></i> Reports by Period</h4>
+                <table class="summary-table">
+                    <thead>
+                        <tr><th>Period</th><th style="text-align:center;">Count</th><th style="text-align:center;">Percentage</th></tr>
+                    </thead>
+                    <tbody>${periodRows}</tbody>
+                </table>
+            </div>
+            <div class="summary-table-wrapper">
+                <h4><i class="fas fa-building"></i> Reports by Source</h4>
+                <table class="summary-table">
+                    <thead>
+                        <tr><th>Source</th><th style="text-align:center;">Count</th><th style="text-align:center;">Percentage</th></tr>
+                    </thead>
+                    <tbody>${deptRows}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="reports-section">
+            <div class="reports-title">📄 Reports List (${totalReports} reports)</div>
+            ${rows}
+        </div>
+
+        <div class="footer">
+            GeoTraverse ERP System - Finance Department | Official All Reports Report<br>
+            This report includes all ${totalReports} reports from the Finance Department.
+        </div>
+        <div class="print-btn">
+            <button onclick="window.print(); setTimeout(() => window.close(), 1000);">
+                🖨️ Save as PDF / Print
+            </button>
+            <button class="close-btn" onclick="window.close();">
+                ❌ Close
+            </button>
+        </div>
+    </div>
+</body>
+</html>`;
+
+    // ============================================================
+    // OPEN IN NEW WINDOW FOR PDF GENERATION
+    // ============================================================
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to generate PDF', true);
+        return;
+    }
+
+    printWindow.document.write(fullHtml);
+    printWindow.document.close();
+    
+    showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
+}
 // ============================================================
 // SAVE REPORT - TUMIA DIRECT FETCH, SI apiCall
 // ============================================================
