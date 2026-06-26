@@ -1018,6 +1018,200 @@ async function loadMyTransactions(highlightId = null) {
     }
 }
 
+// ============================================================
+// ==================== DELETE BUDGET REQUEST - FIXED ====================
+// ============================================================
+async function deleteBudgetRequest(id) {
+    // Find the request in requestsData
+    const r = requestsData.find(req => req.id === id);
+    if (!r) {
+        showToast('❌ Request not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // FINANCE DELETE - HIDES FROM FINANCE DASHBOARD ONLY
+    // ============================================================
+    const isSuperAdmin = (DEPARTMENT_ID == 1);
+    const isFinance = (DEPARTMENT_ID == 2);
+    
+    let confirmMsg = '';
+    let confirmTitle = '';
+    
+    if (isSuperAdmin) {
+        confirmTitle = '⚠️ Hide from Super Admin Dashboard';
+        confirmMsg = 'This will hide this request from the Super Admin dashboard only.\n\n' +
+                     'The request will still be visible to:\n' +
+                     '• The department that created it (' + departmentNames[r.department_id] + ')\n' +
+                     '• Finance Department\n\n' +
+                     '⚠️ This does NOT delete the request from the database.\n\n' +
+                     'Are you sure you want to proceed?';
+    } else if (isFinance) {
+        confirmTitle = '⚠️ Hide from Finance Dashboard';
+        confirmMsg = 'This will hide this request from the Finance dashboard only.\n\n' +
+                     'The request will still be visible to:\n' +
+                     '• Super Admin\n' +
+                     '• The department that created it (' + (departmentNames[r.department_id] || r.department_name || 'Unknown') + ')\n\n' +
+                     '⚠️ This does NOT delete the request from the database.\n\n' +
+                     'Are you sure you want to proceed?';
+    } else {
+        confirmMsg = 'Delete this budget request? It will be moved to recycle bin.';
+    }
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const row = document.getElementById('request-row-' + id);
+    const deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
+    const approveBtn = row ? row.querySelector('.action-btn.approve') : null;
+    const cancelBtn = row ? row.querySelector('.action-btn.cancel') : null;
+    const originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.disabled = true;
+    }
+    if (approveBtn) {
+        approveBtn.disabled = true;
+        approveBtn.style.opacity = '0.5';
+    }
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.style.opacity = '0.5';
+    }
+    
+    try {
+        console.log('📤 Deleting request ID:', id);
+        
+        // ============================================================
+        // CALL API - SOFT DELETE
+        // ============================================================
+        const res = await apiCall('delete_fund_request.php', 'POST', {
+            id: parseInt(id),
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'Finance Manager',
+            department_id: DEPARTMENT_ID,
+            is_admin: isSuperAdmin ? 1 : 0,
+            request_id: parseInt(id)
+        });
+        
+        console.log('📤 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL ARRAY
+        // ============================================================
+        requestsData = requestsData.filter(req => req.id !== id);
+        
+        // ============================================================
+        // ADD TO RECYCLE BIN
+        // ============================================================
+        await addToRecycleBin(id, 'budget_request', r.title);
+        
+        // ============================================================
+        // REMOVE ROW FROM UI WITH ANIMATION
+        // ============================================================
+        if (row) {
+            row.style.transition = 'all 0.4s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            row.style.height = '0';
+            row.style.padding = '0';
+            row.style.overflow = 'hidden';
+            row.style.margin = '0';
+            row.style.border = 'none';
+            
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                    
+                    // Check if tbody is empty
+                    const tbody = row.closest('tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No budget requests found.</td></tr>';
+                    }
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // UPDATE COUNTS
+        // ============================================================
+        unviewedRequestsCount = requestsData.filter(req => {
+            return (req.status === 'pending' || req.status === 'Pending') && 
+                   !viewedRequestIds.includes(req.id);
+        }).length;
+        updateRequestBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS MESSAGE
+        // ============================================================
+        const msg = res && res.success ? 
+            `✅ Request "${r.title}" moved to recycle bin` :
+            `⚠️ Request "${r.title}" removed from view`;
+        
+        showToast(msg, false);
+        addLog(`Budget request deleted: "${r.title}"`);
+        
+        // ============================================================
+        // REFRESH DATA IN BACKGROUND
+        // ============================================================
+        setTimeout(async () => {
+            await fetchBudgetRequests();
+            await loadDashboard();
+            await fetchUnviewedCounts();
+        }, 500);
+        
+    } catch(error) {
+        console.error('❌ Delete error:', error);
+        
+        // ============================================================
+        // FALLBACK - REMOVE FROM UI ANYWAY
+        // ============================================================
+        requestsData = requestsData.filter(req => req.id !== id);
+        
+        if (row) {
+            row.style.transition = 'all 0.3s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                    const tbody = row.closest('tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No budget requests found.</td></tr>';
+                    }
+                }
+            }, 300);
+        }
+        
+        unviewedRequestsCount = requestsData.filter(req => {
+            return (req.status === 'pending' || req.status === 'Pending') && 
+                   !viewedRequestIds.includes(req.id);
+        }).length;
+        updateRequestBadge();
+        
+        showToast(`⚠️ Request removed from view`, false);
+        
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
+        }
+        if (approveBtn) {
+            approveBtn.disabled = false;
+            approveBtn.style.opacity = '1';
+        }
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.style.opacity = '1';
+        }
+    }
+}
+
 function viewTransaction(id) { const t = myTransactions.find(t => t.id === id); if(t) { document.getElementById('viewTransContent').innerHTML = `<div class="space-y-2"><p><strong>Date:</strong> ${formatDateTime(t.transaction_date)}</p><p><strong>Type:</strong> ${t.type}</p><p><strong>Source:</strong> ${escapeHtml(t.source)}</p><p><strong>Amount:</strong> <span class="font-bold text-green-600">${formatMoney(t.amount)}</span></p><p><strong>Paid:</strong> ${formatMoney(t.paid_amount || 0)}</p><p><strong>Pending:</strong> ${formatMoney((parseFloat(t.amount)||0) - (parseFloat(t.paid_amount)||0))}</p><p><strong>Status:</strong> ${t.status}</p><p><strong>Description:</strong> ${escapeHtml(t.description || '-')}</p><div class="user-info pt-2 mt-2 border-t">Created by: ${escapeHtml(t.created_by || 'System')} on ${formatDateTime(t.created_at)}</div></div>`; openModal('viewTransModal'); } }
 function editTransaction(id) { const t = myTransactions.find(t => t.id === id); if(t) { document.getElementById('transId').value = t.id; document.getElementById('transType').value = t.type; document.getElementById('transSource').value = t.source; document.getElementById('transAmount').value = formatNumberWithCommas(t.amount); document.getElementById('transDate').value = t.transaction_date; document.getElementById('transStatus').value = t.status; document.getElementById('transPaidAmount').value = formatNumberWithCommas(t.paid_amount || 0); document.getElementById('transDesc').value = t.description || ''; const partialGroup = document.getElementById('partialPaidGroup'); if(partialGroup) partialGroup.style.display = t.status === 'partial' ? 'block' : 'none'; openModal('transModal'); } }
 async function saveTransaction() { let id = document.getElementById('transId').value; let status = document.getElementById('transStatus').value; let paidAmount = parseAmount(document.getElementById('transPaidAmount').value); let amount = parseAmount(document.getElementById('transAmount').value); if (status === 'partial' && paidAmount <= 0) { showToast('Please enter partial paid amount', true); return; } if (status === 'partial' && paidAmount > amount) { showToast('Paid amount cannot exceed total amount', true); return; } let data = { type: document.getElementById('transType').value, source: document.getElementById('transSource').value, amount: amount, transaction_date: document.getElementById('transDate').value || new Date().toISOString().split('T')[0], status: status, description: document.getElementById('transDesc').value, department_id: DEPARTMENT_ID, created_by: CURRENT_USER }; if (status === 'partial') data.paid_amount = paidAmount; else data.paid_amount = amount; if(!data.source || data.amount <= 0) { showToast('Source and amount required', true); return; } let res = id ? await apiCall('update_transaction.php','POST',{...data,id:parseInt(id)}) : await apiCall('add_transaction.php','POST',data); if(res.success) { showToast(id ? 'Transaction updated' : 'Transaction added'); addLog(id ? `Transaction updated: ${data.source}` : `Transaction added: ${data.source}`); closeModal('transModal'); loadMyTransactions(); loadDashboard(); } else showToast(res.message || 'Failed', true); }
@@ -1589,39 +1783,143 @@ async function cancelRequest(requestId) {
     }
 }
 
+// ============================================================
+// ==================== DELETE REQUEST ITEM - FIXED ====================
+// ============================================================
 async function deleteRequestItem(id) {
-    if (!confirm('Delete this budget request permanently? This action cannot be undone.')) return;
+    // Find the request
     const r = requestsData.find(req => req.id === id);
-    if (!r) { showToast('Request not found', true); return; }
+    if (!r) {
+        showToast('❌ Request not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // CONFIRM DELETE
+    // ============================================================
+    const confirmMsg = `Delete budget request "${r.title}"?\n\n` +
+                       `Department: ${departmentNames[r.department_id] || r.department_name || 'Unknown'}\n` +
+                       `Amount: ${formatMoney(r.amount)}\n` +
+                       `Status: ${r.status}\n\n` +
+                       `This will move it to the recycle bin.`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const row = document.getElementById('request-row-' + id);
+    const deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
+    const originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.disabled = true;
+    }
+    
     try {
-        const res = await apiCall('delete_fund_request.php', 'POST', { 
-            request_id: id, 
-            department_id: DEPARTMENT_ID,
+        console.log('📤 Deleting request ID:', id);
+        
+        // ============================================================
+        // CALL API - SOFT DELETE
+        // ============================================================
+        const res = await apiCall('delete_fund_request.php', 'POST', {
+            request_id: parseInt(id),
+            id: parseInt(id),
             is_deleted: 1,
-            deleted_by: CURRENT_USER
+            deleted_by: CURRENT_USER || 'Finance Manager',
+            department_id: DEPARTMENT_ID
         });
-        if (res.success) {
-            await addToRecycleBin(id, 'fund_request', r.title);
-            requestsData = requestsData.filter(req => req.id !== id);
-            showToast('✅ Budget request deleted');
-            addLog(`Budget request deleted: ${r.title}`);
-            await loadRequests();
-            await loadDashboard();
-        } else {
-            requestsData = requestsData.filter(req => req.id !== id);
-            await loadRequests();
-            await loadDashboard();
-            showToast('Request removed from view', false);
-        }
-    } catch(e) {
-        console.error('Delete error:', e);
+        
+        console.log('📤 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA
+        // ============================================================
         requestsData = requestsData.filter(req => req.id !== id);
-        await loadRequests();
-        await loadDashboard();
-        showToast('Request removed from view', false);
+        
+        // ============================================================
+        // ADD TO RECYCLE BIN
+        // ============================================================
+        await addToRecycleBin(id, 'budget_request', r.title);
+        
+        // ============================================================
+        // REMOVE ROW FROM UI
+        // ============================================================
+        if (row) {
+            row.style.transition = 'all 0.4s ease';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                    const tbody = row.closest('tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No budget requests found.</td></tr>';
+                    }
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // UPDATE COUNTS
+        // ============================================================
+        unviewedRequestsCount = requestsData.filter(req => {
+            return (req.status === 'pending' || req.status === 'Pending') && 
+                   !viewedRequestIds.includes(req.id);
+        }).length;
+        updateRequestBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS
+        // ============================================================
+        const msg = res && res.success ? 
+            `✅ Request "${r.title}" moved to recycle bin` :
+            `⚠️ Request "${r.title}" removed from view`;
+        
+        showToast(msg, false);
+        addLog(`Budget request deleted: "${r.title}"`);
+        
+        // ============================================================
+        // REFRESH DATA IN BACKGROUND
+        // ============================================================
+        setTimeout(async () => {
+            await fetchBudgetRequests();
+            await loadDashboard();
+            await fetchUnviewedCounts();
+        }, 500);
+        
+    } catch(error) {
+        console.error('❌ Delete error:', error);
+        
+        // Fallback - remove from UI
+        requestsData = requestsData.filter(req => req.id !== id);
+        if (row) {
+            row.style.transition = 'all 0.3s ease';
+            row.style.opacity = '0';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        unviewedRequestsCount = requestsData.filter(req => {
+            return (req.status === 'pending' || req.status === 'Pending') && 
+                   !viewedRequestIds.includes(req.id);
+        }).length;
+        updateRequestBadge();
+        
+        showToast('⚠️ Request removed from view', false);
+        
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
+        }
     }
 }
-
 async function loadRequests(highlightId = null) {
     await fetchBudgetRequests();
     let totalAmount = 0, pendingCount = 0, approvedCount = 0, cancelledCount = 0;

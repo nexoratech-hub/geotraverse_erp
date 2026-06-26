@@ -1,5 +1,5 @@
 <?php
-// backend/api/get_fund_requests.php
+// backend/api/get_fund_requests.php - FIXED
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -32,11 +32,11 @@ try {
 // Get parameters
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
 $all = isset($_GET['all']) ? intval($_GET['all']) : 0;
-$limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
+$limit = isset($_GET['limit']) ? intval($_GET['limit']) : 500;
 
 try {
     // ============================================================
-    // BUILD QUERY BASED ON DEPARTMENT
+    // BUILD QUERY
     // ============================================================
     $query = "SELECT fr.*, 
               d.name as department_name,
@@ -49,26 +49,23 @@ try {
     $params = [];
     
     // ============================================================
-    // SUPER ADMIN (department_id = 1) - sees all undeleted requests
+    // SUPER ADMIN (department_id = 1) - sees all requests
+    // Only hidden if Super Admin deleted it OR is_deleted = 1
     // ============================================================
-    if ($department_id == 1) {
-        // Super Admin sees all requests that are NOT deleted by admin
+    if ($department_id == 1 || $all == 1) {
+        // Super Admin sees ALL requests EXCEPT those deleted by Super Admin
         $where[] = "fr.is_deleted = 0";
         $where[] = "(fr.deleted_by_admin = 0 OR fr.deleted_by_admin IS NULL)";
+        // DO NOT filter by is_visible_to_super_admin - Super Admin should see all
     }
     
     // ============================================================
-    // FINANCE (department_id = 2) - sees own + others not deleted
+    // FINANCE (department_id = 2) - sees all requests except those Finance deleted
     // ============================================================
     else if ($department_id == 2) {
-        // Finance sees:
-        // 1. Requests from their department
-        // 2. Requests from other departments that are NOT deleted by finance
         $where[] = "fr.is_deleted = 0";
-        $where[] = "(fr.deleted_by_department = 0 OR fr.deleted_by_department IS NULL)";
-        $where[] = "fr.department_id = ? OR fr.department_id != ?";
-        $params[] = $department_id;
-        $params[] = $department_id;
+        $where[] = "(fr.deleted_by_admin = 0 OR fr.deleted_by_admin IS NULL)";
+        $where[] = "(fr.is_visible_to_finance = 1 OR fr.is_visible_to_finance IS NULL)";
     }
     
     // ============================================================
@@ -78,16 +75,8 @@ try {
         $where[] = "fr.is_deleted = 0";
         $where[] = "fr.department_id = ?";
         $where[] = "(fr.deleted_by_department = 0 OR fr.deleted_by_department IS NULL)";
+        $where[] = "(fr.is_visible_to_own_department = 1 OR fr.is_visible_to_own_department IS NULL)";
         $params[] = $department_id;
-    }
-    
-    // ============================================================
-    // ALL (if specified)
-    // ============================================================
-    if ($all == 1) {
-        // Show all undeleted requests
-        $where = ["fr.is_deleted = 0"];
-        $params = [];
     }
     
     if (!empty($where)) {
@@ -96,8 +85,8 @@ try {
     
     $query .= " ORDER BY fr.id DESC LIMIT " . intval($limit);
     
-    error_log("get_fund_requests query: " . $query);
-    error_log("get_fund_requests params: " . json_encode($params));
+    error_log("📊 get_fund_requests query: " . $query);
+    error_log("📊 get_fund_requests params: " . json_encode($params));
     
     $stmt = $pdo->prepare($query);
     $stmt->execute($params);
@@ -113,7 +102,7 @@ try {
     ]);
     
 } catch(PDOException $e) {
-    error_log("Get fund requests error: " . $e->getMessage());
+    error_log("❌ Get fund requests error: " . $e->getMessage());
     echo json_encode([
         'success' => false,
         'message' => 'Database error: ' . $e->getMessage(),
