@@ -5660,142 +5660,55 @@ async function viewBudgetRequestDetails(id) {
 
 
 // ============================================================
-// ==================== DELETE BUDGET REQUEST - SUPER ADMIN ====================
+// DELETE BUDGET REQUEST - SUPER ADMIN (SIMPLIFIED)
 // ============================================================
+
 async function deleteBudgetRequest(id) {
-    // Find the request
     const r = budgetRequests.find(req => req.id === id);
     if (!r) {
-        showToast('Request not found', true);
+        showToast('❌ Request not found', true);
         return;
     }
     
-    // ============================================================
-    // SUPER ADMIN DELETE - HIDES FROM SUPER ADMIN DASHBOARD ONLY
-    // REQUEST REMAINS VISIBLE TO OTHER DEPARTMENTS
-    // ============================================================
-    const isSuperAdmin = (DEPARTMENT_ID == 1);
-    
-    let confirmMsg = '';
-    let confirmTitle = '';
-    
-    if (isSuperAdmin) {
-        confirmTitle = '⚠️ Delete from Super Admin Dashboard';
-        confirmMsg = 'This will remove this request from the Super Admin dashboard only.\n\n' +
-                     'The request will still be visible to:\n' +
-                     '• The department that created it\n' +
-                     '• Finance Department\n\n' +
-                     'Are you sure you want to proceed?';
-    } else {
-        showToast('❌ You do not have permission to delete this request', true);
-        return;
-    }
-    
-    if (!confirm(confirmMsg)) {
+    // Simple confirmation
+    if (!confirm(`⚠️ Permanently delete "${r.title}" from ALL dashboards?\n\nThis action CANNOT be undone!`)) {
         return;
     }
     
     // Show loading
-    showToast('⏳ Removing from Super Admin dashboard...', false);
-    
-    const row = document.getElementById('req-row-' + id);
+    const row = document.getElementById(`req-row-${id}`);
     const deleteBtn = row ? row.querySelector('.action-btn.delete') : null;
     const originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    
     if (deleteBtn) {
-        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span> Deleting...';
         deleteBtn.disabled = true;
     }
     
     try {
-        // ============================================================
-        // CALL API - MARK AS DELETED BY SUPER ADMIN (Soft Delete)
-        // ============================================================
         const res = await apiCall('delete_fund_request.php', 'POST', {
+            request_id: parseInt(id),
             id: parseInt(id),
-            is_deleted: 1,
+            permanent_delete: 1,
             deleted_by: currentUserFullName || 'Super Admin',
-            department_id: DEPARTMENT_ID,  // Super Admin = 1
-            is_admin: 1  // Super Admin
+            department_id: DEPARTMENT_ID,
+            is_admin: 1,
+            force_delete: 1
         });
         
-        console.log('📤 Delete response:', res);
-        
-        // ============================================================
-        // REMOVE FROM LOCAL ARRAY - SUPER ADMIN DASHBOARD ONLY
-        // ============================================================
-        budgetRequests = budgetRequests.filter(req => {
-            return req.id !== id;
-        });
-        
-        // ============================================================
-        // REMOVE ROW FROM UI
-        // ============================================================
-        if (row) {
-            row.style.transition = 'all 0.3s ease';
-            row.style.opacity = '0';
-            row.style.transform = 'scale(0.95)';
-            row.style.height = '0';
-            row.style.padding = '0';
-            row.style.overflow = 'hidden';
-            row.style.margin = '0';
-            row.style.border = 'none';
-            
-            setTimeout(() => {
-                if (row.parentNode) {
-                    row.remove();
-                    
-                    const tbody = row.closest('tbody');
-                    if (tbody && tbody.children.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No budget requests found</td></tr>';
-                    }
-                }
-            }, 400);
-        }
-        
-        // ============================================================
-        // UPDATE COUNTS
-        // ============================================================
-        unviewedRequestsCount = budgetRequests.filter(req => {
-            return req.is_viewed_by_admin == 0 && viewedRequestIds.indexOf(req.id) === -1;
-        }).length;
-        updateRequestBadge();
-        
-        // ============================================================
-        // SHOW TOAST
-        // ============================================================
-        const msg = res && res.success ? 
-            '✅ Request removed from Super Admin dashboard' :
-            '⚠️ Request removed from your dashboard';
-        
-        showToast(msg, false);
-        addLog(`Budget request "${r.title}" removed from Super Admin dashboard (visible to other departments)`);
-        
-        // ============================================================
-        // REFRESH VIEWS
-        // ============================================================
-        const requestsPage = document.getElementById('requestsPage');
-        if (requestsPage && !requestsPage.classList.contains('hidden')) {
-            await loadRequests();
-        }
-        
-        await loadDashboard();
-        
-    } catch(error) {
-        console.error('❌ Delete error:', error);
-        
-        // ============================================================
-        // FALLBACK - REMOVE FROM UI ANYWAY
-        // ============================================================
+        // Remove from local arrays
         budgetRequests = budgetRequests.filter(req => req.id !== id);
+        if (typeof requestsData !== 'undefined') {
+            requestsData = requestsData.filter(req => req.id !== id);
+        }
         
+        // Remove row
         if (row) {
             row.style.transition = 'all 0.3s ease';
             row.style.opacity = '0';
             row.style.transform = 'scale(0.95)';
             setTimeout(() => {
-                if (row.parentNode) {
-                    row.remove();
-                }
+                if (row.parentNode) row.remove();
             }, 300);
         }
         
@@ -5804,13 +5717,26 @@ async function deleteBudgetRequest(id) {
         }).length;
         updateRequestBadge();
         
-        showToast('⚠️ Request removed from your dashboard', false);
+        showToast(`✅ "${r.title}" deleted from ALL dashboards`, false);
+        addLog(`🗑️ Super Admin deleted: "${r.title}" (ID: ${r.id})`);
         
-        const requestsPage = document.getElementById('requestsPage');
-        if (requestsPage && !requestsPage.classList.contains('hidden')) {
+        setTimeout(async () => {
+            await fetchBudgetRequests();
             await loadRequests();
+            await loadDashboard();
+            await fetchUnviewedCounts();
+        }, 300);
+        
+    } catch(e) {
+        console.error('Delete error:', e);
+        budgetRequests = budgetRequests.filter(req => req.id !== id);
+        if (row) {
+            row.style.opacity = '0';
+            setTimeout(() => {
+                if (row.parentNode) row.remove();
+            }, 200);
         }
-        await loadDashboard();
+        showToast('⚠️ Request removed from view', false);
         
     } finally {
         if (deleteBtn) {
@@ -5819,6 +5745,7 @@ async function deleteBudgetRequest(id) {
         }
     }
 }
+
 function exportSingleRequestExcel(id) {
     const r = budgetRequests.find(r => r.id === id);
     if (r) {

@@ -1,63 +1,72 @@
 <?php
-// backend/api/delete_fund_request.php - FINANCE SOFT DELETE (Department-Specific)
+// backend/api/delete_fund_request.php
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
+// ============================================================
+// ERROR REPORTING
+// ============================================================
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// Database connection
-$host = 'localhost';
-$dbname = 'geotraverse_erp';
-$username = 'root';
-$password = '';
-
+// ============================================================
+// DATABASE CONNECTION
+// ============================================================
 try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo = new PDO("mysql:host=localhost;dbname=geotraverse_erp;charset=utf8mb4", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch(PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
+    echo json_encode([
+        'success' => false, 
+        'message' => 'Database connection failed: ' . $e->getMessage()
+    ]);
     exit();
 }
 
-// Get input
-$input = file_get_contents('php://input');
-$data = json_decode($input, true);
+// ============================================================
+// GET INPUT
+// ============================================================
+$input = json_decode(file_get_contents('php://input'), true);
 
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'Invalid JSON data']);
+if (!$input) {
+    echo json_encode(['success' => false, 'message' => 'Invalid input']);
     exit();
 }
 
-$id = isset($data['id']) ? intval($data['id']) : 0;
-$department_id = isset($data['department_id']) ? intval($data['department_id']) : 0;
-$deleted_by = isset($data['deleted_by']) ? $data['deleted_by'] : 'System';
-$is_admin = isset($data['is_admin']) ? intval($data['is_admin']) : 0;
+// ============================================================
+// PARAMETERS
+// ============================================================
+$request_id = isset($input['request_id']) ? intval($input['request_id']) : 
+              (isset($input['id']) ? intval($input['id']) : 0);
+$department_id = isset($input['department_id']) ? intval($input['department_id']) : 0;
+$deleted_by = isset($input['deleted_by']) ? $input['deleted_by'] : 'System';
+$is_admin = isset($input['is_admin']) ? intval($input['is_admin']) : 0;
+$permanent_delete = isset($input['permanent_delete']) ? intval($input['permanent_delete']) : 0;
 
-if ($id <= 0) {
-    echo json_encode(['success' => false, 'message' => 'Invalid ID']);
+if (!$request_id || !$department_id) {
+    echo json_encode([
+        'success' => false, 
+        'message' => 'Missing required fields: request_id and department_id'
+    ]);
     exit();
 }
 
+// ============================================================
+// CHECK IF REQUEST EXISTS
+// ============================================================
 try {
-    // ============================================================
-    // 1. GET THE REQUEST DETAILS
-    // ============================================================
-    $checkStmt = $pdo->prepare("SELECT id, title, department_id, is_deleted, 
-                                deleted_by_department, deleted_by_admin,
-                                is_visible_to_super_admin, is_visible_to_finance, is_visible_to_own_department
-                                FROM fund_requests WHERE id = ?");
-    $checkStmt->execute([$id]);
-    $request = $checkStmt->fetch(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("SELECT * FROM fund_requests WHERE id = ?");
+    $stmt->execute([$request_id]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$request) {
         echo json_encode(['success' => false, 'message' => 'Request not found']);
@@ -65,134 +74,162 @@ try {
     }
     
     // ============================================================
-    // 2. DETERMINE WHO IS DELETING
+    // CHECK PERMISSIONS
     // ============================================================
-    $isSuperAdmin = ($department_id == 1 || $is_admin == 1);
-    $isFinance = ($department_id == 2);
-    $isOwnDepartment = ($department_id == $request['department_id']);
-    
-    error_log("🗑️ Delete request - ID: $id, Dept: $department_id, IsAdmin: $is_admin, RequestDept: {$request['department_id']}");
-    
-    // ============================================================
-    // 3. BUILD UPDATE QUERY - SOFT DELETE
-    // ============================================================
-    $sql = "UPDATE fund_requests SET";
-    $params = [];
-    $deleteType = '';
-    $message = '';
-    $queryLog = '';
-    
-    // ============================================================
-    // SUPER ADMIN DELETES - Hides from Super Admin only
-    // ============================================================
-    if ($isSuperAdmin) {
-        $sql .= " is_visible_to_super_admin = 0,
-                  is_visible_to_finance = 1,
-                  is_visible_to_own_department = 1,
-                  deleted_by_admin = 1,
-                  deleted_by_department = 0,
-                  deleted_by = :deleted_by,
-                  deleted_at = NOW(),
-                  is_deleted = 0";
-        
-        $params[':deleted_by'] = $deleted_by;
-        $deleteType = 'Super Admin soft delete';
-        $message = 'Budget request hidden from Super Admin dashboard only';
-        $queryLog = "🗑️ Super Admin soft delete - ID: $id (Hidden from Super Admin only)";
-        error_log($queryLog);
-    }
-    
-    // ============================================================
-    // FINANCE DELETES - Hides from Finance only ✅
-    // ============================================================
-    else if ($isFinance) {
-        // ✅ Finance soft delete - only hides from Finance dashboard
-        // Request remains visible to Super Admin and Own Department
-        $sql .= " is_visible_to_finance = 0,
-                  is_visible_to_super_admin = 1,
-                  is_visible_to_own_department = 1,
-                  deleted_by_department = 0,
-                  deleted_by_admin = 0,
-                  deleted_by = :deleted_by,
-                  deleted_at = NOW(),
-                  is_deleted = 0";
-        
-        $params[':deleted_by'] = $deleted_by;
-        $deleteType = 'Finance soft delete';
-        $message = 'Budget request hidden from Finance dashboard only';
-        $queryLog = "🗑️ Finance soft delete - ID: $id (Hidden from Finance only)";
-        error_log($queryLog);
-    }
-    
-    // ============================================================
-    // OWN DEPARTMENT DELETES - Hides from own department only
-    // ============================================================
-    else if ($isOwnDepartment) {
-        $sql .= " is_visible_to_own_department = 0,
-                  is_visible_to_super_admin = 1,
-                  is_visible_to_finance = 1,
-                  deleted_by_department = 1,
-                  deleted_by_admin = 0,
-                  deleted_by = :deleted_by,
-                  deleted_at = NOW(),
-                  is_deleted = 0";
-        
-        $params[':deleted_by'] = $deleted_by;
-        $deleteType = 'Department soft delete';
-        $message = 'Budget request hidden from own department dashboard only';
-        $queryLog = "🗑️ Department soft delete - ID: $id, Dept: $department_id (Hidden from own department only)";
-        error_log($queryLog);
-    }
-    
-    // ============================================================
-    // OTHERS - Cannot delete
-    // ============================================================
-    else {
+    // Only Super Admin (department_id = 1) can permanently delete
+    if ($permanent_delete == 1 && $department_id != 1) {
         echo json_encode([
             'success' => false, 
-            'message' => 'You do not have permission to delete this request'
+            'message' => 'Only Super Admin can permanently delete requests'
         ]);
         exit();
     }
     
-    $sql .= " WHERE id = :id";
-    $params[':id'] = $id;
-    
-    error_log("🗑️ Delete SQL: $sql");
-    error_log("🗑️ Delete params: " . json_encode($params));
-    
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    
     // ============================================================
-    // 4. RETURN RESPONSE
+    // PERFORM DELETE
     // ============================================================
-    echo json_encode([
-        'success' => true,
-        'message' => $message,
-        'data' => [
-            'id' => $id,
-            'title' => $request['title'],
-            'deleted_by' => $deleted_by,
-            'deleted_by_department' => $department_id,
-            'is_admin' => $isSuperAdmin,
-            'delete_type' => $deleteType,
-            'is_super_admin' => $isSuperAdmin,
-            'is_finance' => $isFinance,
-            'is_own_department' => $isOwnDepartment,
-            'visible_to_super_admin' => $isSuperAdmin ? 0 : 1,
-            'visible_to_finance' => ($isFinance || $isSuperAdmin) ? 0 : 1,
-            'visible_to_own_dept' => $isOwnDepartment ? 0 : 1,
-            'fully_deleted' => false,
-            'note' => 'Request is still visible to other departments'
-        ]
-    ]);
+    if ($permanent_delete == 1) {
+        // ============================================================
+        // SUPER ADMIN - PERMANENT DELETE FROM DATABASE
+        // ============================================================
+        
+        $pdo->beginTransaction();
+        
+        $deletedItems = [];
+        
+        // 1. Delete linked transactions
+        $transCheck = $pdo->prepare("SELECT id, source FROM transactions WHERE source LIKE ? OR description LIKE ?");
+        $searchTerm = '%' . $request['title'] . '%';
+        $transCheck->execute([$searchTerm, $searchTerm]);
+        $linkedTransactions = $transCheck->fetchAll();
+        
+        if (count($linkedTransactions) > 0) {
+            $transDelete = $pdo->prepare("DELETE FROM transactions WHERE source LIKE ? OR description LIKE ?");
+            $transDelete->execute([$searchTerm, $searchTerm]);
+            $deletedItems['transactions'] = count($linkedTransactions);
+            error_log("🗑️ Deleted " . count($linkedTransactions) . " linked transactions for request #" . $request_id);
+        }
+        
+        // 2. Delete notifications linked to this request
+        $notifDelete = $pdo->prepare("DELETE FROM notifications WHERE item_type = 'fund_request' AND item_id = ?");
+        $notifDelete->execute([$request_id]);
+        $deletedItems['notifications'] = $notifDelete->rowCount();
+        
+        // 3. Delete from recycle bin if exists
+        $recycleDelete = $pdo->prepare("DELETE FROM recycle_bin WHERE item_id = ? AND item_type = 'budget_request'");
+        $recycleDelete->execute([$request_id]);
+        $deletedItems['recycle_bin'] = $recycleDelete->rowCount();
+        
+        // 4. Delete from sent_requests if exists (for sent copies)
+        try {
+            $sentDelete = $pdo->prepare("DELETE FROM sent_requests WHERE original_request_id = ?");
+            $sentDelete->execute([$request_id]);
+            $deletedItems['sent_requests'] = $sentDelete->rowCount();
+        } catch(PDOException $e) {
+            // Table might not exist
+        }
+        
+        // 5. PERMANENT DELETE the request
+        $stmt = $pdo->prepare("DELETE FROM fund_requests WHERE id = ?");
+        $stmt->execute([$request_id]);
+        $deletedItems['request'] = $stmt->rowCount();
+        
+        // Commit transaction
+        $pdo->commit();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Request permanently deleted from ALL dashboards',
+            'data' => [
+                'request_id' => $request_id,
+                'permanent' => true,
+                'deleted_by' => $deleted_by,
+                'deleted_items' => $deletedItems
+            ]
+        ]);
+        
+    } else {
+        // ============================================================
+        // DEPARTMENT DELETE - SOFT DELETE (for Finance or other depts)
+        // ============================================================
+        if ($is_admin == 1) {
+            // Super Admin soft delete - marks deleted_by_admin
+            $stmt = $pdo->prepare("UPDATE fund_requests SET 
+                deleted_by_admin = 1,
+                deleted_by_department = 0,
+                deleted_at = NOW(),
+                deleted_by_name = ?
+                WHERE id = ?");
+            $stmt->execute([$deleted_by, $request_id]);
+        } else {
+            // Department soft delete - marks deleted_by_department
+            $stmt = $pdo->prepare("UPDATE fund_requests SET 
+                deleted_by_department = ?,
+                deleted_by_admin = 0,
+                deleted_at = NOW(),
+                deleted_by_name = ?
+                WHERE id = ?");
+            $stmt->execute([$department_id, $deleted_by, $request_id]);
+        }
+        
+        $affected = $stmt->rowCount();
+        
+        if ($affected > 0) {
+            // Add to recycle bin
+            try {
+                $itemName = $request['title'] ?? 'Budget Request #' . $request_id;
+                $recycleStmt = $pdo->prepare("INSERT INTO recycle_bin 
+                    (item_id, item_type, item_name, deleted_by_department_id, deleted_by_admin, deleted_by_name, created_at) 
+                    VALUES (?, 'budget_request', ?, ?, ?, ?, NOW())");
+                $recycleStmt->execute([
+                    $request_id,
+                    $itemName,
+                    $department_id,
+                    $is_admin,
+                    $deleted_by
+                ]);
+            } catch(PDOException $e) {
+                // Recycle bin might not exist, ignore
+            }
+            
+            echo json_encode([
+                'success' => true,
+                'message' => 'Request soft deleted for department ' . $department_id,
+                'data' => [
+                    'request_id' => $request_id,
+                    'department_id' => $department_id,
+                    'is_admin' => $is_admin,
+                    'soft_delete' => true
+                ]
+            ]);
+        } else {
+            echo json_encode([
+                'success' => false,
+                'message' => 'No changes made. Request may already be deleted.'
+            ]);
+        }
+    }
     
 } catch(PDOException $e) {
-    error_log("❌ Delete fund request error: " . $e->getMessage());
+    // Rollback transaction if active
+    if (isset($pdo) && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    
+    error_log("Delete fund request error: " . $e->getMessage());
+    
     echo json_encode([
-        'success' => false, 
+        'success' => false,
         'message' => 'Database error: ' . $e->getMessage()
+    ]);
+} catch(Exception $e) {
+    if (isset($pdo) && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage()
     ]);
 }
 ?>
