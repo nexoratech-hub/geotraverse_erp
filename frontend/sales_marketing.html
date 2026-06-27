@@ -2680,22 +2680,59 @@ function viewUploadedReportDetails(id) {
 }
 
 // ============================================================
-// SEND UPLOADED REPORT - Only for own reports
+// SEND UPLOADED REPORT TO DEPARTMENT - TUMIA API MAALUM
 // ============================================================
 function sendUploadedReportToDept(reportId, deptId) {
+    console.log('📤 sendUploadedReportToDept called:');
+    console.log('   reportId:', reportId, 'type:', typeof reportId);
+    console.log('   deptId:', deptId);
+    console.log('   uploadedReports length:', uploadedReports.length);
+    
+    // ============================================================
+    // TAFUTA UPLOADED REPORT
+    // ============================================================
     var r = null;
     for (var i = 0; i < uploadedReports.length; i++) {
-        if (uploadedReports[i].id === reportId) {
+        if (uploadedReports[i].id == reportId) {
             r = uploadedReports[i];
             break;
         }
     }
     if (!r) {
-        showToast('Report not found', true);
+        // Jaribu kwa string
+        for (var i = 0; i < uploadedReports.length; i++) {
+            if (String(uploadedReports[i].id) === String(reportId)) {
+                r = uploadedReports[i];
+                break;
+            }
+        }
+    }
+    if (!r) {
+        var idNum = parseInt(reportId);
+        if (!isNaN(idNum)) {
+            for (var i = 0; i < uploadedReports.length; i++) {
+                if (uploadedReports[i].id === idNum) {
+                    r = uploadedReports[i];
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!r) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', reportId);
+        console.log('Available uploaded reports:', uploadedReports.map(function(d) { return { id: d.id, title: d.title }; }));
         return;
     }
+    
+    console.log('✅ Uploaded report found:', r.id, r.title);
+    
+    // ============================================================
+    // CHECK DEPARTMENT
+    // ============================================================
     if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
+        showToast('❌ Cannot send to your own department', true);
         return;
     }
     
@@ -2706,8 +2743,11 @@ function sendUploadedReportToDept(reportId, deptId) {
             break;
         }
     }
-    deptName = deptName || 'Department';
+    deptName = deptName || 'Department ' + deptId;
     
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
     var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
     var originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
@@ -2715,66 +2755,176 @@ function sendUploadedReportToDept(reportId, deptId) {
         btn.disabled = true;
     }
     
-    var payload = {
-        document_id: parseInt(reportId),
-        to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Sales & Marketing',
-        document_title: r.title || 'Uploaded Report',
-        document_file: r.file_name || '',
-        description: r.description || '',
-        doc_type: 'uploaded_report',
-        sent_by: CURRENT_USER || 'Sales Manager',
-        duplicate_send: true,
-        doc_data: {
-            id: r.id,
-            title: r.title,
-            description: r.description || '',
-            file_name: r.file_name || '',
-            file_path: r.file_path || '',
-            file_size: r.file_size || 0,
-            period: r.period || 'monthly',
-            uploaded_by: r.uploaded_by || CURRENT_USER,
-            department_id: r.department_id || DEPARTMENT_ID,
-            created_at: r.created_at || new Date().toISOString(),
-            sent_count: (r.sent_count || 0) + 1,
-            is_sent: 1,
-            last_sent_at: new Date().toISOString()
+    // ============================================================
+    // GET FILE INFO
+    // ============================================================
+    var filePath = r.file_path || r.file_name || '';
+    var fileName = r.file_name || 'document.pdf';
+    
+    // Clean file path
+    if (filePath) {
+        while (filePath.startsWith('../')) {
+            filePath = filePath.substring(3);
         }
+        while (filePath.startsWith('./')) {
+            filePath = filePath.substring(2);
+        }
+    }
+    
+    console.log('📎 File path:', filePath);
+    console.log('📎 File name:', fileName);
+    
+    // ============================================================
+    // BUILD UPLOADED REPORT DATA
+    // ============================================================
+    var uploadedReportData = {
+        id: r.id,
+        title: r.title || 'Uploaded Report',
+        file_name: fileName,
+        file_path: filePath,
+        file_size: r.file_size || 0,
+        file_type: r.file_type || '',
+        description: r.description || '',
+        period: r.period || 'monthly',
+        uploaded_by: r.uploaded_by || CURRENT_USER || 'Sales Manager',
+        department_id: r.department_id || DEPARTMENT_ID,
+        created_at: r.created_at || new Date().toISOString(),
+        sent_from_department: DEPARTMENT_ID,
+        sent_from_name: departmentNames[DEPARTMENT_ID] || 'Sales & Marketing'
     };
     
-    apiCall('send_document_advanced.php', 'POST', payload)
-    .then(function(res) {
+    // ============================================================
+    // BUILD PAYLOAD - KULINGANA NA MUUNDO WA DB
+    // ============================================================
+    var payload = {
+        // ============================================================
+        // REQUIRED FIELDS - HIZI ZOTE ZINAPASWA KUWEPO
+        // ============================================================
+        original_uploaded_report_id: parseInt(r.id),
+        to_department_id: parseInt(deptId),
+        from_department_id: parseInt(DEPARTMENT_ID),
+        uploaded_report_data: JSON.stringify(uploadedReportData),
+        
+        // ============================================================
+        // OPTIONAL FIELDS
+        // ============================================================
+        from_department_name: departmentNames[DEPARTMENT_ID] || 'Sales & Marketing',
+        to_department_name: deptName,
+        uploaded_report_title: r.title || 'Untitled Report',
+        uploaded_report_period: r.period || 'monthly',
+        uploaded_report_file: fileName,
+        
+        // ============================================================
+        // SENT BY
+        // ============================================================
+        sent_by: CURRENT_USER || 'Sales Manager'
+    };
+    
+    console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
+    
+    // ============================================================
+    // SEND REQUEST - TUMIA API MAALUM
+    // ============================================================
+    var apiUrl = API_BASE + 'send_uploaded_report_advanced.php';
+    console.log('📡 URL:', apiUrl);
+    
+    fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+    })
+    .then(function(response) {
+        console.log('📡 Response status:', response.status);
+        return response.text();
+    })
+    .then(function(responseText) {
+        console.log('📥 Raw response:', responseText);
+        
+        var res;
+        try {
+            res = JSON.parse(responseText);
+        } catch (e) {
+            console.error('❌ Failed to parse response:', e);
+            res = { success: false, message: 'Invalid response from server', raw: responseText };
+        }
+        
+        console.log('📥 Parsed response:', res);
+        
+        // ============================================================
+        // HANDLE RESPONSE
+        // ============================================================
         if (res && res.success) {
             showToast('✅ Uploaded report "' + r.title + '" sent to ' + deptName, false);
-            addLog('Uploaded report sent: "' + r.title + '" to ' + deptName);
+            addLog('Uploaded report "' + r.title + '" sent to ' + deptName);
             
+            // Update local data
             r.sent_to_department = parseInt(deptId);
             r.sent_from_department = DEPARTMENT_ID;
             r.is_viewed_by_department = 0;
+            r._is_unviewed = true;
             r.sent_count = (r.sent_count || 0) + 1;
+            r.last_sent_at = new Date().toISOString();
             r.is_sent = 1;
             
-            closeModal('documentInfoModal');
-            loadReports();
-            loadDashboard();
-            fetchUnviewedCounts();
+            // Add notification
+            apiCall('add_notification.php', 'POST', {
+                department_id: parseInt(deptId),
+                from_department_id: parseInt(DEPARTMENT_ID),
+                item_type: 'uploaded_report',
+                item_id: parseInt(r.id),
+                item_title: r.title,
+                message: 'Uploaded report "' + r.title + '" sent from ' + (departmentNames[DEPARTMENT_ID] || 'Sales & Marketing')
+            })
+            .then(function() {
+                // ============================================================
+                // REFRESH DATA
+                // ============================================================
+                return Promise.all([
+                    fetchUploadedReports(),
+                    fetchReports(),
+                    loadDashboard(),
+                    fetchUnviewedCounts()
+                ]);
+            })
+            .then(function() {
+                // Close modal and dropdown
+                closeModal('documentInfoModal');
+                toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
+            });
+            
         } else {
-            showToast(res?.message || 'Failed to send uploaded report', true);
+            // ============================================================
+            // HANDLE ERROR
+            // ============================================================
+            var errorMsg = res?.message || res?.error || 'Unknown error';
+            console.error('❌ Send error response:', res);
+            
+            // Check which fields might be missing
+            console.log('📋 Required fields check:');
+            console.log('  - original_uploaded_report_id:', payload.original_uploaded_report_id);
+            console.log('  - to_department_id:', payload.to_department_id);
+            console.log('  - from_department_id:', payload.from_department_id);
+            console.log('  - uploaded_report_data:', payload.uploaded_report_data ? 'Present' : 'Missing');
+            console.log('  - uploaded_report_data length:', payload.uploaded_report_data?.length || 0);
+            
+            showToast('❌ Failed to send: ' + errorMsg, true);
         }
     })
     .catch(function(e) {
-        console.error('Send uploaded report error:', e);
-        showToast('Network error: ' + e.message, true);
+        console.error('❌ Send error:', e);
+        showToast('❌ Network error: ' + e.message, true);
     })
     .finally(function() {
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
     });
 }
+
 // ============================================================
 // ==================== REPORTS FUNCTIONS ====================
 // ============================================================
@@ -3072,24 +3222,173 @@ function deleteReport(id) {
         });
     }
 }
+// ============================================================
+// DELETE UPLOADED REPORT - KWA SALES & MARKETING DASHBOARD
+// ============================================================
 function deleteUploadedReport(id) {
-    if(confirm('Delete this uploaded report?')) {
-        var r = null;
+    if (!confirm('⚠️ Delete this uploaded report?\n\nThis will move it to the recycle bin.\nYou can restore it later.')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting uploaded report ID:', id);
+    
+    // ============================================================
+    // TAFUTA REPORT
+    // ============================================================
+    var r = null;
+    for (var i = 0; i < uploadedReports.length; i++) {
+        if (uploadedReports[i].id == id) {
+            r = uploadedReports[i];
+            break;
+        }
+    }
+    if (!r) {
+        // Jaribu kwa string
         for (var i = 0; i < uploadedReports.length; i++) {
-            if (uploadedReports[i].id === id) {
+            if (String(uploadedReports[i].id) === String(id)) {
                 r = uploadedReports[i];
                 break;
             }
         }
-        if(r) addToRecycleBin(id, 'report', r.title);
-        apiCall('delete_uploaded_report.php', 'POST', { id: id, deleted_by: CURRENT_USER })
-        .then(function(res) {
-            if(res.success) { showToast('Deleted'); fetchUploadedReports(); loadReports(); loadDashboard(); fetchUnviewedCounts(); }
-            else { showToast(res.message || 'Failed', true); }
-        });
     }
+    if (!r) {
+        showToast('❌ Uploaded report not found', true);
+        return;
+    }
+    
+    console.log('✅ Report found:', r.id, r.title);
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    var card = document.getElementById('uploaded-report-card-' + id);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+        card.style.transition = 'all 0.3s ease';
+    }
+    
+    // ============================================================
+    // ADD TO RECYCLE BIN
+    // ============================================================
+    addToRecycleBin(id, 'uploaded_report', r.title || 'Uploaded Report')
+    .then(function() {
+        // ============================================================
+        // CALL DELETE API
+        // ============================================================
+        var payload = {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'Sales Manager',
+            is_deleted: 1
+        };
+        
+        console.log('📤 Delete payload:', payload);
+        
+        return apiCall('delete_uploaded_report.php', 'POST', payload);
+    })
+    .then(function(res) {
+        console.log('📥 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA
+        // ============================================================
+        uploadedReports = uploadedReports.filter(function(d) { 
+            return d.id != id; 
+        });
+        
+        // ============================================================
+        // REMOVE FROM UI
+        // ============================================================
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        // Also remove from any other views
+        var gridCard = document.getElementById('uploaded-report-card-' + id);
+        if (gridCard && gridCard !== card && gridCard.parentNode) {
+            gridCard.style.opacity = '0';
+            gridCard.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (gridCard.parentNode) {
+                    gridCard.parentNode.removeChild(gridCard);
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // UPDATE COUNTS
+        // ============================================================
+        // Recalculate unviewed count
+        unviewedReportsCount = uploadedReports.filter(function(d) {
+            return d._is_unviewed === true;
+        }).length;
+        
+        // Add from reportsList too
+        var addedUnviewed = reportsList.filter(function(r) {
+            return r._is_unviewed === true;
+        }).length;
+        unviewedReportsCount += addedUnviewed;
+        
+        updateReportBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast('✅ Uploaded report moved to recycle bin', false);
+            addLog('Uploaded report deleted: "' + r.title + '" (ID: ' + r.id + ')');
+        } else {
+            showToast('⚠️ Uploaded report removed from view (refresh may be needed)', false);
+            addLog('Uploaded report removed: "' + r.title + '" (ID: ' + r.id + ')');
+        }
+        
+        // ============================================================
+        // REFRESH DATA
+        // ============================================================
+        return Promise.all([
+            fetchUploadedReports(),
+            loadRecycleBin(),
+            loadReports(),
+            loadDashboard(),
+            fetchUnviewedCounts()
+        ]);
+    })
+    .then(function() {
+        console.log('✅ Data refreshed after delete');
+    })
+    .catch(function(e) {
+        console.error('❌ Delete error:', e);
+        showToast('⚠️ Error: ' + e.message, true);
+        
+        // Still remove from UI
+        if (card && card.parentNode) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (card.parentNode) {
+                    card.parentNode.removeChild(card);
+                }
+            }, 400);
+        }
+        
+        // Update counts
+        unviewedReportsCount = uploadedReports.filter(function(d) {
+            return d._is_unviewed === true;
+        }).length;
+        var addedUnviewed = reportsList.filter(function(r) {
+            return r._is_unviewed === true;
+        }).length;
+        unviewedReportsCount += addedUnviewed;
+        updateReportBadge();
+    });
 }
-
 function openGenerateReportModal() { document.getElementById('genReportTitle').value = ''; document.getElementById('genPeriodType').value = 'daily'; openModal('generateReportModal'); }
 
 function generateAndSaveReport() {
