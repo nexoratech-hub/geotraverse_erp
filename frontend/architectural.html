@@ -3694,61 +3694,293 @@ function viewReportDetailsModal(id) {
     loadReports();
 }
 
+
+// ============================================================
+// VIEW UPLOADED REPORT DETAIL - FIXED (Inafanya kazi kwa Original na Sent)
+// ============================================================
 function viewUploadedReportDetail(id) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-    if (!doc) { showToast('Report not found', true); return; }
+    console.log('📋 viewUploadedReportDetail called with ID:', id);
+    console.log('📋 uploadedReportsData length:', uploadedReportsData.length);
+    console.log('📋 uploadedReportsData:', uploadedReportsData);
     
-    if (doc.is_viewed_by_department == 0 && doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID && viewedReportIds.indexOf(id) === -1) {
-        markReportViewed(id);
-        apiCall('mark_notification_viewed.php', 'POST', {
-            item_type: 'uploaded_report',
-            item_id: parseInt(id),
-            department_id: DEPARTMENT_ID
-        }).catch(function(e) {});
+    // ============================================================
+    // TAFUTA REPORT KWA NJIA MBALIMBALI
+    // ============================================================
+    var doc = null;
+    var idNum = parseInt(id);
+    
+    // 1. Tafuta kwa ID halisi
+    if (!doc) {
+        doc = uploadedReportsData.find(function(d) { 
+            return parseInt(d.id) === idNum; 
+        });
     }
     
+    // 2. Tafuta kwa string
+    if (!doc) {
+        doc = uploadedReportsData.find(function(d) { 
+            return String(d.id) === String(id); 
+        });
+    }
+    
+    // 3. Tafuta kwa original_uploaded_report_id (kwa sent copies)
+    if (!doc) {
+        doc = uploadedReportsData.find(function(d) { 
+            return parseInt(d.original_uploaded_report_id) === idNum; 
+        });
+    }
+    
+    // 4. Tafuta kwa reportsData (kwa added reports with file)
+    if (!doc) {
+        doc = reportsData.find(function(r) { 
+            return parseInt(r.id) === idNum && r.file_path; 
+        });
+    }
+    
+    // 5. LAST RESORT - jaribu kwenye uploadedReportsData kwa kulinganisha
+    if (!doc) {
+        for (var i = 0; i < uploadedReportsData.length; i++) {
+            var d = uploadedReportsData[i];
+            if (d.id == id || d.id === id || String(d.id) === String(id)) {
+                doc = d;
+                break;
+            }
+        }
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', id);
+        console.log('Available uploaded reports IDs:', uploadedReportsData.map(function(d) { 
+            return { id: d.id, title: d.title, type: d.type || 'unknown' }; 
+        }));
+        return;
+    }
+    
+    console.log('✅ Uploaded report found:', doc.id, doc.title);
+    console.log('📋 Report data:', doc);
+    
+    // ============================================================
+    // DETERMINE IF REPORT IS SENT OR ORIGINAL
+    // ============================================================
+    var isSent = false;
+    var isOriginal = false;
+    var sentFromDept = '';
+    
+    // Check if sent from another department
+    if (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) {
+        isSent = true;
+        sentFromDept = departmentNames[doc.sent_from_department] || 'Unknown Department';
+    }
+    
+    // Check if it's a sent copy
+    if (doc.is_sent_copy === 1 || doc.source_type === 'sent' || doc.source_type === 'sent_from') {
+        isSent = true;
+        if (!sentFromDept && doc.from_department_name) {
+            sentFromDept = doc.from_department_name;
+        }
+        if (!sentFromDept && doc.sent_from_name) {
+            sentFromDept = doc.sent_from_name;
+        }
+    }
+    
+    // Check if it's original
+    if (doc.is_original === 1 || doc.source_type === 'original') {
+        isOriginal = true;
+    }
+    
+    // If neither, check department_id
+    if (!isSent && !isOriginal) {
+        if (doc.department_id && parseInt(doc.department_id) === parseInt(DEPARTMENT_ID)) {
+            isOriginal = true;
+        }
+        if (doc.from_department_id && parseInt(doc.from_department_id) !== parseInt(DEPARTMENT_ID)) {
+            isSent = true;
+            sentFromDept = departmentNames[doc.from_department_id] || 'Unknown';
+        }
+    }
+    
+    console.log('📋 isSent:', isSent, 'isOriginal:', isOriginal);
+    
+    // ============================================================
+    // MARK AS VIEWED IF UNVIEWED
+    // ============================================================
+    var isUnviewed = false;
+    
+    if (isSent) {
+        if (doc.is_viewed_by_department == 0 || doc.is_viewed_by_department === null) {
+            isUnviewed = true;
+        }
+        if (doc._is_unviewed === true) {
+            isUnviewed = true;
+        }
+        if (doc.is_viewed === 0 || doc.is_viewed === null) {
+            isUnviewed = true;
+        }
+    }
+    
+    // For original reports, they are already viewed
+    if (isOriginal && !isSent) {
+        isUnviewed = false;
+    }
+    
+    // Mark as viewed if unviewed
+    if (isUnviewed) {
+        markReportViewed(doc.id);
+        doc.is_viewed_by_department = 1;
+        doc._is_unviewed = false;
+        doc.is_viewed = 1;
+        
+        // Remove new badge from card
+        var card = document.getElementById('uploaded-report-card-' + doc.id);
+        if (card) {
+            var badge = card.querySelector('.new-badge');
+            if (badge) badge.remove();
+        }
+        
+        // Update badge count
+        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
+        updateReportBadge();
+        
+        showToast('✅ Report marked as viewed', false);
+    }
+    
+    // ============================================================
+    // PREPARE FILE INFO
+    // ============================================================
+    var fileName = doc.file_name || doc.uploaded_report_file || 'document.pdf';
     var fileSize = doc.file_size ? formatFileSize(doc.file_size) : 'Unknown';
-    var fileExt = doc.file_name ? doc.file_name.split('.').pop().toUpperCase() : 'UNKNOWN';
+    var fileExt = fileName.split('.').pop().toUpperCase();
+    var period = doc.period || doc.uploaded_report_period || 'Not specified';
+    var description = doc.description || 'No description';
+    var uploadedBy = doc.uploaded_by || doc.created_by || doc.sent_by || 'System';
+    var createdAt = doc.created_at || doc.sent_at || new Date().toISOString();
+    var title = doc.title || doc.uploaded_report_title || 'Uploaded Report';
     
-    var isSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
+    // Get file path
+    var filePath = doc.file_path || doc.uploaded_report_file || doc.file_name || '';
     
-    document.getElementById('viewReportContent').innerHTML = 
-        '<div class="bg-gradient-to-r from-pink-600 to-pink-800 text-white p-4 rounded-lg"><h3 class="text-xl font-bold">Document Information</h3><p class="text-xs opacity-90 mt-1">Uploaded Report #' + doc.id + '</p></div>' +
+    // For original reports, try to find file in reportsData
+    if (isOriginal && !filePath) {
+        var reportFile = reportsData.find(function(r) { 
+            return parseInt(r.id) === parseInt(doc.id) && r.file_path; 
+        });
+        if (reportFile && reportFile.file_path) {
+            filePath = reportFile.file_path;
+        }
+    }
+    
+    console.log('📎 File path:', filePath);
+    console.log('📎 File name:', fileName);
+    
+    // ============================================================
+    // BUILD MODAL CONTENT
+    // ============================================================
+    var infoHtml = 
+        (isSent ? 
+            '<div style="background: #fef3c7; padding: 10px; border-radius: 8px; margin-bottom: 12px; text-align: center; color: #d97706; font-weight: 600; font-size: 12px;">' +
+                '<i class="fas fa-paper-plane mr-2"></i> This report was sent from <strong>' + escapeHtml(sentFromDept) + '</strong>' +
+            '</div>' : 
+            (isOriginal ? 
+                '<div style="background: #d1fae5; padding: 10px; border-radius: 8px; margin-bottom: 12px; text-align: center; color: #059669; font-weight: 600; font-size: 12px;">' +
+                    '<i class="fas fa-check-circle mr-2"></i> This is your original report' +
+                '</div>' : '')) +
         '<div class="doc-info-container">' +
-            '<div class="doc-info-item"><div class="doc-info-label">Title:</div><div class="doc-info-value"><strong>' + escapeHtml(doc.title) + '</strong></div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">File Name:</div><div class="doc-info-value">' + escapeHtml(doc.file_name || '-') + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">File Type:</div><div class="doc-info-value">' + fileExt + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">File Size:</div><div class="doc-info-value">' + fileSize + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">Period:</div><div class="doc-info-value">' + escapeHtml(doc.period || 'N/A') + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">Uploaded By:</div><div class="doc-info-value">' + escapeHtml(doc.uploaded_by || 'System') + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">Uploaded At:</div><div class="doc-info-value">' + new Date(doc.created_at).toLocaleString() + '</div></div>' +
-            '<div class="doc-info-item"><div class="doc-info-label">Description:</div><div class="doc-info-value">' + escapeHtml(doc.description || 'No description') + '</div></div>' +
-            (isSent ? '<div class="doc-info-item"><div class="doc-info-label">Received From:</div><div class="doc-info-value"><span class="sent-from-badge"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown') + '</span></div></div>' : '') +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">Document Title:</div>' +
+                '<div class="doc-info-value"><strong>' + escapeHtml(title) + '</strong></div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">File Name:</div>' +
+                '<div class="doc-info-value">' + escapeHtml(fileName) + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">File Type:</div>' +
+                '<div class="doc-info-value">' + fileExt + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">File Size:</div>' +
+                '<div class="doc-info-value">' + fileSize + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">Period:</div>' +
+                '<div class="doc-info-value">' + escapeHtml(period) + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">Uploaded By:</div>' +
+                '<div class="doc-info-value">' + escapeHtml(uploadedBy) + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">Uploaded At:</div>' +
+                '<div class="doc-info-value">' + new Date(createdAt).toLocaleString() + '</div>' +
+            '</div>' +
+            '<div class="doc-info-item">' +
+                '<div class="doc-info-label">Description:</div>' +
+                '<div class="doc-info-value">' + escapeHtml(description) + '</div>' +
+            '</div>' +
+            (isSent ? 
+                '<div class="doc-info-item">' +
+                    '<div class="doc-info-label">Received From:</div>' +
+                    '<div class="doc-info-value"><span class="sent-from-badge" style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:9px;font-weight:600;background:#fef3c7;color:#d97706;"><i class="fas fa-paper-plane mr-1"></i> ' + escapeHtml(sentFromDept) + '</span></div>' +
+                '</div>' : '') +
         '</div>';
     
+    document.getElementById('documentInfoContent').innerHTML = infoHtml;
+    
+    // ============================================================
+    // BUILD BUTTONS - DOWNLOAD AND SEND
+    // ============================================================
+    var canSend = isOriginal || (!isSent && doc.department_id === DEPARTMENT_ID);
+    
     var deptOptions = '';
-    allDepartmentsForSend.forEach(function(d) {
-        if (d.id !== DEPARTMENT_ID) {
-            deptOptions += '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs"><i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) + '</a>';
-        }
-    });
-    
-    var downloadUrl = '../backend/api/download_report_document.php?id=' + doc.id;
-    
-    var buttonsHtml = '<a href="' + downloadUrl + '" target="_blank" class="btn-download"><i class="fas fa-download mr-1"></i> Download</a>';
-    
-    if (deptOptions) {
-        buttonsHtml += '<div class="send-dropdown"><button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')"><i class="fas fa-paper-plane"></i> ' + (isSent ? 'Forward Report' : 'Send Report') + '</button><div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div></div>';
+    if (canSend) {
+        allDepartmentsForSend.forEach(function(d) {
+            if (d.id !== DEPARTMENT_ID) {
+                deptOptions += 
+                    '<a onclick="sendUploadedReportToDept(' + doc.id + ', ' + d.id + ')" class="block px-3 py-1.5 text-white hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 text-xs">' +
+                        '<i class="fas ' + d.icon + ' mr-1"></i> ' + escapeHtml(d.name) +
+                    '</a>';
+            }
+        });
     }
     
-    if (!isSent) {
-        buttonsHtml += '<button onclick="deleteUploadedReport(' + doc.id + ')" class="btn-danger"><i class="fas fa-trash"></i> Delete</button>';
+    var buttonsHtml = 
+        '<button onclick="downloadReportFileDirect(' + doc.id + ', \'' + escapeHtml(fileName) + '\')" class="btn-primary text-white px-3 py-1.5 rounded text-sm">' +
+            '<i class="fas fa-download"></i> Download' +
+        '</button>' +
+        '<button onclick="downloadReportFileViaAPI(' + doc.id + ', \'' + escapeHtml(fileName) + '\')" class="btn-cyan text-white px-3 py-1.5 rounded text-sm" style="background:#06b6d4;border:none;cursor:pointer;">' +
+            '<i class="fas fa-cloud-download-alt"></i> Download (API)' +
+        '</button>';
+    
+    if (canSend && deptOptions) {
+        buttonsHtml += 
+            '<div class="send-dropdown">' +
+                '<button class="dropdown-trigger" onclick="toggleSendDropdown(\'uploadedReportSendDropdown-' + doc.id + '\')">' +
+                    '<i class="fas fa-paper-plane"></i> Send Report' +
+                '</button>' +
+                '<div id="uploadedReportSendDropdown-' + doc.id + '" class="send-dropdown-content">' + deptOptions + '</div>' +
+            '</div>';
+    } else if (isSent) {
+        buttonsHtml += 
+            '<div style="display: inline-block; position: relative;">' +
+                '<button class="dropdown-trigger" style="background: #9ca3af; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: not-allowed; display: inline-flex; align-items: center; gap: 6px; opacity: 0.6;" title="You cannot send a report received from another department">' +
+                    '<i class="fas fa-ban"></i> Cannot Forward' +
+                '</button>' +
+            '</div>' +
+            '<div style="width:100%;text-align:center;margin-top:5px;padding-top:5px;">' +
+                '<span style="font-size:9px;color:#9ca3af;">' +
+                    '<i class="fas fa-info-circle mr-1"></i> Only reports created by your department can be sent' +
+                '</span>' +
+            '</div>';
     }
     
-    document.getElementById('viewReportButtons').innerHTML = buttonsHtml;
-    openModal('viewReportModal');
+    document.getElementById('documentInfoButtons').innerHTML = buttonsHtml;
+    
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
+    openModal('documentInfoModal');
 }
-
 function editReport(id) {
     var r = reportsData.find(function(r) { return r.id === id; });
     if (r) {
@@ -4221,13 +4453,64 @@ function sendDocumentToDept(docId, deptId) {
     });
 }
 
+// ============================================================
+// FORMAT FILE SIZE - ONGEZA HII FUNCTION
+// ============================================================
+function formatFileSize(bytes) {
+    if (!bytes || bytes === 0 || bytes === '0' || bytes === 'null' || bytes === 'undefined') {
+        return 'Unknown';
+    }
+    
+    var numBytes = parseFloat(bytes);
+    if (isNaN(numBytes) || numBytes <= 0) {
+        return 'Unknown';
+    }
+    
+    if (numBytes < 1024) {
+        return numBytes + ' B';
+    } else if (numBytes < 1024 * 1024) {
+        return (numBytes / 1024).toFixed(2) + ' KB';
+    } else if (numBytes < 1024 * 1024 * 1024) {
+        return (numBytes / (1024 * 1024)).toFixed(2) + ' MB';
+    } else {
+        return (numBytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+}
+
+// ============================================================
+// SEND UPLOADED REPORT TO DEPARTMENT - FIXED
+// ============================================================
 function sendUploadedReportToDept(reportId, deptId) {
-    var doc = uploadedReportsData.find(function(d) { return d.id === reportId; });
+    console.log('📤 sendUploadedReportToDept called with:', reportId, deptId);
+    
+    // Find document
+    var doc = null;
+    var idNum = parseInt(reportId);
+    
+    doc = uploadedReportsData.find(function(d) { 
+        return parseInt(d.id) === idNum; 
+    });
+    
     if (!doc) {
-        showToast('Uploaded report not found', true);
+        doc = uploadedReportsData.find(function(d) { 
+            return parseInt(d.original_uploaded_report_id) === idNum; 
+        });
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found', true);
         return;
     }
-    if (deptId == DEPARTMENT_ID) {
+    
+    // Check if report was received from another department
+    if (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) {
+        var sentFromName = departmentNames[doc.sent_from_department] || 'Unknown';
+        if (!confirm('⚠️ This uploaded report was received from "' + sentFromName + '". Are you sure you want to forward it?')) {
+            return;
+        }
+    }
+    
+    if (parseInt(deptId) === parseInt(DEPARTMENT_ID)) {
         showToast('Cannot send to your own department', true);
         return;
     }
@@ -4241,6 +4524,7 @@ function sendUploadedReportToDept(reportId, deptId) {
     }
     deptName = deptName || 'Department';
     
+    // Show loading
     var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
     var originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
@@ -4248,57 +4532,50 @@ function sendUploadedReportToDept(reportId, deptId) {
         btn.disabled = true;
     }
     
-    var isSent = doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID;
-    var originalSender = doc.sent_from_department || DEPARTMENT_ID;
-    var originalSenderName = departmentNames[originalSender] || 'Architectural';
-    
+    // Build payload
     var payload = {
-        document_id: parseInt(reportId),
+        original_uploaded_report_id: parseInt(doc.id),
         to_department_id: parseInt(deptId),
-        from_department_id: DEPARTMENT_ID,
-        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
-        doc_type: 'uploaded_report',
-        document_title: doc.title,
-        document_file: doc.file_name || '',
-        description: doc.description || '',
-        sent_by: CURRENT_USER || 'Architectural Manager',
-        duplicate_send: true,
-        doc_data: {
+        from_department_id: parseInt(DEPARTMENT_ID),
+        uploaded_report_data: JSON.stringify({
             id: doc.id,
-            title: doc.title,
-            description: doc.description || '',
+            title: doc.title || 'Uploaded Report',
             file_name: doc.file_name || '',
             file_path: doc.file_path || '',
-            file_size: doc.file_size || 0,
+            description: doc.description || '',
             period: doc.period || 'monthly',
-            uploaded_by: doc.uploaded_by || 'System',
-            department_id: doc.department_id || DEPARTMENT_ID,
-            created_at: doc.created_at,
-            sent_count: (doc.sent_count || 0) + 1
-        },
-        is_forwarded: isSent,
-        original_sender_id: originalSender,
-        original_sender_name: originalSenderName,
-        forwarded_from: DEPARTMENT_ID,
-        forwarded_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
+            uploaded_by: doc.uploaded_by || CURRENT_USER,
+            created_at: doc.created_at || new Date().toISOString(),
+            sent_from_department: DEPARTMENT_ID,
+            sent_from_name: departmentNames[DEPARTMENT_ID] || 'Architectural'
+        }),
+        from_department_name: departmentNames[DEPARTMENT_ID] || 'Architectural',
+        to_department_name: deptName,
+        uploaded_report_title: doc.title || 'Untitled Report',
+        uploaded_report_period: doc.period || 'monthly',
+        uploaded_report_file: doc.file_name || '',
+        sent_by: CURRENT_USER || 'Architectural Manager'
     };
     
-    apiCall('send_document_advanced.php', 'POST', payload)
+    apiCall('send_uploaded_report_advanced.php', 'POST', payload)
     .then(function(res) {
         if (res && res.success) {
-            var forwardMsg = isSent ? ' (forwarded from ' + originalSenderName + ')' : '';
-            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
-            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName + forwardMsg);
+            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
+            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName);
             
-            doc.sent_to_department = deptId;
-            doc.sent_from_department = DEPARTMENT_ID;
+            doc.sent_to_department = parseInt(deptId);
+            doc.sent_from_department = parseInt(DEPARTMENT_ID);
             doc.is_viewed_by_department = 0;
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.is_sent = 1;
+            doc._is_unviewed = true;
             
-            closeModal('documentInfoModal');
+            fetchUploadedReports();
             loadReports();
             loadDashboard();
+            
+            closeModal('documentInfoModal');
+            toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
         } else {
             showToast(res?.message || 'Failed to send uploaded report', true);
         }
@@ -4312,10 +4589,8 @@ function sendUploadedReportToDept(reportId, deptId) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
     });
 }
-
 function sendReportToDeptModal(reportId, deptId) {
     var r = reportsData.find(function(r) { return r.id === reportId; });
     if (!r) {
