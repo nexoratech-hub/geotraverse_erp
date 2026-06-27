@@ -1,6 +1,7 @@
 <?php
 // backend/api/send_report_advanced.php
 // Send added/generated report to another department
+// ONLY ORIGINAL REPORTS CAN BE SENT (NO FORWARDING)
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -48,7 +49,80 @@ $reportId = (int)$input['report_id'];
 $toDeptId = (int)$input['to_department_id'];
 $fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
-$isForward = isset($input['is_forward']) ? (int)$input['is_forward'] : 0;
+
+// ============================================================
+// CHECK IF THIS REPORT IS ORIGINAL
+// ============================================================
+$isOriginal = false;
+$isCopy = false;
+$reportDataFromDb = null;
+
+try {
+    $checkStmt = $pdo->prepare("SELECT id, title, is_original, is_sent_copy, department_id, sent_from_department, sent_to_department 
+                                FROM reports 
+                                WHERE id = ? AND is_deleted = 0");
+    $checkStmt->execute([$reportId]);
+    $dbReport = $checkStmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($dbReport) {
+        $isOriginal = ($dbReport['is_original'] == 1);
+        $isCopy = ($dbReport['is_sent_copy'] == 1);
+        $reportTitle = $dbReport['title'] ?? 'Report';
+        
+        // If this is a copy, reject
+        if ($isCopy) {
+            ob_clean();
+            echo json_encode([
+                'success' => false,
+                'message' => '❌ Cannot send copies. Only original reports can be sent.',
+                'error_code' => 'NOT_ORIGINAL',
+                'report_type' => 'copy'
+            ]);
+            exit;
+        }
+        
+        // If this is not original, reject
+        if (!$isOriginal) {
+            ob_clean();
+            echo json_encode([
+                'success' => false,
+                'message' => '❌ Only original reports can be sent.',
+                'error_code' => 'NOT_ORIGINAL'
+            ]);
+            exit;
+        }
+        
+        // Check if department owns this original
+        if ($dbReport['department_id'] != $fromDeptId) {
+            ob_clean();
+            echo json_encode([
+                'success' => false,
+                'message' => '❌ You can only send your own original reports.',
+                'error_code' => 'NOT_OWNER'
+            ]);
+            exit;
+        }
+    } else {
+        // Report not found in reports table - check sent_reports
+        $checkSentStmt = $pdo->prepare("SELECT id, report_title, is_sent_copy, from_department_id, to_department_id 
+                                        FROM sent_reports 
+                                        WHERE id = ? AND is_deleted = 0");
+        $checkSentStmt->execute([$reportId]);
+        $sentReport = $checkSentStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($sentReport) {
+            ob_clean();
+            echo json_encode([
+                'success' => false,
+                'message' => '❌ Cannot send sent reports. Only original reports can be sent.',
+                'error_code' => 'NOT_ORIGINAL'
+            ]);
+            exit;
+        }
+    }
+} catch(PDOException $e) {
+    // Ignore and continue
+}
 
 // Get report data
 $reportTitle = isset($input['report_title']) ? $input['report_title'] : 'Report';
@@ -84,13 +158,19 @@ if (empty($reportData)) {
         'content' => $reportContent,
         'status' => $reportStatus,
         'created_by' => $sentBy,
-        'created_at' => date('Y-m-d H:i:s')
+        'created_at' => date('Y-m-d H:i:s'),
+        'is_original' => 1,
+        'is_sent_copy' => 0
     ];
 }
 
+// Ensure we mark this as original
+$reportData['is_original'] = 1;
+$reportData['is_sent_copy'] = 0;
+
 $reportDataJson = json_encode($reportData);
 if ($reportDataJson === false || $reportDataJson === null) {
-    $reportDataJson = json_encode(['id' => $reportId, 'title' => $reportTitle]);
+    $reportDataJson = json_encode(['id' => $reportId, 'title' => $reportTitle, 'is_original' => 1]);
 }
 
 // Get sender department name
@@ -107,7 +187,7 @@ try {
 }
 
 // ============================================================
-// CREATE TABLES IF NOT EXISTS (With all columns)
+// CREATE TABLES IF NOT EXISTS
 // ============================================================
 try {
     $pdo->exec("
@@ -135,10 +215,7 @@ try {
         `forward_count` int(11) DEFAULT 0,
         `original_sender_department` int(11) DEFAULT NULL,
         `is_original` tinyint(4) DEFAULT 0,
-        `is_sent_copy` tinyint(4) DEFAULT 1,
-        PRIMARY KEY (`id`),
-        KEY `idx_original_report` (`original_report_id`),
-        KEY `idx_to_dept` (`to_department_id`)
+        `is_sent_copy` tinyint(4) DEFAULT 1
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 } catch(PDOException $e) {
     ob_clean();
@@ -238,10 +315,10 @@ try {
         :report_id, :report_data, :from_dept, :to_dept,
         :sent_by, NOW(), 0, 0, 1, 1, NOW(),
         :from_name, :to_name, :title, :period, :status, 
-        :is_forward, :forward_count, :original_sender, 0, 1
+        0, 0, :original_sender, 0, 1
     )");
     
-    $originalSender = isset($input['original_sender_department']) ? (int)$input['original_sender_department'] : $fromDeptId;
+    $originalSender = $fromDeptId;
     
     $stmt->execute([
         ':report_id' => $reportId,
@@ -254,8 +331,6 @@ try {
         ':title' => $reportTitle,
         ':period' => $reportPeriod,
         ':status' => $reportStatus,
-        ':is_forward' => $isForward,
-        ':forward_count' => $isForward ? 1 : 0,
         ':original_sender' => $originalSender
     ]);
     
@@ -331,8 +406,7 @@ try {
                 is_viewed
             ) VALUES (?, ?, 'report', ?, ?, ?, NOW(), 0)");
             
-            $forwardMsg = $isForward ? ' (Forwarded)' : '';
-            $message = "📊 Report \"{$reportTitle}\" sent from {$fromDeptName}{$forwardMsg}";
+            $message = "📊 Report \"{$reportTitle}\" sent from {$fromDeptName}";
             $notifStmt->execute([$toDeptId, $fromDeptId, $reportId, $reportTitle, $message]);
         }
     } catch(PDOException $e) {
@@ -342,7 +416,7 @@ try {
     ob_clean();
     echo json_encode([
         'success' => true,
-        'message' => 'Report sent successfully' . ($isForward ? ' (Forwarded)' : ''),
+        'message' => 'Report sent successfully',
         'sent_id' => $sentId,
         'copy_id' => $copyId,
         'original_id' => $reportId,
@@ -351,7 +425,7 @@ try {
         'from_department' => $fromDeptId,
         'from_department_name' => $fromDeptName,
         'report_title' => $reportTitle,
-        'is_forward' => $isForward,
+        'is_forward' => 0,
         'note' => 'Copy created for receiver. Sender keeps original.'
     ]);
 

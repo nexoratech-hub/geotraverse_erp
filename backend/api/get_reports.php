@@ -64,13 +64,13 @@ try {
     $seenIds = [];
     
     // ============================================================
-    // CASE: SUPER ADMIN - ANAONA ZOTE
+    // CASE: SUPER ADMIN - ANAONA ORIGINAL TU (HAONI COPIES ZAKE)
     // ============================================================
     if ($department_id == 1) {
         
         // ============================================================
-        // 1. ORIGINAL REPORTS (is_original = 1, department_id = 1)
-        // Super Admin anaona original zake mwenyewe
+        // 1. ORIGINAL REPORTS ONLY (is_original = 1, department_id = 1)
+        // Super Admin anaona original zake mwenyewe TU
         // ============================================================
         $sql = "
             SELECT * FROM reports 
@@ -97,8 +97,8 @@ try {
         }
         
         // ============================================================
-        // 2. COPIES RECEIVED (zilizotumwa kwake kutoka dept nyingine)
-        // Hizi ni copies katika reports table ambazo zimetumwa kwake
+        // 2. RECEIVED COPIES (zilizotumwa kwake kutoka dept nyingine)
+        // Super Admin anaona copies zilizotumwa kwake
         // ============================================================
         $sql2 = "
             SELECT * FROM reports 
@@ -106,6 +106,7 @@ try {
             AND is_sent_copy = 1
             AND is_deleted = 0
             AND department_id != 1
+            AND sent_from_department != 1
             AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY created_at DESC
         ";
@@ -124,70 +125,35 @@ try {
         }
         
         // ============================================================
-        // 3. COPIES SENT (zilizotumwa na Super Admin kwenda wengine)
-        // Hizi ni copies katika reports table ambazo zimetumwa kutoka kwake
+        // 3. SENT REPORTS FROM sent_reports TABLE (Received by Super Admin)
         // ============================================================
         $sql3 = "
-            SELECT * FROM reports 
-            WHERE sent_from_department = 1
-            AND is_sent_copy = 1
-            AND is_deleted = 0
-            AND department_id != 1
-            AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
-            ORDER BY created_at DESC
-        ";
-        $stmt3 = $pdo->prepare($sql3);
-        $stmt3->execute();
-        $sentReports = $stmt3->fetchAll();
-        
-        foreach ($sentReports as $report) {
-            // Check if original already shown (skip if original exists)
-            $origId = $report['original_report_id'] ?? 0;
-            if (isset($seenIds['orig_' . $origId])) {
-                continue;
-            }
-            
-            $report['source_type'] = 'sent';
-            $report['_is_unviewed'] = false;
-            $report['_is_copy'] = true;
-            $report['_is_sent_by_me'] = true;
-            $report['_is_received_by_me'] = false;
-            $reports[] = $report;
-            $seenIds['sent_' . $report['id']] = true;
-        }
-        
-        // ============================================================
-        // 4. SENT REPORTS FROM sent_reports TABLE
-        // Hizi ni copies zilizotumwa kutoka dept nyingine kwake
-        // AU zilizotumwa na yeye kwenda dept nyingine
-        // ============================================================
-        $sql4 = "
             SELECT * FROM sent_reports 
-            WHERE (from_department_id = 1 OR to_department_id = 1)
+            WHERE to_department_id = 1
+            AND from_department_id != 1
             AND (is_deleted = 0 OR is_deleted IS NULL)
             AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY sent_at DESC
         ";
-        $stmt4 = $pdo->prepare($sql4);
-        $stmt4->execute();
-        $sentReportsData = $stmt4->fetchAll();
+        $stmt3 = $pdo->prepare($sql3);
+        $stmt3->execute();
+        $sentReportsData = $stmt3->fetchAll();
         
         foreach ($sentReportsData as $sent) {
             $data = json_decode($sent['report_data'], true);
             if ($data && is_array($data)) {
-                // Skip if original already shown
+                // Skip if original already shown or already added
                 $origId = $sent['original_report_id'] ?? $data['id'] ?? 0;
                 if (isset($seenIds['orig_' . $origId])) {
                     continue;
                 }
                 
-                // Build metadata
                 $data['sent_id'] = $sent['id'];
-                $data['source_type'] = ($sent['from_department_id'] == 1) ? 'sent_from' : 'sent_received';
+                $data['source_type'] = 'sent_received';
                 $data['_is_unviewed'] = ($sent['is_viewed'] == 0);
                 $data['_is_copy'] = true;
-                $data['_is_sent_by_me'] = ($sent['from_department_id'] == 1);
-                $data['_is_received_by_me'] = ($sent['to_department_id'] == 1);
+                $data['_is_sent_by_me'] = false;
+                $data['_is_received_by_me'] = true;
                 $data['sent_from_department'] = $sent['from_department_id'];
                 $data['sent_to_department'] = $sent['to_department_id'];
                 $data['from_department_name'] = $sent['from_department_name'];
@@ -202,7 +168,6 @@ try {
                 $data['display_id'] = $sent['id'];
                 $data['id'] = $sent['id'];
                 
-                // Ensure required fields
                 if (!isset($data['title']) || empty($data['title'])) {
                     $data['title'] = $sent['report_title'] ?? 'Untitled Report';
                 }
@@ -219,13 +184,19 @@ try {
                     $data['created_at'] = $sent['sent_at'];
                 }
                 
-                $key = 'sent_from_table_' . $sent['id'];
+                $key = 'sent_rec_' . $sent['id'];
                 if (!isset($seenIds[$key])) {
                     $reports[] = $data;
                     $seenIds[$key] = true;
                 }
             }
         }
+        
+        // ============================================================
+        // 4. SKIP SENT FROM (copies alizotuma) - HAZIONYESHWI KWA ADMIN
+        // Super Admin haoni copies alizotuma, anaona original tu
+        // ============================================================
+        // TUMEACHA HII SEHEMU - HAIONYESHI COPIES ALIZOTUMA
         
         // ============================================================
         // 5. REMOVE DUPLICATES
@@ -276,11 +247,7 @@ try {
                 'received_count' => count(array_filter($reports, function($r) { 
                     return $r['source_type'] === 'received' || $r['source_type'] === 'sent_received'; 
                 })),
-                'sent_count' => count(array_filter($reports, function($r) { 
-                    return $r['source_type'] === 'sent' || $r['source_type'] === 'sent_from'; 
-                })),
-                'total_reports_table' => count($originalReports),
-                'total_sent_reports_table' => count($sentReportsData),
+                'note' => 'Super Admin: Sees ORIGINAL (his own) + RECEIVED (copies from others). Does NOT see SENT FROM copies.'
             ],
             'message' => 'Reports retrieved successfully'
         ]);
@@ -324,6 +291,7 @@ try {
             AND is_sent_copy = 1
             AND is_deleted = 0
             AND department_id != :department_id
+            AND sent_from_department != :department_id
             AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY created_at DESC
         ";
@@ -342,11 +310,11 @@ try {
         
         // ============================================================
         // 3. SENT REPORTS FROM sent_reports TABLE
-        // Department inaona copies zilizotumwa kwake
         // ============================================================
         $sql3 = "
             SELECT * FROM sent_reports 
             WHERE to_department_id = :department_id
+            AND from_department_id != :department_id
             AND (is_deleted = 0 OR is_deleted IS NULL)
             AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
             ORDER BY sent_at DESC
@@ -397,7 +365,7 @@ try {
                     $data['created_at'] = $sent['sent_at'];
                 }
                 
-                $key = 'sent_from_table_' . $sent['id'];
+                $key = 'sent_rec_' . $sent['id'];
                 if (!isset($seenIds[$key])) {
                     $reports[] = $data;
                     $seenIds[$key] = true;
