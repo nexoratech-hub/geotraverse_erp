@@ -934,29 +934,43 @@ async function fetchProjectDocuments() {
 }
 
 // ============================================================
-// FETCH UPLOADED REPORTS
+// FETCH UPLOADED REPORTS - HAKIKISHA DATA INAPATIKANA
 // ============================================================
 async function fetchUploadedReports() { 
     try {
-        const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`); 
+        console.log('📡 Fetching uploaded reports for department:', DEPARTMENT_ID);
+        const timestamp = new Date().getTime();
+        const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}&_=${timestamp}`); 
+        
+        console.log('📥 Uploaded reports response:', res);
+        
         if (res.success && res.data) { 
-            uploadedReportsData = res.data.filter(d => d.is_deleted != 1).sort((a,b) => b.id - a.id);
+            // Filter out deleted reports
+            uploadedReportsData = res.data.filter(d => 
+                d.is_deleted != 1 && 
+                (!d.deleted_by_department || d.deleted_by_department != 1)
+            ).sort((a,b) => b.id - a.id);
             
-            // Mark unviewed
+            // Mark unviewed reports
             uploadedReportsData.forEach(d => {
                 d._is_unviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null) &&
                                  d.sent_from_department && parseInt(d.sent_from_department) !== parseInt(DEPARTMENT_ID);
             });
             
-            console.log(`📁 Loaded ${uploadedReportsData.length} uploaded reports`);
+            console.log(`✅ Loaded ${uploadedReportsData.length} uploaded reports`);
+            console.log('📋 Uploaded reports:', uploadedReportsData.map(d => ({ id: d.id, title: d.title, file_name: d.file_name })));
         } else { 
             uploadedReportsData = []; 
+            console.warn('⚠️ No uploaded reports data:', res);
         }
+        return uploadedReportsData;
     } catch(e) {
-        console.error('❌ fetchUploadedReports error:', e);
+        console.error('❌ Error fetching uploaded reports:', e);
         uploadedReportsData = [];
+        return [];
     }
 }
+
 async function fetchReports() { 
     const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
@@ -4180,31 +4194,145 @@ function exportAllUploadedReportsToPDF() {
     showToast("📄 PDF preview opened - Click Print/Save to download", false);
 }
 
+
 // ============================================================
-// SEND UPLOADED REPORT TO DEPARTMENT
+// SEND DOCUMENT TO DEPARTMENT - FUNCTION KUU
 // ============================================================
-async function sendUploadedReportToDept(reportId, deptId) {
-    const doc = uploadedReportsData.find(d => d.id === reportId);
-    if (!doc) {
-        showToast('Uploaded report not found', true);
+async function sendDocumentToDept(docId, deptId, type) {
+    console.log('📤 sendDocumentToDept called:', { docId, deptId, type });
+    
+    // ============================================================
+    // IF UPLOADED REPORT - TUMIA sendUploadedReportToDept
+    // ============================================================
+    if (type === 'uploaded_report') {
+        await sendUploadedReportToDept(docId, deptId);
         return;
     }
+    
+    // ============================================================
+    // PROJECT DOCUMENT - ORIGINAL LOGIC
+    // ============================================================
+    // Tafuta document
+    let doc = projectDocuments.find(d => d.id === docId);
+    if (!doc) {
+        doc = projectDocuments.find(d => String(d.id) === String(docId));
+    }
+    if (!doc) {
+        const idNum = parseInt(docId);
+        if (!isNaN(idNum)) {
+            doc = projectDocuments.find(d => d.id === idNum);
+        }
+    }
+    
+    if (!doc) {
+        showToast('Document not found', true);
+        return;
+    }
+    
     if (deptId == DEPARTMENT_ID) {
         showToast('Cannot send to your own department', true);
         return;
     }
     
-    // KUZUIA FORWARDING - Ikiwa uploaded report ilitumwa kutoka department nyingine, usiruhusu kutumwa tena
-    if (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) {
-        const sentFromName = departmentNames[doc.sent_from_department] || 'Unknown';
-        if (!confirm(`⚠️ This uploaded report was received from "${sentFromName}". Are you sure you want to forward it to another department?`)) {
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department';
+    
+    try {
+        const payload = {
+            document_id: parseInt(docId),
+            to_department_id: parseInt(deptId),
+            from_department_id: DEPARTMENT_ID,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
+            document_title: doc.title,
+            document_file: doc.file_name,
+            description: doc.description || '',
+            doc_type: type || 'project_document',
+            sent_by: CURRENT_USER || 'Survey Manager'
+        };
+        
+        const res = await apiCall('send_document_advanced.php', 'POST', payload);
+        
+        if (res && res.success) {
+            showToast(`✅ Document "${doc.title}" sent to ${deptName}`, false);
+            addLog(`Document "${doc.title}" sent to ${deptName}`);
+            
+            doc.sent_to_department = parseInt(deptId);
+            doc.sent_from_department = DEPARTMENT_ID;
+            doc.is_viewed_by_department = 0;
+            doc._is_unviewed = true;
+            
+            await addNotification(deptId, 'document', doc.id, doc.title, `Document "${doc.title}" sent from Survey Department`);
+            
+            await fetchProjectDocuments();
+            await loadProjects();
+            await loadDashboard();
+        } else {
+            showToast(res?.message || 'Failed to send document', true);
+        }
+    } catch(e) {
+        console.error('Send document error:', e);
+        showToast('Network error: ' + e.message, true);
+    }
+}
+
+// ============================================================
+// SEND UPLOADED REPORT TO DEPARTMENT - FUNCTION MAALUM
+// ============================================================
+async function sendUploadedReportToDept(reportId, deptId) {
+    console.log('📤 sendUploadedReportToDept called:');
+    console.log('   reportId:', reportId, 'type:', typeof reportId);
+    console.log('   deptId:', deptId);
+    console.log('   uploadedReportsData length:', uploadedReportsData.length);
+    
+    // ============================================================
+    // TAFUTA UPLOADED REPORT
+    // ============================================================
+    let doc = uploadedReportsData.find(d => d.id === reportId);
+    if (!doc) {
+        doc = uploadedReportsData.find(d => String(d.id) === String(reportId));
+    }
+    if (!doc) {
+        const idNum = parseInt(reportId);
+        if (!isNaN(idNum)) {
+            doc = uploadedReportsData.find(d => d.id === idNum);
+        }
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', reportId);
+        console.log('Available uploaded reports:', uploadedReportsData.map(d => ({ id: d.id, title: d.title })));
+        return;
+    }
+    
+    console.log('✅ Uploaded report found:', doc.id, doc.title);
+    
+    // ============================================================
+    // CHECK DEPARTMENT
+    // ============================================================
+    if (deptId == DEPARTMENT_ID) {
+        showToast('❌ Cannot send to your own department', true);
+        return;
+    }
+    
+    const dept = allDepartmentsForSend.find(d => d.id == deptId);
+    const deptName = dept ? dept.name : 'Department ' + deptId;
+    
+    // ============================================================
+    // CHECK IF REPORT WAS ALREADY SENT
+    // ============================================================
+    const isReceived = doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID);
+    const sentFromName = isReceived ? (departmentNames[doc.sent_from_department] || 'Unknown') : null;
+    
+    if (isReceived) {
+        if (!confirm(`⚠️ This uploaded report was received from "${sentFromName}". Are you sure you want to forward it?`)) {
             return;
         }
     }
     
-    const dept = allDepartmentsForSend.find(d => d.id == deptId);
-    const deptName = dept ? dept.name : 'Department';
-    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
     const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
@@ -4212,68 +4340,151 @@ async function sendUploadedReportToDept(reportId, deptId) {
         btn.disabled = true;
     }
     
+    // Also disable modal button if exists
+    const modalBtn = document.querySelector(`#docSendDropdown-${reportId} .dropdown-trigger`);
+    if (modalBtn && modalBtn !== btn) {
+        modalBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        modalBtn.disabled = true;
+    }
+    
     try {
+        // ============================================================
+        // GET FILE PATH
+        // ============================================================
+        let filePath = doc.file_path || doc.file_name || '';
+        let fileName = doc.file_name || 'document.pdf';
+        
+        // Clean file path
+        if (filePath) {
+            while (filePath.startsWith('../')) {
+                filePath = filePath.substring(3);
+            }
+            while (filePath.startsWith('./')) {
+                filePath = filePath.substring(2);
+            }
+        }
+        
+        // ============================================================
+        // BUILD PAYLOAD
+        // ============================================================
         const payload = {
-            document_id: parseInt(reportId),
+            original_uploaded_report_id: parseInt(doc.id),
             to_department_id: parseInt(deptId),
-            from_department_id: DEPARTMENT_ID,
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
-            doc_type: 'uploaded_report',
-            doc_data: {
+            from_department_id: parseInt(DEPARTMENT_ID),
+            
+            uploaded_report_data: JSON.stringify({
                 id: doc.id,
-                title: doc.title,
+                title: doc.title || 'Untitled Report',
+                file_name: fileName,
+                file_path: filePath,
                 description: doc.description || '',
-                file_name: doc.file_name || '',
-                file_path: doc.file_path || '',
-                file_size: doc.file_size || 0,
                 period: doc.period || 'monthly',
-                uploaded_by: doc.uploaded_by || CURRENT_USER,
-                department_id: doc.department_id || DEPARTMENT_ID,
-                created_at: doc.created_at || new Date().toISOString()
-            },
+                uploaded_by: doc.uploaded_by || CURRENT_USER || 'Survey',
+                created_at: doc.created_at || new Date().toISOString(),
+                sent_from_department: DEPARTMENT_ID,
+                sent_from_name: departmentNames[DEPARTMENT_ID] || 'Survey'
+            }),
+            
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Survey',
+            to_department_name: deptName,
+            uploaded_report_title: doc.title || 'Untitled Report',
+            uploaded_report_period: doc.period || 'monthly',
+            uploaded_report_file: fileName,
             sent_by: CURRENT_USER || 'Survey Manager',
-            duplicate_send: true,
-            is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) ? 1 : 0,
-            original_sender: doc.sent_from_department || null
+            is_forward: isReceived ? 1 : 0,
+            original_sender: doc.sent_from_department || null,
+            original_sender_name: sentFromName || null
         };
         
-        const res = await apiCall('send_document_advanced.php', 'POST', payload);
+        console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
         
+        // ============================================================
+        // SEND REQUEST
+        // ============================================================
+        const url = API_BASE + 'send_uploaded_report_advanced.php';
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        
+        console.log('📡 Response status:', response.status);
+        
+        const responseText = await response.text();
+        console.log('📥 Raw response:', responseText);
+        
+        let res;
+        try {
+            res = JSON.parse(responseText);
+        } catch (e) {
+            console.error('❌ Failed to parse response:', e);
+            res = { success: false, message: 'Invalid response from server', raw: responseText };
+        }
+        
+        console.log('📥 Parsed response:', res);
+        
+        // ============================================================
+        // HANDLE RESPONSE
+        // ============================================================
         if (res && res.success) {
-            const forwardMsg = (doc.sent_from_department && parseInt(doc.sent_from_department) !== parseInt(DEPARTMENT_ID)) ? ' (forwarded)' : '';
+            const forwardMsg = isReceived ? ' (forwarded)' : '';
             showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`, false);
-            addLog(`Uploaded report sent: "${doc.title}" to ${deptName}${forwardMsg}`);
+            addLog(`Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`);
             
             doc.sent_to_department = parseInt(deptId);
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
-            doc.is_sent = 1;
+            doc._is_unviewed = true;
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();
-            doc._is_unviewed = true;
             
-            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, `Uploaded report "${doc.title}" sent from Survey Department${forwardMsg}`);
-            await updateReportBadge();
+            try {
+                await apiCall('add_notification.php', 'POST', {
+                    department_id: parseInt(deptId),
+                    from_department_id: parseInt(DEPARTMENT_ID),
+                    item_type: 'uploaded_report',
+                    item_id: parseInt(doc.id),
+                    item_title: doc.title,
+                    message: `Uploaded report "${doc.title}" sent from ${departmentNames[DEPARTMENT_ID] || 'Survey'}${forwardMsg}`
+                });
+            } catch(e) {
+                console.log('⚠️ Notification error:', e);
+            }
             
             await fetchUploadedReports();
             await loadReports();
             await loadDashboard();
+            await fetchUnviewedCounts();
+            
+            closeModal('documentInfoModal');
+            toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
+            toggleSendDropdown(`docSendDropdown-${reportId}`);
+            
         } else {
-            showToast(res?.message || 'Failed to send uploaded report', true);
+            const errorMsg = res?.message || res?.error || 'Unknown error';
+            console.error('❌ Send error response:', res);
+            showToast(`❌ Failed to send: ${errorMsg}`, true);
         }
-    } catch(e) {
-        console.error('Send uploaded report error:', e);
-        showToast('Network error: ' + e.message, true);
+        
+    } catch (e) {
+        console.error('❌ Send error:', e);
+        showToast('❌ Network error: ' + e.message, true);
     } finally {
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
-        toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
-        closeModal('documentInfoModal');
+        if (modalBtn && modalBtn !== btn) {
+            modalBtn.innerHTML = originalText;
+            modalBtn.disabled = false;
+        }
     }
 }
-
 function exportAllProjectsToExcel() { 
     let ws = [['ID','Name','Client','Amount','Status','Progress','Location','Start Date','End Date','Created By','Received From']]; 
     projectsData.forEach(p => {
