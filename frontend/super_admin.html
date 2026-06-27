@@ -1384,17 +1384,15 @@ async function fetchBudgetRequests() {
 }
 
 // ============================================================
-// FETCH REPORTS - SUPER ADMIN (Original + Received, No Own Copies)
+// FETCH REPORTS - SUPER ADMIN (Original + Sent From + Received)
 // ============================================================
 async function fetchReports() {
     console.log('📡 [fetchReports] Fetching reports for Super Admin...');
     
     try {
-        // ============================================================
-        // FORCE FRESH - CACHE BUSTING
-        // ============================================================
+        // Force fresh data - no cache
         const cacheBuster = `&_t=${Date.now()}`;
-        const url = `get_reports.php?all=1${cacheBuster}`;
+        const url = `get_reports.php?department_id=${DEPARTMENT_ID}&all=1${cacheBuster}`;
         
         console.log('📡 URL:', API_BASE + url);
         
@@ -1408,8 +1406,11 @@ async function fetchReports() {
             }
         });
         
+        console.log('📡 Response status:', response.status);
+        
         const responseText = await response.text();
-        console.log('📥 Raw response:', responseText);
+        console.log('📥 Raw response length:', responseText.length);
+        console.log('📥 Raw response preview:', responseText.substring(0, 300));
         
         let res;
         try {
@@ -1422,137 +1423,130 @@ async function fetchReports() {
                 try {
                     res = JSON.parse(jsonMatch[0]);
                 } catch(e2) {
-                    res = { success: false, message: 'Invalid JSON', data: [] };
+                    console.error('❌ Failed to extract JSON:', e2);
+                    reportsData = [];
+                    return [];
                 }
             } else {
-                res = { success: false, message: 'No JSON found', data: [] };
+                console.error('❌ No JSON found in response');
+                reportsData = [];
+                return [];
             }
         }
         
         console.log('📥 Parsed response:', res);
         
-        if (res && res.success) {
-            let reportsArray = [];
-            
-            // Extract data
-            if (res.data) {
-                if (Array.isArray(res.data)) {
-                    reportsArray = res.data;
-                } else if (typeof res.data === 'object') {
-                    if (res.data.reports && Array.isArray(res.data.reports)) {
-                        reportsArray = res.data.reports;
-                    } else if (res.data.data && Array.isArray(res.data.data)) {
-                        reportsArray = res.data.data;
-                    } else {
-                        const values = Object.values(res.data);
-                        for (let val of values) {
-                            if (Array.isArray(val)) {
-                                reportsArray = val;
-                                break;
-                            }
-                        }
+        if (!res || !res.success) {
+            console.warn('⚠️ API returned error:', res?.message);
+            reportsData = [];
+            return [];
+        }
+        
+        // Get reports array
+        let reportsArray = [];
+        if (Array.isArray(res.data)) {
+            reportsArray = res.data;
+        } else if (res.data && typeof res.data === 'object') {
+            if (Array.isArray(res.data.data)) {
+                reportsArray = res.data.data;
+            } else if (Array.isArray(res.data.reports)) {
+                reportsArray = res.data.reports;
+            } else {
+                const values = Object.values(res.data);
+                for (let val of values) {
+                    if (Array.isArray(val)) {
+                        reportsArray = val;
+                        break;
                     }
                 }
             }
-            
-            console.log('📊 Raw reports array length:', reportsArray.length);
-            
-            // ============================================================
-            // ✅ FILTER: Original + Received, NO OWN COPIES
-            // ============================================================
-            reportsData = reportsArray
-                .filter(r => {
-                    // Skip deleted
-                    if (r.is_deleted == 1) return false;
-                    if (r.deleted_by_admin == 1) return false;
-                    if (r.deleted_by_department == 1) return false;
-                    
-                    // ============================================================
-                    // CASE 1: NI ORIGINAL (is_original = 1 au is_sent_copy != 1)
-                    // Sender anaona original zake
-                    // ============================================================
-                    if (r.is_original == 1 || r.is_sent_copy != 1) {
-                        // Super Admin (department_id = 1) anaona original zake
-                        if (r.department_id == DEPARTMENT_ID) {
-                            console.log(`✅ Original kept for sender: ${r.id} - ${r.title}`);
-                            return true;
-                        }
-                        // Receiver haoni original
-                        console.log(`⏭️ Original hidden from receiver: ${r.id} - ${r.title}`);
-                        return false;
-                    }
-                    
-                    // ============================================================
-                    // CASE 2: NI COPY (is_sent_copy = 1)
-                    // Receiver (to_department_id = current) anaona copy
-                    // ============================================================
-                    if (r.is_sent_copy == 1) {
-                        if (r.to_department_id == DEPARTMENT_ID) {
-                            console.log(`✅ Copy kept for receiver: ${r.id} - ${r.title}`);
-                            return true;
-                        }
-                        console.log(`⏭️ Copy hidden from sender: ${r.id} - ${r.title}`);
-                        return false;
-                    }
-                    
-                    // ============================================================
-                    // CASE 3: IMETUMWA KUTOKA DEPARTMENT NYINGINE
-                    // ============================================================
-                    if (r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID) {
-                        if (r.sent_to_department == DEPARTMENT_ID) {
-                            console.log(`✅ Received report kept: ${r.id} - ${r.title}`);
-                            return true;
-                        }
-                        return false;
-                    }
-                    
-                    return r.department_id == DEPARTMENT_ID;
-                })
-                .map(r => {
-                    r.id = parseInt(r.id) || parseInt(r.sent_id) || 0;
-                    
-                    // Set source type
-                    if (r.is_original == 1 || r.is_sent_copy != 1) {
-                        r.source_type = 'original';
-                        r._is_original = true;
-                        r._is_copy = false;
-                        r._is_sent_by_me = (r.department_id == DEPARTMENT_ID);
-                        r._is_received_by_me = false;
-                    } else if (r.is_sent_copy == 1) {
-                        r.source_type = 'copy';
-                        r._is_original = false;
-                        r._is_copy = true;
-                        r._is_sent_by_me = (r.from_department_id == DEPARTMENT_ID);
-                        r._is_received_by_me = (r.to_department_id == DEPARTMENT_ID);
-                    }
-                    
-                    r._is_unviewed = (r.sent_from_department && 
-                                     parseInt(r.sent_from_department) !== DEPARTMENT_ID && 
-                                     (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null));
-                    
-                    return r;
-                })
-                .sort((a, b) => (b.id || 0) - (a.id || 0));
-            
-            console.log(`✅ Reports loaded: ${reportsData.length}`);
-            console.log('📋 Report types:', reportsData.map(r => ({ 
-                id: r.id, 
-                title: r.title, 
-                source_type: r.source_type,
-                is_original: r._is_original,
-                is_copy: r._is_copy,
-                sent_by_me: r._is_sent_by_me,
-                received_by_me: r._is_received_by_me,
-                department_id: r.department_id,
-                from_dept: r.from_department_id,
-                to_dept: r.to_department_id
-            })));
-            
-        } else {
-            console.warn('⚠️ Failed to fetch reports:', res?.message);
-            reportsData = [];
         }
         
+        console.log('📊 Raw reports array length:', reportsArray.length);
+        
+        if (!Array.isArray(reportsArray) || reportsArray.length === 0) {
+            console.log('📊 No reports found');
+            reportsData = [];
+            return [];
+        }
+        
+        // ============================================================
+        // FILTER AND PROCESS REPORTS
+        // ============================================================
+        reportsData = reportsArray
+            .filter(r => {
+                // Skip deleted
+                if (r.is_deleted == 1) return false;
+                if (r.deleted_by_admin == 1) return false;
+                if (r.deleted_by_department == 1) return false;
+                if (r.deleted_at && r.deleted_at !== null && r.deleted_at !== '0000-00-00 00:00:00') return false;
+                return true;
+            })
+            .map(r => {
+                // Ensure ID is number
+                r.id = parseInt(r.id) || parseInt(r.sent_id) || 0;
+                
+                // Set source type
+                if (r.source_type === 'original' || r.is_original == 1) {
+                    r._is_original = true;
+                    r._is_copy = false;
+                    r._is_sent_by_me = (r.department_id == DEPARTMENT_ID);
+                    r._is_received_by_me = false;
+                } else if (r.source_type === 'sent_from') {
+                    r._is_original = false;
+                    r._is_copy = true;
+                    r._is_sent_by_me = true;
+                    r._is_received_by_me = false;
+                } else if (r.source_type === 'sent_received') {
+                    r._is_original = false;
+                    r._is_copy = true;
+                    r._is_sent_by_me = false;
+                    r._is_received_by_me = true;
+                } else if (r.source_type === 'sent') {
+                    // Generic sent
+                    r._is_original = false;
+                    r._is_copy = true;
+                    r._is_sent_by_me = (r.from_department_id == DEPARTMENT_ID);
+                    r._is_received_by_me = (r.to_department_id == DEPARTMENT_ID);
+                }
+                
+                // Check if unviewed
+                r._is_unviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
+                                 (r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID);
+                
+                // Ensure title
+                if (!r.title || r.title === '') {
+                    r.title = r.report_title || 'Untitled Report';
+                }
+                if (!r.period || r.period === '') {
+                    r.period = r.report_period || 'daily';
+                }
+                if (!r.status || r.status === '') {
+                    r.status = r.report_status || 'draft';
+                }
+                
+                return r;
+            })
+            .sort((a, b) => {
+                const dateA = new Date(a.created_at || a.sent_at || 0);
+                const dateB = new Date(b.created_at || b.sent_at || 0);
+                return dateB - dateA;
+            });
+        
+        console.log(`✅ Reports loaded: ${reportsData.length}`);
+        
+        // Log report types
+        const originalCount = reportsData.filter(r => r._is_original).length;
+        const sentFromCount = reportsData.filter(r => r._is_sent_by_me && r._is_copy).length;
+        const receivedCount = reportsData.filter(r => r._is_received_by_me).length;
+        console.log('📋 Report types:', {
+            original: originalCount,
+            sent_from: sentFromCount,
+            received: receivedCount,
+            total: reportsData.length
+        });
+        
+        // Update unviewed count
         unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
         updateReportBadge();
         
