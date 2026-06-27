@@ -1,7 +1,7 @@
 <?php
-// ============================================================
-// send_uploaded_report_advanced.php - COMPLETE FIX
-// ============================================================
+// backend/api/send_uploaded_report_advanced.php
+// Send uploaded report to another department
+// Saves to sent_uploaded_reports table ONLY
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -12,23 +12,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-error_reporting(E_ALL);
+error_reporting(0);
 ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/error_log.txt');
+ob_clean();
 
-function logMessage($msg) {
-    $log = date('Y-m-d H:i:s') . " - " . $msg . "\n";
-    file_put_contents(__DIR__ . '/error_log.txt', $log, FILE_APPEND);
-    error_log($msg);
-}
-
-logMessage("========================================");
-logMessage("📤 send_uploaded_report_advanced.php called");
-
-// ============================================================
-// DATABASE CONNECTION
-// ============================================================
 $host = 'localhost';
 $dbname = 'geotraverse_erp';
 $username = 'root';
@@ -37,231 +24,260 @@ $password = '';
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    logMessage("✅ Database connected");
 } catch(PDOException $e) {
-    logMessage("❌ DB Connection failed: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
+    ob_clean();
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
     exit;
 }
 
-// ============================================================
-// GET INPUT
-// ============================================================
-$rawInput = file_get_contents('php://input');
-logMessage("📤 RAW INPUT: " . $rawInput);
-
-$input = json_decode($rawInput, true);
+$input = json_decode(file_get_contents('php://input'), true);
 
 if (!$input) {
-    logMessage("❌ Invalid JSON input");
-    echo json_encode(['success' => false, 'message' => 'Invalid JSON input']);
+    ob_clean();
+    echo json_encode(['success' => false, 'message' => 'Invalid input']);
     exit;
 }
 
-logMessage("📤 PARSED INPUT: " . json_encode($input));
+// Required fields
+if (!isset($input['original_uploaded_report_id']) || !isset($input['to_department_id']) || !isset($input['from_department_id'])) {
+    ob_clean();
+    echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+    exit;
+}
 
-// ============================================================
-// EXTRACT DATA - MATCHING sent_uploaded_reports TABLE
-// ============================================================
-$originalUploadedReportId = isset($input['original_uploaded_report_id']) ? (int)$input['original_uploaded_report_id'] : 0;
-$uploadedReportData = isset($input['uploaded_report_data']) ? $input['uploaded_report_data'] : '';
-$fromDepartmentId = isset($input['from_department_id']) ? (int)$input['from_department_id'] : 0;
-$toDepartmentId = isset($input['to_department_id']) ? (int)$input['to_department_id'] : 0;
+$originalReportId = (int)$input['original_uploaded_report_id'];
+$toDeptId = (int)$input['to_department_id'];
+$fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
-$fromDepartmentName = isset($input['from_department_name']) ? $input['from_department_name'] : 'Super Admin';
-$toDepartmentName = isset($input['to_department_name']) ? $input['to_department_name'] : 'Department';
-$uploadedReportTitle = isset($input['uploaded_report_title']) ? $input['uploaded_report_title'] : 'Uploaded Report';
-$uploadedReportPeriod = isset($input['uploaded_report_period']) ? $input['uploaded_report_period'] : 'monthly';
-$uploadedReportFile = isset($input['uploaded_report_file']) ? $input['uploaded_report_file'] : '';
 
-logMessage("📊 Data: original_id=$originalUploadedReportId, from=$fromDepartmentId, to=$toDepartmentId, title=$uploadedReportTitle");
+// Get sender department name
+$fromDeptName = 'Department ' . $fromDeptId;
+$toDeptName = 'Department ' . $toDeptId;
+try {
+    $deptStmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
+    $deptStmt->execute([$fromDeptId]);
+    $fromDeptName = $deptStmt->fetchColumn() ?: $fromDeptName;
+    $deptStmt->execute([$toDeptId]);
+    $toDeptName = $deptStmt->fetchColumn() ?: $toDeptName;
+} catch(PDOException $e) {
+    // Ignore
+}
 
-if ($originalUploadedReportId <= 0 || $toDepartmentId <= 0 || $fromDepartmentId <= 0) {
-    logMessage("❌ Missing required fields");
-    echo json_encode([
-        'success' => false,
-        'message' => 'Missing required fields',
-        'debug' => [
-            'original_uploaded_report_id' => $originalUploadedReportId,
-            'to_department_id' => $toDepartmentId,
-            'from_department_id' => $fromDepartmentId
-        ]
-    ]);
+// ============================================================
+// GET UPLOADED REPORT DATA
+// ============================================================
+$reportData = [];
+$reportTitle = 'Uploaded Report';
+$reportFile = '';
+$reportPeriod = 'monthly';
+
+// 1. Try to get from input
+if (isset($input['uploaded_report_data'])) {
+    if (is_array($input['uploaded_report_data'])) {
+        $reportData = $input['uploaded_report_data'];
+    } elseif (is_string($input['uploaded_report_data'])) {
+        $reportData = json_decode($input['uploaded_report_data'], true);
+        if (!is_array($reportData)) {
+            $reportData = [];
+        }
+    }
+}
+
+// 2. Try to get metadata from input
+if (isset($input['uploaded_report_title'])) {
+    $reportTitle = $input['uploaded_report_title'];
+}
+if (isset($input['uploaded_report_file'])) {
+    $reportFile = $input['uploaded_report_file'];
+}
+if (isset($input['uploaded_report_period'])) {
+    $reportPeriod = $input['uploaded_report_period'];
+}
+
+// 3. If empty, try to fetch from database
+if (empty($reportData)) {
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ? AND is_deleted = 0");
+        $stmt->execute([$originalReportId]);
+        $dbData = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($dbData) {
+            $reportData = $dbData;
+            $reportTitle = $dbData['title'] ?? $reportTitle;
+            $reportFile = $dbData['file_name'] ?? $reportFile;
+            $reportPeriod = $dbData['period'] ?? $reportPeriod;
+        }
+    } catch(PDOException $e) {
+        // Ignore
+    }
+}
+
+// 4. Ensure report_data is not empty - use fallback
+if (empty($reportData)) {
+    // Try to get from input's uploaded_report_data again
+    if (isset($input['uploaded_report_data']) && is_string($input['uploaded_report_data'])) {
+        $reportData = json_decode($input['uploaded_report_data'], true);
+        if (!is_array($reportData)) {
+            $reportData = [];
+        }
+    }
+    
+    // If still empty, create minimal data
+    if (empty($reportData)) {
+        $reportData = [
+            'id' => $originalReportId,
+            'title' => $reportTitle,
+            'file_name' => $reportFile,
+            'period' => $reportPeriod,
+            'uploaded_by' => $sentBy,
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+    }
+}
+
+// Ensure report_data is a valid JSON string
+$reportDataJson = json_encode($reportData);
+if ($reportDataJson === false || $reportDataJson === null) {
+    $reportDataJson = json_encode(['id' => $originalReportId, 'title' => $reportTitle]);
+}
+
+// ============================================================
+// CREATE TABLES IF NOT EXISTS
+// ============================================================
+try {
+    $pdo->exec("
+    CREATE TABLE IF NOT EXISTS `sent_uploaded_reports` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `original_uploaded_report_id` int(11) NOT NULL,
+        `copy_uploaded_report_id` int(11) DEFAULT NULL,
+        `uploaded_report_data` longtext NOT NULL,
+        `from_department_id` int(11) NOT NULL,
+        `to_department_id` int(11) NOT NULL,
+        `sent_by` varchar(100) DEFAULT NULL,
+        `sent_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `is_viewed` tinyint(4) DEFAULT 0,
+        `viewed_at` timestamp NULL DEFAULT NULL,
+        `is_deleted` tinyint(4) DEFAULT 0,
+        `deleted_at` timestamp NULL DEFAULT NULL,
+        `sent_count` int(11) DEFAULT 1,
+        `is_sent` tinyint(4) DEFAULT 1,
+        `last_sent_at` timestamp NULL DEFAULT NULL,
+        `from_department_name` varchar(100) DEFAULT NULL,
+        `to_department_name` varchar(100) DEFAULT NULL,
+        `uploaded_report_title` varchar(255) DEFAULT NULL,
+        `uploaded_report_period` varchar(50) DEFAULT NULL,
+        `uploaded_report_file` varchar(255) DEFAULT NULL,
+        `is_original` tinyint(4) DEFAULT 0,
+        `is_sent_copy` tinyint(4) DEFAULT 1,
+        PRIMARY KEY (`id`),
+        KEY `idx_original_report` (`original_uploaded_report_id`),
+        KEY `idx_to_dept` (`to_department_id`),
+        KEY `idx_from_dept` (`from_department_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+} catch(PDOException $e) {
+    ob_clean();
+    echo json_encode(['success' => false, 'message' => 'Table creation failed: ' . $e->getMessage()]);
     exit;
 }
 
+// ============================================================
+// CHECK IF ALREADY SENT
+// ============================================================
 try {
-    // ============================================================
-    // STEP 1: CHECK IF ORIGINAL REPORT EXISTS
-    // ============================================================
-    $checkOriginal = $pdo->prepare("SELECT * FROM uploaded_reports WHERE id = ? AND is_deleted != 1");
-    $checkOriginal->execute([$originalUploadedReportId]);
-    $originalReport = $checkOriginal->fetch();
+    $checkStmt = $pdo->prepare("SELECT id, sent_count FROM sent_uploaded_reports 
+                                WHERE original_uploaded_report_id = ? 
+                                AND to_department_id = ? 
+                                AND is_deleted = 0 
+                                LIMIT 1");
+    $checkStmt->execute([$originalReportId, $toDeptId]);
+    $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
     
-    if (!$originalReport) {
-        logMessage("❌ Original report not found: $originalUploadedReportId");
-        echo json_encode(['success' => false, 'message' => 'Original report not found']);
+    if ($existing) {
+        // Update sent_count instead of creating new record
+        $updateStmt = $pdo->prepare("UPDATE sent_uploaded_reports SET 
+            sent_count = sent_count + 1,
+            last_sent_at = NOW(),
+            is_sent = 1,
+            uploaded_report_data = ?
+            WHERE id = ?");
+        $updateStmt->execute([$reportDataJson, $existing['id']]);
+        
+        ob_clean();
+        echo json_encode([
+            'success' => true,
+            'message' => 'Report already sent to this department. Updated sent count.',
+            'sent_id' => $existing['id'],
+            'already_sent' => true,
+            'sent_count' => $existing['sent_count'] + 1
+        ]);
         exit;
     }
+} catch(PDOException $e) {
+    // Ignore
+}
+
+// ============================================================
+// SAVE TO sent_uploaded_reports TABLE
+// ============================================================
+try {
+    $stmt = $pdo->prepare("INSERT INTO sent_uploaded_reports (
+        original_uploaded_report_id,
+        copy_uploaded_report_id,
+        uploaded_report_data,
+        from_department_id,
+        to_department_id,
+        sent_by,
+        sent_at,
+        is_viewed,
+        is_deleted,
+        sent_count,
+        is_sent,
+        last_sent_at,
+        from_department_name,
+        to_department_name,
+        uploaded_report_title,
+        uploaded_report_period,
+        uploaded_report_file,
+        is_original,
+        is_sent_copy
+    ) VALUES (
+        :original_id, NULL, :report_data, :from_dept, :to_dept,
+        :sent_by, NOW(), 0, 0, 1, 1, NOW(),
+        :from_name, :to_name, :title, :period, :file, 0, 1
+    )");
     
-    logMessage("✅ Original report found: ID=" . $originalReport['id'] . ", Title=" . $originalReport['title']);
-
-    // ============================================================
-    // STEP 2: CHECK IF ALREADY SENT TO THIS DEPARTMENT
-    // ============================================================
-    $checkStmt = $pdo->prepare("SELECT id FROM sent_uploaded_reports 
-        WHERE original_uploaded_report_id = ? AND to_department_id = ? AND is_deleted = 0");
-    $checkStmt->execute([$originalUploadedReportId, $toDepartmentId]);
-    $existing = $checkStmt->fetch();
+    $stmt->execute([
+        ':original_id' => $originalReportId,
+        ':report_data' => $reportDataJson,
+        ':from_dept' => $fromDeptId,
+        ':to_dept' => $toDeptId,
+        ':sent_by' => $sentBy,
+        ':from_name' => $fromDeptName,
+        ':to_name' => $toDeptName,
+        ':title' => $reportTitle,
+        ':period' => $reportPeriod,
+        ':file' => $reportFile
+    ]);
     
-    if ($existing) {
-        logMessage("⚠️ Already sent to department $toDepartmentId, updating...");
-    }
-
+    $sentId = $pdo->lastInsertId();
+    
     // ============================================================
-    // STEP 3: PREPARE DATA FOR INSERT
-    // ============================================================
-    // If uploaded_report_data is not provided, build it from original report
-    if (empty($uploadedReportData) || $uploadedReportData === 'null') {
-        $reportData = [
-            'id' => $originalReport['id'],
-            'title' => $originalReport['title'],
-            'description' => $originalReport['description'] ?? '',
-            'file_name' => $originalReport['file_name'],
-            'file_path' => $originalReport['file_path'],
-            'file_size' => $originalReport['file_size'] ?? 0,
-            'file_type' => $originalReport['file_type'] ?? '',
-            'period' => $originalReport['period'] ?? 'monthly',
-            'uploaded_by' => $originalReport['uploaded_by'],
-            'department_id' => $fromDepartmentId,
-            'created_at' => $originalReport['created_at'],
-            'from_department_id' => $fromDepartmentId,
-            'to_department_id' => $toDepartmentId,
-            'sent_by' => $sentBy,
-            'sent_at' => date('Y-m-d H:i:s'),
-            'from_department_name' => $fromDepartmentName,
-            'to_department_name' => $toDepartmentName
-        ];
-        $uploadedReportData = json_encode($reportData, JSON_UNESCAPED_UNICODE);
-        logMessage("📄 Built report data from original");
-    }
-
-    // ============================================================
-    // STEP 4: INSERT OR UPDATE
-    // ============================================================
-    if ($existing) {
-        // UPDATE existing record
-        $updateSql = "UPDATE sent_uploaded_reports SET 
-            uploaded_report_data = ?,
-            sent_by = ?,
-            sent_at = NOW(),
-            is_viewed = 0,
-            sent_count = sent_count + 1,
-            is_sent = 1,
-            last_sent_at = NOW(),
-            from_department_name = ?,
-            to_department_name = ?,
-            uploaded_report_title = ?,
-            uploaded_report_period = ?,
-            uploaded_report_file = ?
-            WHERE id = ?";
-        
-        $updateStmt = $pdo->prepare($updateSql);
-        $updateStmt->execute([
-            $uploadedReportData,
-            $sentBy,
-            $fromDepartmentName,
-            $toDepartmentName,
-            $uploadedReportTitle,
-            $uploadedReportPeriod,
-            $uploadedReportFile,
-            $existing['id']
-        ]);
-        $sentId = $existing['id'];
-        logMessage("🔄 Updated existing record ID: $sentId");
-    } else {
-        // INSERT new record
-        $insertSql = "INSERT INTO sent_uploaded_reports (
-            original_uploaded_report_id,
-            uploaded_report_data,
-            from_department_id,
-            to_department_id,
-            sent_by,
-            sent_at,
-            is_viewed,
-            is_deleted,
-            sent_count,
-            is_sent,
-            last_sent_at,
-            from_department_name,
-            to_department_name,
-            uploaded_report_title,
-            uploaded_report_period,
-            uploaded_report_file
-        ) VALUES (
-            ?, ?, ?, ?, ?, NOW(), 0, 0, 1, 1, NOW(), ?, ?, ?, ?, ?
-        )";
-        
-        logMessage("📝 Insert SQL: $insertSql");
-        
-        $insertStmt = $pdo->prepare($insertSql);
-        $insertResult = $insertStmt->execute([
-            $originalUploadedReportId,
-            $uploadedReportData,
-            $fromDepartmentId,
-            $toDepartmentId,
-            $sentBy,
-            $fromDepartmentName,
-            $toDepartmentName,
-            $uploadedReportTitle,
-            $uploadedReportPeriod,
-            $uploadedReportFile
-        ]);
-        
-        if (!$insertResult) {
-            $errorInfo = $insertStmt->errorInfo();
-            logMessage("❌ Insert failed: " . print_r($errorInfo, true));
-            throw new Exception("Insert failed: " . $errorInfo[2]);
-        }
-        
-        $sentId = $pdo->lastInsertId();
-        logMessage("✅ INSERTED new record ID: $sentId, Rows affected: " . $insertStmt->rowCount());
-    }
-
-    // ============================================================
-    // STEP 5: UPDATE ORIGINAL REPORT
+    // UPDATE ORIGINAL UPLOADED REPORT - Mark as sent
     // ============================================================
     try {
-        $updateOriginal = $pdo->prepare("UPDATE uploaded_reports SET 
+        $updateStmt = $pdo->prepare("UPDATE uploaded_reports SET 
             sent_to_department = ?,
             sent_from_department = ?,
             is_sent = 1,
             sent_count = COALESCE(sent_count, 0) + 1,
             last_sent_at = NOW()
-            WHERE id = ?");
-        $updateOriginal->execute([$toDepartmentId, $fromDepartmentId, $originalUploadedReportId]);
-        logMessage("✅ Original report updated, rows affected: " . $updateOriginal->rowCount());
+            WHERE id = ? AND is_original = 1");
+        $updateStmt->execute([$toDeptId, $fromDeptId, $originalReportId]);
     } catch(PDOException $e) {
-        logMessage("⚠️ Could not update original: " . $e->getMessage());
+        // Ignore
     }
-
-    // ============================================================
-    // STEP 6: VERIFY THE INSERT
-    // ============================================================
-    $verifyStmt = $pdo->prepare("SELECT * FROM sent_uploaded_reports WHERE id = ?");
-    $verifyStmt->execute([$sentId]);
-    $verified = $verifyStmt->fetch();
     
-    if ($verified) {
-        logMessage("✅ VERIFIED: Record exists in sent_uploaded_reports with ID: $sentId");
-        logMessage("✅ Verified data: " . json_encode($verified));
-    } else {
-        logMessage("❌ VERIFICATION FAILED: Record not found in sent_uploaded_reports!");
-    }
-
     // ============================================================
-    // STEP 7: ADD NOTIFICATION
+    // ADD NOTIFICATION FOR RECIPIENT
     // ============================================================
     try {
         $notifStmt = $pdo->prepare("INSERT INTO notifications (
@@ -275,42 +291,35 @@ try {
             is_viewed
         ) VALUES (?, ?, 'uploaded_report', ?, ?, ?, NOW(), 0)");
         
-        $message = "📄 Uploaded Report \"{$uploadedReportTitle}\" sent from {$fromDepartmentName} to {$toDepartmentName}";
-        $notifStmt->execute([$toDepartmentId, $fromDepartmentId, $originalUploadedReportId, $uploadedReportTitle, $message]);
-        logMessage("✅ Notification added for department: $toDepartmentId");
+        $message = "📁 Uploaded report \"{$reportTitle}\" sent from {$fromDeptName}";
+        $notifStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $reportTitle, $message]);
     } catch(PDOException $e) {
-        logMessage("⚠️ Could not add notification: " . $e->getMessage());
+        // Ignore
     }
-
-    // ============================================================
-    // STEP 8: RETURN SUCCESS
-    // ============================================================
-    $response = [
+    
+    ob_clean();
+    echo json_encode([
         'success' => true,
         'message' => 'Uploaded report sent successfully',
         'sent_id' => $sentId,
-        'original_report_id' => $originalUploadedReportId,
-        'to_department' => $toDepartmentId,
-        'to_department_name' => $toDepartmentName,
-        'from_department' => $fromDepartmentId,
-        'from_department_name' => $fromDepartmentName,
-        'report_title' => $uploadedReportTitle,
-        'verified' => $verified ? true : false
-    ];
-    
-    logMessage("📤 RESPONSE: " . json_encode($response));
-    echo json_encode($response);
+        'original_id' => $originalReportId,
+        'to_department' => $toDeptId,
+        'to_department_name' => $toDeptName,
+        'from_department' => $fromDeptId,
+        'from_department_name' => $fromDeptName,
+        'report_title' => $reportTitle,
+        'note' => 'Saved to sent_uploaded_reports table'
+    ]);
 
 } catch(PDOException $e) {
-    logMessage("❌ PDO Exception: " . $e->getMessage());
-    logMessage("❌ SQL State: " . $e->getCode());
+    ob_clean();
     echo json_encode([
-        'success' => false,
+        'success' => false, 
         'message' => 'Database error: ' . $e->getMessage(),
-        'sql_state' => $e->getCode()
+        'debug' => [
+            'report_data_length' => strlen($reportDataJson),
+            'report_data_preview' => substr($reportDataJson, 0, 200)
+        ]
     ]);
-} catch(Exception $e) {
-    logMessage("❌ Exception: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
 }
 ?>

@@ -2437,16 +2437,14 @@ async function fetchReports() {
 }
 
 // ============================================================
-// FETCH UPLOADED REPORTS - INCLUDES SENT HISTORY
+// FETCH UPLOADED REPORTS - FINANCE DEPARTMENT
 // ============================================================
 
 async function fetchUploadedReports() {
-    console.log('📡 [fetchUploadedReports] Starting...');
+    console.log('📡 [fetchUploadedReports] Finance Department');
+    console.log('📡 Department ID:', DEPARTMENT_ID);
     
     try {
-        // ============================================================
-        // FORCE FRESH - CACHE BUSTING
-        // ============================================================
         const cacheBuster = `&_t=${Date.now()}`;
         const url = `get_uploaded_reports.php?department_id=${DEPARTMENT_ID}&all=1${cacheBuster}`;
         
@@ -2486,8 +2484,8 @@ async function fetchUploadedReports() {
             }
         }
         
-        console.log('📥 Parsed data success:', parsedData?.success);
-        console.log('📥 Debug info:', parsedData?.debug);
+        console.log('📥 Parsed data:', parsedData);
+        console.log('📥 Debug:', parsedData?.debug);
         
         let reportsArray = [];
         
@@ -2495,25 +2493,16 @@ async function fetchUploadedReports() {
             if (Array.isArray(parsedData.data)) {
                 reportsArray = parsedData.data;
             } else if (parsedData.data && typeof parsedData.data === 'object') {
-                if (Array.isArray(parsedData.data.data)) {
-                    reportsArray = parsedData.data.data;
-                } else if (Array.isArray(parsedData.data.reports)) {
-                    reportsArray = parsedData.data.reports;
-                } else if (Array.isArray(parsedData.data.uploaded_reports)) {
-                    reportsArray = parsedData.data.uploaded_reports;
-                } else {
-                    const values = Object.values(parsedData.data);
-                    for (let val of values) {
-                        if (Array.isArray(val)) {
-                            reportsArray = val;
-                            break;
-                        }
+                // Try to find array in data object
+                for (let key in parsedData.data) {
+                    if (Array.isArray(parsedData.data[key])) {
+                        reportsArray = parsedData.data[key];
+                        break;
                     }
                 }
-            } else if (Array.isArray(parsedData.reports)) {
-                reportsArray = parsedData.reports;
-            } else if (Array.isArray(parsedData.uploaded_reports)) {
-                reportsArray = parsedData.uploaded_reports;
+                if (!reportsArray.length && Array.isArray(parsedData.data.data)) {
+                    reportsArray = parsedData.data.data;
+                }
             }
         }
         
@@ -2525,8 +2514,27 @@ async function fetchUploadedReports() {
             return [];
         }
         
+        // Log sample for debugging
+        console.log('📋 Sample reports:', reportsArray.slice(0, 5).map(r => ({
+            id: r.id,
+            title: r.title,
+            source_type: r.source_type,
+            is_original: r.is_original,
+            is_sent_copy: r.is_sent_copy,
+            sent_from: r.sent_from_department,
+            sent_to: r.sent_to_department,
+            department_id: r.department_id,
+            display_type: r._display_type
+        })));
+        
         // ============================================================
-        // PROCESS AND CLASSIFY REPORTS
+        // FILTER: ORIGINAL + RECEIVED COPIES ONLY
+        // ============================================================
+        // Finance inaona:
+        // 1. ORIGINAL zake (department_id = Finance)
+        // 2. COPY alizopokea (sent_to_department = Finance)
+        // 3. HAIONI ORIGINAL za sender
+        // 4. HAIONI COPY alizotuma yeye
         // ============================================================
         uploadedReportsData = reportsArray
             .filter(d => {
@@ -2534,59 +2542,64 @@ async function fetchUploadedReports() {
                 if (d.is_deleted == 1) return false;
                 if (d.deleted_at && d.deleted_at !== null) return false;
                 
-                console.log(`📄 Report: ${d.id} - ${d.title}`, {
+                // ============================================================
+                // LOG FOR DEBUGGING
+                // ============================================================
+                console.log(`📄 Checking: ${d.id} - ${d.title}`, {
                     source_type: d.source_type,
                     is_original: d.is_original,
                     is_sent_copy: d.is_sent_copy,
-                    is_sent_history: d._is_sent_history,
-                    is_sent_by_me: d._is_sent_by_me,
-                    is_received_by_me: d._is_received_by_me,
-                    from_dept: d.from_department_id,
-                    to_dept: d.to_department_id
+                    department_id: d.department_id,
+                    sent_from: d.sent_from_department,
+                    sent_to: d.sent_to_department,
+                    display_type: d._display_type
                 });
                 
                 // ============================================================
-                // SHOW ALL TYPES:
-                // 1. ORIGINAL (created by me)
-                // 2. COPY (received from others)  
-                // 3. SENT HISTORY (reports I sent to others)
-                // 4. RECEIVED HISTORY (reports I received from others)
+                // CASE 1: ORIGINAL (is_original = 1)
+                // Finance ANAONA ORIGINAL ZAKE TU (department_id = Finance)
+                // Finance HAONI ORIGINAL ZA WATU WENGINE
                 // ============================================================
-                
-                // CASE 1: ORIGINAL
                 if (d.is_original == 1 || d.source_type === 'original') {
                     if (d.department_id == DEPARTMENT_ID) {
-                        console.log(`✅ ORIGINAL kept: ${d.id} - ${d.title}`);
+                        console.log(`✅ ORIGINAL (owned) kept: ${d.id} - ${d.title}`);
                         return true;
                     }
+                    console.log(`⏭️ ORIGINAL (not owned) HIDDEN: ${d.id} - ${d.title} (department: ${d.department_id})`);
                     return false;
                 }
                 
-                // CASE 2: COPY (received)
+                // ============================================================
+                // CASE 2: COPY (is_sent_copy = 1)
+                // Finance ANAONA COPY ALIZOPOKEA (sent_to_department = Finance)
+                // Finance HAONI COPY ALIZOTUMA YEYE (sent_from_department = Finance)
+                // ============================================================
                 if (d.is_sent_copy == 1 || d.source_type === 'copy') {
-                    // Received by me
+                    // RECEIVER: Finance inaona copy aliyopokea
                     if (d.sent_to_department == DEPARTMENT_ID) {
-                        console.log(`✅ COPY (received) kept: ${d.id} - ${d.title}`);
+                        console.log(`✅ COPY (received) kept: ${d.id} - ${d.title} from ${d.sent_from_department}`);
                         return true;
                     }
-                    // Sent by me - keep as history
+                    // SENDER: Finance HAIONI copy aliyotuma
                     if (d.sent_from_department == DEPARTMENT_ID) {
-                        console.log(`✅ COPY (sent by me) kept as history: ${d.id} - ${d.title}`);
-                        return true;
+                        console.log(`⏭️ COPY (sent by me) HIDDEN: ${d.id} - ${d.title}`);
+                        return false;
                     }
+                    // Not for this department
+                    console.log(`⏭️ COPY (not for me) HIDDEN: ${d.id} - ${d.title}`);
                     return false;
                 }
                 
-                // CASE 3: SENT HISTORY
-                if (d.source_type === 'sent_history' || d._is_sent_history === true) {
-                    console.log(`✅ SENT HISTORY kept: ${d.id} - ${d.title}`);
-                    return true;
-                }
-                
-                // CASE 4: RECEIVED HISTORY
-                if (d.source_type === 'sent_received_history' || d._is_received_by_me === true) {
-                    console.log(`✅ RECEIVED HISTORY kept: ${d.id} - ${d.title}`);
-                    return true;
+                // ============================================================
+                // CASE 3: SENT HISTORY (from sent_uploaded_reports)
+                // ============================================================
+                if (d.source_type === 'sent_history') {
+                    // Show if this department sent OR received it (for history)
+                    if (d.sent_from_department == DEPARTMENT_ID || d.sent_to_department == DEPARTMENT_ID) {
+                        console.log(`✅ HISTORY kept: ${d.id} - ${d.title}`);
+                        return true;
+                    }
+                    return false;
                 }
                 
                 // Default: show if department matches
@@ -2596,50 +2609,68 @@ async function fetchUploadedReports() {
                 // Ensure ID is set
                 d.id = parseInt(d.id) || parseInt(d.sent_id) || 0;
                 
-                // Set source type for display
+                // ============================================================
+                // SET DISPLAY TYPE
+                // ============================================================
                 if (d.source_type === 'original' || d.is_original == 1) {
                     d._display_type = 'Original';
                     d._display_icon = '📁';
                     d._display_color = '#059669';
+                    d._is_original = true;
+                    d._is_copy = false;
                 } else if (d.source_type === 'copy' || d.is_sent_copy == 1) {
                     if (d.sent_to_department == DEPARTMENT_ID) {
-                        d._display_type = 'Received Copy';
+                        d._display_type = '📨 Received Copy';
                         d._display_icon = '📨';
                         d._display_color = '#8b5cf6';
+                        d._is_received_by_me = true;
+                        d._is_sent_by_me = false;
                     } else if (d.sent_from_department == DEPARTMENT_ID) {
-                        d._display_type = 'Sent Copy';
+                        d._display_type = '📤 Sent Copy';
                         d._display_icon = '📤';
                         d._display_color = '#f59e0b';
+                        d._is_sent_by_me = true;
+                        d._is_received_by_me = false;
                     } else {
                         d._display_type = 'Copy';
                         d._display_icon = '📄';
                         d._display_color = '#6b7280';
                     }
-                } else if (d.source_type === 'sent_history' || d._is_sent_history === true) {
-                    d._display_type = 'Sent History';
-                    d._display_icon = '📤';
-                    d._display_color = '#f59e0b';
-                    d.is_original = 0;
-                    d.is_sent_copy = 1;
-                } else if (d.source_type === 'sent_received_history' || d._is_received_by_me === true) {
-                    d._display_type = 'Received History';
-                    d._display_icon = '📨';
-                    d._display_color = '#8b5cf6';
-                    d.is_original = 0;
-                    d.is_sent_copy = 1;
+                    d._is_original = false;
+                    d._is_copy = true;
+                } else if (d.source_type === 'sent_history') {
+                    if (d.sent_from_department == DEPARTMENT_ID) {
+                        d._display_type = '📤 Sent History';
+                        d._display_icon = '📤';
+                        d._display_color = '#f59e0b';
+                        d._is_sent_by_me = true;
+                        d._is_received_by_me = false;
+                    } else if (d.sent_to_department == DEPARTMENT_ID) {
+                        d._display_type = '📨 Received History';
+                        d._display_icon = '📨';
+                        d._display_color = '#8b5cf6';
+                        d._is_sent_by_me = false;
+                        d._is_received_by_me = true;
+                    } else {
+                        d._display_type = 'History';
+                        d._display_icon = '📄';
+                        d._display_color = '#6b7280';
+                    }
+                    d._is_original = false;
+                    d._is_copy = true;
+                    d._is_sent_history = true;
                 } else {
                     d._display_type = 'Unknown';
                     d._display_icon = '📄';
                     d._display_color = '#6b7280';
                 }
                 
-                // Mark as original or copy
-                d._is_original = (d.is_original == 1);
-                d._is_copy = (d.is_sent_copy == 1);
-                
-                // Set unviewed flag
+                // ============================================================
+                // SET UNVIEWED FLAG (only for received reports)
+                // ============================================================
                 d._is_unviewed = (d.sent_from_department && 
                                  parseInt(d.sent_from_department) !== DEPARTMENT_ID && 
+                                 d.sent_to_department == DEPARTMENT_ID &&
                                  (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null));
                 
                 // Ensure title is set
@@ -2650,7 +2681,9 @@ async function fetchUploadedReports() {
                 
                 return d;
             })
-            // Remove duplicates by ID
+            // ============================================================
+            // REMOVE DUPLICATES
+            // ============================================================
             .filter((d, index, self) => {
                 return index === self.findIndex((t) => t.id === d.id);
             })
@@ -2660,6 +2693,9 @@ async function fetchUploadedReports() {
                 return dateB - dateA;
             });
         
+        // ============================================================
+        // LOG FINAL RESULTS
+        // ============================================================
         console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
         console.log('📋 Report types:', uploadedReportsData.map(d => ({
             id: d.id,
@@ -2669,7 +2705,8 @@ async function fetchUploadedReports() {
             is_copy: d._is_copy,
             sent_by_me: d._is_sent_by_me,
             received_by_me: d._is_received_by_me,
-            source_type: d.source_type
+            source_type: d.source_type,
+            is_unviewed: d._is_unviewed
         })));
         
         // Update unviewed count
@@ -2684,7 +2721,6 @@ async function fetchUploadedReports() {
         return [];
     }
 }
-
 function markReportViewed(id) { 
     if(!viewedReportIds.includes(id)) { 
         viewedReportIds.push(id); 
@@ -3080,15 +3116,28 @@ function sleep(ms) {
 }
 
 // ============================================================
-// DELETE UPLOADED REPORT - REMOVE FROM DASHBOARD & MOVE TO RECYCLE BIN
+// DELETE UPLOADED REPORT - SINGLE FUNCTION
+// DELETES BOTH UPLOADED_REPORTS AND SENT_UPLOADED_REPORTS
 // ============================================================
 
 async function deleteUploadedReport(id) {
-    if (!confirm('Delete this uploaded report? It will be moved to recycle bin.')) {
+    // ============================================================
+    // CONFIRM DELETE
+    // ============================================================
+    const confirmMsg = 'Delete this uploaded report?\n\n' +
+                       '⚠️ This will delete:\n' +
+                       '• The uploaded report from your dashboard\n' +
+                       '• All sent records (history) of this report\n' +
+                       '• All copies of this report\n\n' +
+                       'Original remains with sender (if it was a copy).';
+    
+    if (!confirm(confirmMsg)) {
         return;
     }
     
-    // Find the report
+    // ============================================================
+    // FIND THE REPORT
+    // ============================================================
     const doc = uploadedReportsData.find(d => d.id === id);
     if (!doc) {
         showToast('❌ Uploaded report not found', true);
@@ -3096,6 +3145,14 @@ async function deleteUploadedReport(id) {
     }
     
     console.log('🗑️ Deleting uploaded report:', doc.id, doc.title);
+    console.log('📄 Report details:', {
+        is_original: doc.is_original,
+        is_sent_copy: doc.is_sent_copy,
+        source_type: doc.source_type,
+        department_id: doc.department_id,
+        sent_from: doc.sent_from_department,
+        sent_to: doc.sent_to_department
+    });
     
     // ============================================================
     // SHOW LOADING STATE
@@ -3116,37 +3173,50 @@ async function deleteUploadedReport(id) {
     
     try {
         // ============================================================
-        // 1. ADD TO RECYCLE BIN
+        // ADD TO RECYCLE BIN
         // ============================================================
-        await addToRecycleBin(id, 'uploaded_report', doc.title);
+        const isOriginal = doc.is_original == 1 || doc._is_original === true;
+        const isCopy = doc.is_sent_copy == 1 || doc._is_copy === true;
+        const isSentHistory = doc.source_type === 'sent_history' || doc._is_sent_history === true;
+        
+        let itemType = 'uploaded_report';
+        if (isCopy && !isOriginal) {
+            itemType = 'uploaded_report_copy';
+        }
+        if (isSentHistory) {
+            itemType = 'uploaded_report_sent';
+        }
+        
+        await addToRecycleBin(id, itemType, doc.title);
         
         // ============================================================
-        // 2. DELETE FROM DATABASE - SOFT DELETE
+        // DELETE FROM DATABASE - BOTH TABLES
         // ============================================================
         const res = await apiCall('delete_uploaded_report.php', 'POST', {
             id: parseInt(id),
             department_id: parseInt(DEPARTMENT_ID),
             deleted_by: CURRENT_USER || 'System',
-            is_admin: (DEPARTMENT_ID == 1) ? 1 : 0
+            is_admin: (DEPARTMENT_ID == 1) ? 1 : 0,
+            delete_copy_only: 0
         });
         
-        console.log('📤 Delete uploaded report response:', res);
+        console.log('📤 Delete response:', res);
         
         // ============================================================
-        // 3. IMMEDIATELY REMOVE FROM LOCAL DATA
+        // IMMEDIATELY REMOVE FROM LOCAL DATA
         // ============================================================
         uploadedReportsData = uploadedReportsData.filter(d => d.id !== id);
         
         // ============================================================
-        // 4. IMMEDIATELY REMOVE FROM UI - ALL INSTANCES
+        // REMOVE FROM UI - ALL INSTANCES
         // ============================================================
         if (card) {
-            card.style.transition = 'opacity 0.3s, transform 0.3s, height 0.3s';
+            card.style.transition = 'opacity 0.3s, transform 0.3s, height 0.3s, margin 0.3s, padding 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
             card.style.height = card.offsetHeight + 'px';
             
-            setTimeout(function() {
+            setTimeout(() => {
                 card.style.height = '0';
                 card.style.margin = '0';
                 card.style.padding = '0';
@@ -3154,62 +3224,65 @@ async function deleteUploadedReport(id) {
                 card.style.border = 'none';
             }, 300);
             
-            setTimeout(function() {
+            setTimeout(() => {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 600);
         }
         
-        // Remove any other instances
+        // Remove any other instances of this card
         const otherCards = document.querySelectorAll(`[id="uploaded-report-card-${id}"]`);
-        otherCards.forEach(function(c) {
+        otherCards.forEach(c => {
             c.style.transition = 'opacity 0.3s, transform 0.3s';
             c.style.opacity = '0';
             c.style.transform = 'scale(0.95)';
-            setTimeout(function() {
-                if (c.parentNode) c.parentNode.removeChild(c);
+            setTimeout(() => {
+                if (c.parentNode) {
+                    c.parentNode.removeChild(c);
+                }
             }, 300);
         });
         
         // ============================================================
-        // 5. UPDATE BADGE
+        // UPDATE BADGE
         // ============================================================
-        unviewedReportsCount = uploadedReportsData.filter(function(d) {
-            return d.sent_from_department && 
-                   d.sent_from_department != DEPARTMENT_ID && 
-                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
-        }).length;
+        unviewedReportsCount = uploadedReportsData.filter(d => d._is_unviewed).length;
         updateReportBadge();
         
         // ============================================================
-        // 6. SHOW SUCCESS
+        // SHOW SUCCESS
         // ============================================================
         if (res && res.success) {
-            showToast('✅ Uploaded report "' + doc.title + '" moved to recycle bin', false);
+            const deleteInfo = res.data || {};
+            const totalDeleted = deleteInfo.deleted_count || 1;
+            const message = deleteInfo.note || 'Report deleted successfully';
+            showToast(`✅ "${doc.title}" deleted (${totalDeleted} records removed)`, false);
+            console.log(`✅ Deleted: ${totalDeleted} records`);
         } else {
-            showToast('⚠️ Uploaded report "' + doc.title + '" removed from view', false);
+            showToast(`⚠️ "${doc.title}" removed from view`, false);
         }
         
-        addLog('🗑️ Uploaded report deleted: ' + doc.title);
+        addLog(`🗑️ Uploaded report deleted: ${doc.title}`);
         
         // ============================================================
-        // 7. CHECK IF GRID IS EMPTY - SHOW EMPTY MESSAGE
+        // CHECK IF GRID IS EMPTY - SHOW EMPTY MESSAGE
         // ============================================================
         const grid = document.getElementById('uploadedReportsGrid');
         if (grid && grid.children.length === 0) {
             grid.innerHTML = `
                 <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
                     <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
-                    <p>No uploaded reports. Click "Upload Report" to add one.</p>
+                    <p class="text-sm">No uploaded reports found</p>
+                    <p class="text-xs mt-1">Click "Upload Report" to add a document</p>
                 </div>
             `;
         }
         
         // ============================================================
-        // 8. REFRESH DATA IN BACKGROUND
+        // REFRESH DATA IN BACKGROUND
         // ============================================================
-        setTimeout(async function() {
+        setTimeout(async () => {
             await fetchUploadedReports();
             await loadReports();
             await loadDashboard();
@@ -3227,14 +3300,14 @@ async function deleteUploadedReport(id) {
             card.style.transition = 'opacity 0.3s, transform 0.3s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.95)';
-            setTimeout(function() {
+            setTimeout(() => {
                 if (card.parentNode) {
                     card.parentNode.removeChild(card);
                 }
             }, 300);
         }
         
-        showToast('⚠️ Uploaded report "' + doc.title + '" removed from view', false);
+        showToast(`⚠️ "${doc.title}" removed from view`, false);
         
     } finally {
         if (btn) {
@@ -3892,24 +3965,19 @@ async function sendReportToDept(reportId, deptId) {
 }
 
 // ============================================================
-// SEND UPLOADED REPORT - FIXED
+// SEND UPLOADED REPORT - FINANCE DEPARTMENT
 // ============================================================
 
 async function sendUploadedReportToDept(reportId, deptId) {
     console.log('🔵🔵🔵 [sendUploadedReportToDept] CALLED!');
     console.log('🔵 Report ID:', reportId, 'Department:', deptId);
     
-    // Find the uploaded report - FIRST check uploadedReportsData
+    // ============================================================
+    // FIND THE UPLOADED REPORT
+    // ============================================================
     let doc = uploadedReportsData.find(function(d) {
         return parseInt(d.id) === parseInt(reportId);
     });
-    
-    // If not found, check reportsData (added reports)
-    if (!doc) {
-        doc = reportsData.find(function(d) {
-            return parseInt(d.id) === parseInt(reportId);
-        });
-    }
     
     if (!doc) {
         showToast('❌ Uploaded report not found.', true);
@@ -3918,6 +3986,9 @@ async function sendUploadedReportToDept(reportId, deptId) {
     
     console.log('📄 Report found:', doc);
     
+    // ============================================================
+    // VALIDATIONS
+    // ============================================================
     if (parseInt(deptId) === DEPARTMENT_ID) {
         showToast('❌ Cannot send to your own department', true);
         return;
@@ -3940,7 +4011,34 @@ async function sendUploadedReportToDept(reportId, deptId) {
 
     try {
         // ============================================================
-        // BUILD PAYLOAD - SEND TO send_uploaded_report_advanced.php
+        // BUILD REPORT DATA - ENSURE IT'S VALID
+        // ============================================================
+        const reportData = {
+            id: parseInt(doc.id),
+            title: doc.title || 'Uploaded Report',
+            description: doc.description || '',
+            file_name: doc.file_name || '',
+            file_path: doc.file_path || '',
+            file_size: parseInt(doc.file_size) || 0,
+            file_type: doc.file_type || '',
+            period: doc.period || 'monthly',
+            uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
+            department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
+            created_at: doc.created_at || new Date().toISOString(),
+            // FORWARD DATA
+            original_sender: doc.sent_from_department || null,
+            original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+            is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
+            forward_count: (doc.forward_count || 0) + 1,
+            is_sent_copy: 1,
+            is_original: 0,
+            sent_count: (doc.sent_count || 0) + 1,
+            is_sent: 1,
+            last_sent_at: new Date().toISOString()
+        };
+
+        // ============================================================
+        // BUILD PAYLOAD - SEND TO sent_uploaded_reports TABLE
         // ============================================================
         const payload = {
             original_uploaded_report_id: parseInt(doc.id),
@@ -3950,30 +4048,8 @@ async function sendUploadedReportToDept(reportId, deptId) {
             from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
             to_department_name: deptName,
             
-            // Uploaded report data
-            uploaded_report_data: {
-                id: parseInt(doc.id),
-                title: doc.title || 'Uploaded Report',
-                description: doc.description || '',
-                file_name: doc.file_name || '',
-                file_path: doc.file_path || '',
-                file_size: parseInt(doc.file_size) || 0,
-                file_type: doc.file_type || '',
-                period: doc.period || 'monthly',
-                uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
-                department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
-                created_at: doc.created_at || new Date().toISOString(),
-                // FORWARD DATA - TRACK ORIGINAL SENDER
-                original_sender: doc.sent_from_department || null,
-                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
-                forward_count: (doc.forward_count || 0) + 1,
-                is_sent_copy: 1,
-                is_original: 0,
-                sent_count: (doc.sent_count || 0) + 1,
-                is_sent: 1,
-                last_sent_at: new Date().toISOString()
-            },
+            // Uploaded report data - stored as JSON
+            uploaded_report_data: reportData,
             
             // FORWARD DATA AT TOP LEVEL
             original_sender: doc.sent_from_department || null,
@@ -3983,7 +4059,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
             is_sent_copy: 1,
             is_original: 0,
             
-            // Report metadata
+            // Report metadata for quick access
             uploaded_report_title: doc.title || 'Uploaded Report',
             uploaded_report_period: doc.period || 'monthly',
             uploaded_report_file: doc.file_name || '',
@@ -3993,10 +4069,10 @@ async function sendUploadedReportToDept(reportId, deptId) {
             is_sent: 1
         };
 
-        console.log('📤 PAYLOAD to send_uploaded_report_advanced.php:', JSON.stringify(payload, null, 2));
+        console.log('📤 PAYLOAD:', JSON.stringify(payload, null, 2));
 
         // ============================================================
-        // SEND TO API
+        // SEND TO send_uploaded_report_advanced.php
         // ============================================================
         const response = await fetch(API_BASE + 'send_uploaded_report_advanced.php', {
             method: 'POST',
@@ -4031,7 +4107,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
             addLog('📤 Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg);
 
             // ============================================================
-            // UPDATE LOCAL DATA - Sender retains original
+            // UPDATE LOCAL DATA
             // ============================================================
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();
@@ -4039,8 +4115,6 @@ async function sendUploadedReportToDept(reportId, deptId) {
             doc.forward_count = (doc.forward_count || 0) + 1;
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc._is_unviewed = true;
 
             // ============================================================
             // ADD NOTIFICATION FOR RECIPIENT
@@ -4069,83 +4143,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
             toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
 
         } else {
-            // ============================================================
-            // TRY FALLBACK - send_document_advanced.php
-            // ============================================================
-            console.log('⚠️ Primary API failed, trying fallback...');
-            
-            const fallbackPayload = {
-                document_id: parseInt(doc.id),
-                to_department_id: parseInt(deptId),
-                from_department_id: DEPARTMENT_ID,
-                doc_type: 'uploaded_report',
-                document_title: doc.title || 'Uploaded Report',
-                document_file: doc.file_name || '',
-                description: doc.description || '',
-                sent_by: CURRENT_USER || 'Finance Manager',
-                from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
-                duplicate_send: true,
-                document_data: {
-                    id: parseInt(doc.id),
-                    title: doc.title || 'Uploaded Report',
-                    description: doc.description || '',
-                    file_name: doc.file_name || '',
-                    file_path: doc.file_path || '',
-                    file_size: parseInt(doc.file_size) || 0,
-                    file_type: doc.file_type || '',
-                    uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
-                    department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
-                    created_at: doc.created_at || new Date().toISOString(),
-                    original_sender: doc.sent_from_department || null,
-                    original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                    is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
-                    forward_count: (doc.forward_count || 0) + 1,
-                    sent_count: (doc.sent_count || 0) + 1
-                },
-                original_sender: doc.sent_from_department || null,
-                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
-                forward_count: (doc.forward_count || 0) + 1
-            };
-            
-            const fallbackResponse = await fetch(API_BASE + 'send_document_advanced.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                credentials: 'include',
-                body: JSON.stringify(fallbackPayload)
-            });
-            
-            const fallbackText = await fallbackResponse.text();
-            let fallbackRes;
-            try {
-                fallbackRes = JSON.parse(fallbackText);
-            } catch(e) {
-                fallbackRes = { success: false, message: 'Fallback failed' };
-            }
-            
-            if (fallbackRes && fallbackRes.success) {
-                const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
-                showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg + ' (via fallback)', false);
-                addLog('📤 Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg + ' (fallback)');
-                
-                // Update local data
-                doc.sent_count = (doc.sent_count || 0) + 1;
-                doc.last_sent_at = new Date().toISOString();
-                doc.is_sent = 1;
-                
-                await fetchUploadedReports();
-                await loadReports();
-                await loadDashboard();
-                await fetchNotifications();
-                await fetchUnviewedCounts();
-                
-                toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
-            } else {
-                showToast(fallbackRes?.message || res?.message || '❌ Failed to send uploaded report. Please try again.', true);
-            }
+            showToast(res?.message || '❌ Failed to send. Please try again.', true);
         }
 
     } catch(e) {
