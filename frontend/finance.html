@@ -3964,7 +3964,7 @@ async function sendReportToDept(reportId, deptId) {
 }
 
 // ============================================================
-// SEND UPLOADED REPORT - FINANCE DEPARTMENT
+// SEND UPLOADED REPORT - FINANCE (Inaruhusu Forwarding)
 // ============================================================
 
 async function sendUploadedReportToDept(reportId, deptId) {
@@ -3984,6 +3984,14 @@ async function sendUploadedReportToDept(reportId, deptId) {
     }
     
     console.log('📄 Report found:', doc);
+    console.log('📄 Report details:', {
+        is_original: doc.is_original,
+        is_sent_copy: doc.is_sent_copy,
+        source_type: doc.source_type,
+        sent_from: doc.sent_from_department,
+        sent_to: doc.sent_to_department,
+        department_id: doc.department_id
+    });
     
     // ============================================================
     // VALIDATIONS
@@ -3993,10 +4001,35 @@ async function sendUploadedReportToDept(reportId, deptId) {
         return;
     }
     
+    // Check if already sent to this department
+    const alreadySent = uploadedReportsData.some(function(d) {
+        return d.sent_to_department === deptId && 
+               d.original_uploaded_report_id === doc.id;
+    });
+    
+    if (alreadySent) {
+        showToast('⚠️ This report has already been sent to this department', true);
+        return;
+    }
+    
     const dept = allDepartmentsForSend.find(function(d) {
         return parseInt(d.id) === parseInt(deptId);
     });
     const deptName = dept ? dept.name : 'Department';
+
+    // ============================================================
+    // DETERMINE IF THIS IS A FORWARD
+    // ============================================================
+    const isOriginal = doc.is_original == 1 || doc._is_original === true;
+    const isCopy = doc.is_sent_copy == 1 || doc._is_copy === true;
+    const isReceived = doc._is_received_by_me === true;
+    const isForward = isCopy && isReceived; // This is a copy received from another department
+    
+    if (isForward) {
+        console.log('📤 This is a FORWARD (received copy being sent to another department)');
+    } else {
+        console.log('📤 This is an ORIGINAL send');
+    }
 
     // ============================================================
     // SHOW LOADING
@@ -4010,8 +4043,12 @@ async function sendUploadedReportToDept(reportId, deptId) {
 
     try {
         // ============================================================
-        // BUILD REPORT DATA - ENSURE IT'S VALID
+        // BUILD REPORT DATA
         // ============================================================
+        // For forwarding, we need to keep track of the original sender
+        const originalSender = doc.sent_from_department || doc.department_id || DEPARTMENT_ID;
+        const originalSenderName = doc.sent_from_name || departmentNames[originalSender] || 'Unknown';
+        
         const reportData = {
             id: parseInt(doc.id),
             title: doc.title || 'Uploaded Report',
@@ -4024,41 +4061,44 @@ async function sendUploadedReportToDept(reportId, deptId) {
             uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
             department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
             created_at: doc.created_at || new Date().toISOString(),
-            // FORWARD DATA
-            original_sender: doc.sent_from_department || null,
-            original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-            is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
+            // FORWARD TRACKING
+            original_sender: originalSender,
+            original_sender_name: originalSenderName,
+            is_forward: isForward ? 1 : 0,
             forward_count: (doc.forward_count || 0) + 1,
+            forward_chain: doc.forward_chain || [],
             is_sent_copy: 1,
             is_original: 0,
             sent_count: (doc.sent_count || 0) + 1,
             is_sent: 1,
             last_sent_at: new Date().toISOString()
         };
+        
+        // Add current department to forward chain
+        if (isForward) {
+            reportData.forward_chain.push({
+                from: DEPARTMENT_ID,
+                from_name: departmentNames[DEPARTMENT_ID] || 'Finance',
+                to: deptId,
+                to_name: deptName,
+                forwarded_at: new Date().toISOString()
+            });
+        }
 
         // ============================================================
-        // BUILD PAYLOAD - SEND TO sent_uploaded_reports TABLE
+        // BUILD PAYLOAD
         // ============================================================
         const payload = {
-            original_uploaded_report_id: parseInt(doc.id),
+            original_uploaded_report_id: isForward ? doc.original_uploaded_report_id || doc.id : parseInt(doc.id),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
             sent_by: CURRENT_USER || 'Finance Manager',
             from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
             to_department_name: deptName,
+            is_forward: isForward ? 1 : 0,
             
-            // Uploaded report data - stored as JSON
             uploaded_report_data: reportData,
             
-            // FORWARD DATA AT TOP LEVEL
-            original_sender: doc.sent_from_department || null,
-            original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-            is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
-            forward_count: (doc.forward_count || 0) + 1,
-            is_sent_copy: 1,
-            is_original: 0,
-            
-            // Report metadata for quick access
             uploaded_report_title: doc.title || 'Uploaded Report',
             uploaded_report_period: doc.period || 'monthly',
             uploaded_report_file: doc.file_name || '',
@@ -4071,7 +4111,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
         console.log('📤 PAYLOAD:', JSON.stringify(payload, null, 2));
 
         // ============================================================
-        // SEND TO send_uploaded_report_advanced.php
+        // SEND TO API
         // ============================================================
         const response = await fetch(API_BASE + 'send_uploaded_report_advanced.php', {
             method: 'POST',
@@ -4101,12 +4141,12 @@ async function sendUploadedReportToDept(reportId, deptId) {
         // HANDLE RESPONSE
         // ============================================================
         if (res && res.success) {
-            const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            const forwardMsg = isForward ? ' (Forwarded)' : '';
             showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
             addLog('📤 Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg);
 
             // ============================================================
-            // UPDATE LOCAL DATA
+            // UPDATE LOCAL DATA - Sender keeps their copy
             // ============================================================
             doc.sent_count = (doc.sent_count || 0) + 1;
             doc.last_sent_at = new Date().toISOString();

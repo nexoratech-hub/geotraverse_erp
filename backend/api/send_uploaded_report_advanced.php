@@ -1,7 +1,7 @@
 <?php
 // backend/api/send_uploaded_report_advanced.php
-// Send uploaded report to another department
-// Saves to sent_uploaded_reports table ONLY
+// Send uploaded report - ALLOWS FORWARDING
+// Sender keeps their existing copy, Receiver gets new copy
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -49,6 +49,7 @@ $originalReportId = (int)$input['original_uploaded_report_id'];
 $toDeptId = (int)$input['to_department_id'];
 $fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
+$isForward = isset($input['is_forward']) ? (int)$input['is_forward'] : 0;
 
 // Get sender department name
 $fromDeptName = 'Department ' . $fromDeptId;
@@ -111,30 +112,40 @@ if (empty($reportData)) {
     }
 }
 
-// 4. Ensure report_data is not empty - use fallback
+// 4. If still empty, check if this is a copy (forward)
 if (empty($reportData)) {
-    // Try to get from input's uploaded_report_data again
-    if (isset($input['uploaded_report_data']) && is_string($input['uploaded_report_data'])) {
-        $reportData = json_decode($input['uploaded_report_data'], true);
-        if (!is_array($reportData)) {
-            $reportData = [];
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM uploaded_reports 
+                               WHERE original_uploaded_report_id = ? 
+                               AND department_id = ? 
+                               AND is_sent_copy = 1 
+                               AND is_deleted = 0 
+                               LIMIT 1");
+        $stmt->execute([$originalReportId, $fromDeptId]);
+        $copyData = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($copyData) {
+            $reportData = $copyData;
+            $reportTitle = $copyData['title'] ?? $reportTitle;
+            $reportFile = $copyData['file_name'] ?? $reportFile;
+            $reportPeriod = $copyData['period'] ?? $reportPeriod;
         }
-    }
-    
-    // If still empty, create minimal data
-    if (empty($reportData)) {
-        $reportData = [
-            'id' => $originalReportId,
-            'title' => $reportTitle,
-            'file_name' => $reportFile,
-            'period' => $reportPeriod,
-            'uploaded_by' => $sentBy,
-            'created_at' => date('Y-m-d H:i:s')
-        ];
+    } catch(PDOException $e) {
+        // Ignore
     }
 }
 
-// Ensure report_data is a valid JSON string
+// 5. Ensure report_data is not empty
+if (empty($reportData)) {
+    $reportData = [
+        'id' => $originalReportId,
+        'title' => $reportTitle,
+        'file_name' => $reportFile,
+        'period' => $reportPeriod,
+        'uploaded_by' => $sentBy,
+        'created_at' => date('Y-m-d H:i:s')
+    ];
+}
+
 $reportDataJson = json_encode($reportData);
 if ($reportDataJson === false || $reportDataJson === null) {
     $reportDataJson = json_encode(['id' => $originalReportId, 'title' => $reportTitle]);
@@ -148,7 +159,6 @@ try {
     CREATE TABLE IF NOT EXISTS `sent_uploaded_reports` (
         `id` int(11) NOT NULL AUTO_INCREMENT,
         `original_uploaded_report_id` int(11) NOT NULL,
-        `copy_uploaded_report_id` int(11) DEFAULT NULL,
         `uploaded_report_data` longtext NOT NULL,
         `from_department_id` int(11) NOT NULL,
         `to_department_id` int(11) NOT NULL,
@@ -180,7 +190,7 @@ try {
 }
 
 // ============================================================
-// CHECK IF ALREADY SENT
+// CHECK IF ALREADY SENT TO THIS DEPARTMENT
 // ============================================================
 try {
     $checkStmt = $pdo->prepare("SELECT id, sent_count FROM sent_uploaded_reports 
@@ -192,19 +202,17 @@ try {
     $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
     
     if ($existing) {
-        // Update sent_count instead of creating new record
         $updateStmt = $pdo->prepare("UPDATE sent_uploaded_reports SET 
             sent_count = sent_count + 1,
             last_sent_at = NOW(),
-            is_sent = 1,
-            uploaded_report_data = ?
+            is_sent = 1
             WHERE id = ?");
-        $updateStmt->execute([$reportDataJson, $existing['id']]);
+        $updateStmt->execute([$existing['id']]);
         
         ob_clean();
         echo json_encode([
             'success' => true,
-            'message' => 'Report already sent to this department. Updated sent count.',
+            'message' => 'Report already sent. Updated sent count.',
             'sent_id' => $existing['id'],
             'already_sent' => true,
             'sent_count' => $existing['sent_count'] + 1
@@ -216,12 +224,39 @@ try {
 }
 
 // ============================================================
-// SAVE TO sent_uploaded_reports TABLE
+// CHECK IF RECEIVER ALREADY HAS A COPY
+// ============================================================
+try {
+    $receiverCheck = $pdo->prepare("SELECT id FROM uploaded_reports 
+                                    WHERE original_uploaded_report_id = ? 
+                                    AND department_id = ? 
+                                    AND is_sent_copy = 1 
+                                    AND is_deleted = 0 
+                                    LIMIT 1");
+    $receiverCheck->execute([$originalReportId, $toDeptId]);
+    $existingCopy = $receiverCheck->fetch(PDO::FETCH_ASSOC);
+    
+    if ($existingCopy) {
+        ob_clean();
+        echo json_encode([
+            'success' => false,
+            'message' => '⚠️ This department already has a copy of this report.',
+            'error_code' => 'COPY_ALREADY_EXISTS',
+            'copy_id' => $existingCopy['id'],
+            'to_department' => $toDeptId
+        ]);
+        exit;
+    }
+} catch(PDOException $e) {
+    // Ignore
+}
+
+// ============================================================
+// SAVE TO sent_uploaded_reports
 // ============================================================
 try {
     $stmt = $pdo->prepare("INSERT INTO sent_uploaded_reports (
         original_uploaded_report_id,
-        copy_uploaded_report_id,
         uploaded_report_data,
         from_department_id,
         to_department_id,
@@ -240,7 +275,7 @@ try {
         is_original,
         is_sent_copy
     ) VALUES (
-        :original_id, NULL, :report_data, :from_dept, :to_dept,
+        :original_id, :report_data, :from_dept, :to_dept,
         :sent_by, NOW(), 0, 0, 1, 1, NOW(),
         :from_name, :to_name, :title, :period, :file, 0, 1
     )");
@@ -259,6 +294,72 @@ try {
     ]);
     
     $sentId = $pdo->lastInsertId();
+    
+    // ============================================================
+    // CREATE COPY FOR RECEIVER IN uploaded_reports
+    // ============================================================
+    $copyStmt = $pdo->prepare("INSERT INTO uploaded_reports (
+        title,
+        description,
+        file_name,
+        file_path,
+        file_size,
+        file_type,
+        period,
+        uploaded_by,
+        department_id,
+        created_at,
+        is_original,
+        is_sent_copy,
+        original_uploaded_report_id,
+        sent_from_department,
+        sent_to_department,
+        is_viewed_by_department,
+        is_deleted
+    ) VALUES (
+        :title, :description, :file_name, :file_path, :file_size,
+        :file_type, :period, :uploaded_by, :department_id, NOW(),
+        0, 1, :original_id, :sent_from, :sent_to, 0, 0
+    )");
+    
+    $copyStmt->execute([
+        ':title' => $reportTitle,
+        ':description' => $reportData['description'] ?? '',
+        ':file_name' => $reportFile,
+        ':file_path' => $reportData['file_path'] ?? '',
+        ':file_size' => $reportData['file_size'] ?? 0,
+        ':file_type' => $reportData['file_type'] ?? '',
+        ':period' => $reportPeriod,
+        ':uploaded_by' => $sentBy,
+        ':department_id' => $toDeptId,
+        ':original_id' => $originalReportId,
+        ':sent_from' => $fromDeptId,
+        ':sent_to' => $toDeptId
+    ]);
+    
+    $copyId = $pdo->lastInsertId();
+    
+    // ============================================================
+    // SENDER KEEPS THEIR COPY - NO NEW COPY CREATED
+    // ============================================================
+    
+    // ============================================================
+    // UPDATE SENDER'S COPY - Mark as forwarded
+    // ============================================================
+    try {
+        $updateCopyStmt = $pdo->prepare("UPDATE uploaded_reports SET 
+            sent_to_department = ?,
+            sent_from_department = ?,
+            is_sent = 1,
+            sent_count = COALESCE(sent_count, 0) + 1,
+            last_sent_at = NOW()
+            WHERE original_uploaded_report_id = ? 
+            AND department_id = ? 
+            AND is_sent_copy = 1");
+        $updateCopyStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $fromDeptId]);
+    } catch(PDOException $e) {
+        // Ignore
+    }
     
     // ============================================================
     // UPDATE ORIGINAL UPLOADED REPORT - Mark as sent
@@ -280,19 +381,23 @@ try {
     // ADD NOTIFICATION FOR RECIPIENT
     // ============================================================
     try {
-        $notifStmt = $pdo->prepare("INSERT INTO notifications (
-            department_id,
-            from_department_id,
-            item_type,
-            item_id,
-            item_title,
-            message,
-            created_at,
-            is_viewed
-        ) VALUES (?, ?, 'uploaded_report', ?, ?, ?, NOW(), 0)");
-        
-        $message = "📁 Uploaded report \"{$reportTitle}\" sent from {$fromDeptName}";
-        $notifStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $reportTitle, $message]);
+        $notifCheck = $pdo->query("SHOW TABLES LIKE 'notifications'");
+        if ($notifCheck->rowCount() > 0) {
+            $notifStmt = $pdo->prepare("INSERT INTO notifications (
+                department_id,
+                from_department_id,
+                item_type,
+                item_id,
+                item_title,
+                message,
+                created_at,
+                is_viewed
+            ) VALUES (?, ?, 'uploaded_report', ?, ?, ?, NOW(), 0)");
+            
+            $forwardMsg = $isForward ? ' (Forwarded)' : '';
+            $message = "📁 Uploaded report \"{$reportTitle}\" sent from {$fromDeptName}{$forwardMsg}";
+            $notifStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $reportTitle, $message]);
+        }
     } catch(PDOException $e) {
         // Ignore
     }
@@ -300,26 +405,24 @@ try {
     ob_clean();
     echo json_encode([
         'success' => true,
-        'message' => 'Uploaded report sent successfully',
+        'message' => 'Uploaded report sent successfully' . ($isForward ? ' (Forwarded)' : ''),
         'sent_id' => $sentId,
+        'copy_id' => $copyId,
         'original_id' => $originalReportId,
         'to_department' => $toDeptId,
         'to_department_name' => $toDeptName,
         'from_department' => $fromDeptId,
         'from_department_name' => $fromDeptName,
         'report_title' => $reportTitle,
-        'note' => 'Saved to sent_uploaded_reports table'
+        'is_forward' => $isForward,
+        'note' => 'Copy created for receiver only. Sender keeps their existing copy.'
     ]);
 
 } catch(PDOException $e) {
     ob_clean();
     echo json_encode([
         'success' => false, 
-        'message' => 'Database error: ' . $e->getMessage(),
-        'debug' => [
-            'report_data_length' => strlen($reportDataJson),
-            'report_data_preview' => substr($reportDataJson, 0, 200)
-        ]
+        'message' => 'Database error: ' . $e->getMessage()
     ]);
 }
 ?>
