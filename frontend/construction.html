@@ -4000,110 +4000,276 @@ async function generateAndSaveReport() {
         showToast(res.message || 'Failed', true); 
     }
 }
-// ============================================================
-// UPLOADED REPORT FUNCTIONS
-// ============================================================
 
 // ============================================================
-// SEND UPLOADED REPORT TO DEPARTMENT
+// SEND UPLOADED REPORT TO DEPARTMENT - TUMIA API MAALUM
 // ============================================================
 async function sendUploadedReportToDept(reportId, deptId) {
-    const doc = uploadedReportsData.find(d => d.id === reportId);
+    console.log('📤 sendUploadedReportToDept called:');
+    console.log('   reportId:', reportId, 'type:', typeof reportId);
+    console.log('   deptId:', deptId);
+    console.log('   uploadedReportsData length:', uploadedReportsData.length);
+    
+    // ============================================================
+    // TAFUTA UPLOADED REPORT
+    // ============================================================
+    let doc = uploadedReportsData.find(d => d.id === reportId);
     if (!doc) {
-        showToast('Uploaded report not found', true);
+        doc = uploadedReportsData.find(d => String(d.id) === String(reportId));
+    }
+    if (!doc) {
+        const idNum = parseInt(reportId);
+        if (!isNaN(idNum)) {
+            doc = uploadedReportsData.find(d => d.id === idNum);
+        }
+    }
+    
+    // Also check in reportsData (for added reports that might be uploaded)
+    if (!doc) {
+        doc = reportsData.find(r => r.id === reportId && r.file_path);
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', reportId);
+        console.log('Available uploaded reports:', uploadedReportsData.map(d => ({ id: d.id, title: d.title })));
         return;
     }
+    
+    console.log('✅ Uploaded report found:', doc.id, doc.title);
+    console.log('📋 Document data:', doc);
+    
+    // ============================================================
+    // CHECK DEPARTMENT
+    // ============================================================
     if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
+        showToast('❌ Cannot send to your own department', true);
         return;
     }
     
     const dept = allDepartmentsForSend.find(d => d.id == deptId);
-    const deptName = dept ? dept.name : 'Department';
+    const deptName = dept ? dept.name : 'Department ' + deptId;
     
-    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
+    // ============================================================
+    // CHECK IF REPORT WAS RECEIVED FROM ANOTHER DEPARTMENT
+    // ============================================================
+    const isReceived = doc.sent_from_department && doc.sent_from_department !== DEPARTMENT_ID;
+    const sentFromName = isReceived ? (departmentNames[doc.sent_from_department] || 'Unknown') : null;
+    
+    if (isReceived) {
+        if (!confirm(`⚠️ This uploaded report was received from "${sentFromName}". Are you sure you want to forward it to another department?`)) {
+            return;
+        }
+    }
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    const btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
         btn.disabled = true;
     }
     
+    // Also disable modal button if exists
+    const modalBtn = document.querySelector('#docSendDropdown-' + reportId + ' .dropdown-trigger');
+    if (modalBtn && modalBtn !== btn) {
+        modalBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        modalBtn.disabled = true;
+    }
+    
     try {
         // ============================================================
-        // BUILD PAYLOAD - send_uploaded_report_advanced.php
+        // GET FILE INFO
         // ============================================================
-        const payload = {
-            uploaded_report_id: parseInt(reportId),
-            to_department_id: parseInt(deptId),
-            from_department_id: DEPARTMENT_ID,
-            sent_by: CURRENT_USER,
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
-            duplicate_send: true,
-            // Report data
+        let filePath = doc.file_path || doc.file_name || '';
+        let fileName = doc.file_name || 'document.pdf';
+        
+        // Clean file path
+        if (filePath) {
+            while (filePath.startsWith('../')) {
+                filePath = filePath.substring(3);
+            }
+            while (filePath.startsWith('./')) {
+                filePath = filePath.substring(2);
+            }
+        }
+        
+        console.log('📎 File path:', filePath);
+        console.log('📎 File name:', fileName);
+        
+        // ============================================================
+        // BUILD UPLOADED REPORT DATA - KULINGANA NA MUUNDO WA DB
+        // ============================================================
+        const uploadedReportData = {
+            id: doc.id,
             title: doc.title || 'Uploaded Report',
-            file_name: doc.file_name || '',
+            file_name: fileName,
+            file_path: filePath,
+            file_size: doc.file_size || 0,
+            file_type: doc.file_type || '',
             description: doc.description || '',
             period: doc.period || 'monthly',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
+            uploaded_by: doc.uploaded_by || CURRENT_USER || 'Construction Manager',
+            department_id: doc.department_id || DEPARTMENT_ID,
             created_at: doc.created_at || new Date().toISOString(),
-            // Forward data
+            sent_from_department: DEPARTMENT_ID,
+            sent_from_name: departmentNames[DEPARTMENT_ID] || 'Construction'
+        };
+        
+        // ============================================================
+        // BUILD PAYLOAD - KULINGANA NA MUUNDO WA sent_uploaded_reports
+        // ============================================================
+        const payload = {
+            // ============================================================
+            // REQUIRED FIELDS - HIZI ZOTE ZINAPASWA KUWEPO
+            // ============================================================
+            original_uploaded_report_id: parseInt(doc.id),
+            to_department_id: parseInt(deptId),
+            from_department_id: parseInt(DEPARTMENT_ID),
+            uploaded_report_data: JSON.stringify(uploadedReportData),
+            
+            // ============================================================
+            // OPTIONAL FIELDS
+            // ============================================================
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Construction',
+            to_department_name: deptName,
+            uploaded_report_title: doc.title || 'Untitled Report',
+            uploaded_report_period: doc.period || 'monthly',
+            uploaded_report_file: fileName,
+            
+            // ============================================================
+            // SENT BY
+            // ============================================================
+            sent_by: CURRENT_USER || 'Construction Manager',
+            
+            // ============================================================
+            // FORWARD DATA
+            // ============================================================
+            is_forward: isReceived ? 1 : 0,
             original_sender: doc.sent_from_department || null,
-            original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-            is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+            original_sender_name: sentFromName || null,
             forward_count: (doc.forward_count || 0) + 1
         };
         
-        console.log('📤 Sending uploaded report to send_uploaded_report_advanced.php:', payload);
+        console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
         
         // ============================================================
-        // SEND TO API
+        // SEND REQUEST - TUMIA API MAALUM
         // ============================================================
-        const res = await apiCall('send_uploaded_report_advanced.php', 'POST', payload);
+        const url = API_BASE + 'send_uploaded_report_advanced.php';
+        console.log('📡 URL:', url);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        
+        console.log('📡 Response status:', response.status);
+        
+        // Get response text
+        const responseText = await response.text();
+        console.log('📥 Raw response:', responseText);
+        
+        // Try to parse as JSON
+        let res;
+        try {
+            res = JSON.parse(responseText);
+        } catch (e) {
+            console.error('❌ Failed to parse response:', e);
+            res = { success: false, message: 'Invalid response from server', raw: responseText };
+        }
+        
+        console.log('📥 Parsed response:', res);
         
         // ============================================================
         // HANDLE RESPONSE
         // ============================================================
         if (res && res.success) {
-            const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+            const forwardMsg = isReceived ? ' (forwarded)' : '';
             showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`, false);
-            addLog(`Uploaded report sent: "${doc.title}" to ${deptName}${forwardMsg}`);
+            addLog(`Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`);
             
-            // Update local data - mark as sent
-            doc.sent_to_department = deptId;
+            // Update local data
+            doc.sent_to_department = parseInt(deptId);
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.is_sent = 1;
-            doc.last_sent_at = new Date().toISOString();
             doc._is_unviewed = true;
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.last_sent_at = new Date().toISOString();
+            doc.is_sent = 1;
             doc.forward_count = (doc.forward_count || 0) + 1;
             
-            // Add notification for recipient
-            await addNotification(deptId, 'uploaded_report', doc.id, doc.title, 
-                `Uploaded report "${doc.title}" sent from Construction Department${forwardMsg}`
-            );
+            // Add notification
+            try {
+                await apiCall('add_notification.php', 'POST', {
+                    department_id: parseInt(deptId),
+                    from_department_id: parseInt(DEPARTMENT_ID),
+                    item_type: 'uploaded_report',
+                    item_id: parseInt(doc.id),
+                    item_title: doc.title,
+                    message: `Uploaded report "${doc.title}" sent from ${departmentNames[DEPARTMENT_ID] || 'Construction'}${forwardMsg}`
+                });
+            } catch(e) {
+                console.log('⚠️ Notification error:', e);
+            }
             
-            // Refresh data
+            // ============================================================
+            // REFRESH DATA
+            // ============================================================
             await fetchUploadedReports();
-            await fetchUnviewedCounts();
             await loadReports();
             await loadDashboard();
+            await fetchUnviewedCounts();
             
-            // Close modal
+            // Close modal and dropdowns
             closeModal('documentInfoModal');
-            toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
+            toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
+            toggleSendDropdown('docSendDropdown-' + reportId);
             
         } else {
-            showToast(res?.message || 'Failed to send uploaded report. Please try again.', true);
+            // ============================================================
+            // HANDLE ERROR
+            // ============================================================
+            const errorMsg = res?.message || res?.error || 'Unknown error';
+            console.error('❌ Send error response:', res);
+            
+            // Check which fields might be missing
+            console.log('📋 Required fields check:');
+            console.log('  - original_uploaded_report_id:', payload.original_uploaded_report_id);
+            console.log('  - to_department_id:', payload.to_department_id);
+            console.log('  - from_department_id:', payload.from_department_id);
+            console.log('  - uploaded_report_data:', payload.uploaded_report_data ? 'Present' : 'Missing');
+            console.log('  - uploaded_report_data length:', payload.uploaded_report_data?.length || 0);
+            
+            // Show detailed error
+            showToast(`❌ Failed to send: ${errorMsg}`, true);
+            
+            // Log for debugging
+            console.log('========================================');
+            console.log('❌ SEND FAILED');
+            console.log('Payload:', payload);
+            console.log('Response:', res);
+            console.log('========================================');
         }
         
-    } catch(e) {
-        console.error('Send uploaded report error:', e);
-        showToast('Network error: ' + e.message, true);
+    } catch (e) {
+        console.error('❌ Send error:', e);
+        showToast('❌ Network error: ' + e.message, true);
     } finally {
+        // Restore buttons
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
+        }
+        if (modalBtn && modalBtn !== btn) {
+            modalBtn.innerHTML = originalText;
+            modalBtn.disabled = false;
         }
     }
 }
