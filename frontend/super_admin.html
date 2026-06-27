@@ -7707,13 +7707,217 @@ function editReport(id) {
     }
 }
 
+// ============================================================
+// DELETE REPORT - Inafuta Original au Copy
+// ============================================================
 async function deleteReport(id) {
-    if(confirm('Delete this report? It will be moved to recycle bin.')) {
-        const r = reportsData.find(r=>r.id===id);
-        if(r) await addToRecycleBin(id, 'report', r.title);
-        let res = await apiCall('delete_report.php', 'POST', { report_id: id, department_id: 1, is_deleted: 1, deleted_by_admin: 1 });
-        if(res.success) { showToast('Report moved to recycle bin'); await loadReports(); await loadDashboard(); }
-        else showToast(res.message || 'Failed', true);
+    console.log('🗑️ deleteReport called with ID:', id);
+    
+    // ============================================================
+    // STEP 1: FIND THE REPORT IN LOCAL DATA
+    // ============================================================
+    let report = reportsData.find(r => r.id === id);
+    let isFromSentTable = false;
+    let sourceType = 'reports';
+    
+    // If not found in reportsData, check uploadedReportsData
+    if (!report) {
+        report = uploadedReportsData.find(r => r.id === id);
+        if (report) {
+            sourceType = 'uploaded_reports';
+        }
+    }
+    
+    // If still not found, check if it's from sent_reports table
+    if (!report) {
+        // Check if this ID exists in sent reports data
+        // We may need to fetch sent reports from API
+        try {
+            const sentRes = await apiCall('get_sent_reports.php?department_id=' + DEPARTMENT_ID);
+            if (sentRes.success && sentRes.data) {
+                const sentReport = sentRes.data.find(r => r.id === id);
+                if (sentReport) {
+                    report = sentReport;
+                    isFromSentTable = true;
+                    sourceType = 'sent_reports';
+                    console.log('📄 Found in sent_reports:', report);
+                }
+            }
+        } catch(e) {
+            console.log('Could not check sent_reports:', e);
+        }
+    }
+    
+    if (!report) {
+        showToast('❌ Report not found', true);
+        return;
+    }
+    
+    console.log('📄 Report found:', report);
+    console.log('📄 Source type:', sourceType);
+    
+    // ============================================================
+    // STEP 2: DETERMINE REPORT TYPE
+    // ============================================================
+    const isOriginal = report.is_original == 1 || report._is_original === true;
+    const isSentCopy = report.is_sent_copy == 1 || report._is_copy === true;
+    const isReceived = report.source_type === 'sent_received' || report.source_type === 'received';
+    const isSentFrom = report.source_type === 'sent_from' || report.source_type === 'sent';
+    const isSentTable = isFromSentTable || report.source_type === 'sent_from_table';
+    
+    // ============================================================
+    // STEP 3: BUILD CONFIRMATION MESSAGE
+    // ============================================================
+    let confirmMsg = '';
+    let deleteType = '';
+    
+    if (isSentTable) {
+        confirmMsg = `⚠️ Delete sent report "${report.title}"?\n\nThis will delete the sent record. The original report will remain.`;
+        deleteType = 'sent_record';
+    } else if (isOriginal) {
+        confirmMsg = `⚠️ Delete original report "${report.title}"?\n\nThis will delete the original. Copies sent to other departments will remain.`;
+        deleteType = 'original';
+    } else if (isSentCopy || isReceived) {
+        confirmMsg = `⚠️ Delete copy report "${report.title}"?\n\nThis will delete your copy. The original will remain with the sender.`;
+        deleteType = 'copy';
+    } else if (isSentFrom) {
+        confirmMsg = `⚠️ Delete sent report "${report.title}"?\n\nThis will delete the sent record. The original will remain.`;
+        deleteType = 'sent_from';
+    } else {
+        confirmMsg = `⚠️ Delete report "${report.title}"?`;
+        deleteType = 'unknown';
+    }
+    
+    if (!confirm(confirmMsg)) return;
+    
+    // ============================================================
+    // STEP 4: SHOW LOADING STATE
+    // ============================================================
+    const card = document.getElementById(`report-card-${id}`);
+    const uploadedCard = document.getElementById(`uploaded-report-card-${id}`);
+    const targetCard = card || uploadedCard;
+    
+    const btn = targetCard ? targetCard.querySelector('.action-btn.delete') : null;
+    const originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+    }
+    if (targetCard) {
+        targetCard.style.opacity = '0.5';
+        targetCard.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // ============================================================
+        // STEP 5: ADD TO RECYCLE BIN
+        // ============================================================
+        const itemName = report.title || 'Untitled Report';
+        await addToRecycleBin(id, 'report', itemName);
+        
+        // ============================================================
+        // STEP 6: DELETE FROM API
+        // ============================================================
+        const payload = {
+            report_id: parseInt(id),
+            department_id: DEPARTMENT_ID,
+            deleted_by: currentUserFullName || 'Super Admin',
+            is_deleted: 1,
+            deleted_by_admin: (DEPARTMENT_ID == 1) ? 1 : 0,
+            // Add type info for server to handle correctly
+            report_type: isOriginal ? 'original' : (isSentCopy || isReceived ? 'copy' : 'sent')
+        };
+        
+        console.log('📤 Delete payload:', payload);
+        
+        const res = await apiCall('delete_report.php', 'POST', payload);
+        
+        console.log('📥 Delete response:', res);
+        
+        // ============================================================
+        // STEP 7: REMOVE FROM LOCAL DATA
+        // ============================================================
+        // Remove from reportsData
+        reportsData = reportsData.filter(r => r.id !== id);
+        
+        // Remove from uploadedReportsData
+        uploadedReportsData = uploadedReportsData.filter(r => r.id !== id);
+        
+        // ============================================================
+        // STEP 8: REMOVE FROM UI
+        // ============================================================
+        if (targetCard) {
+            targetCard.style.transition = 'opacity 0.3s, transform 0.3s';
+            targetCard.style.opacity = '0';
+            targetCard.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (targetCard.parentNode) {
+                    targetCard.remove();
+                }
+            }, 300);
+        }
+        
+        // ============================================================
+        // STEP 9: SHOW TOAST
+        // ============================================================
+        if (res && res.success) {
+            let message = '';
+            if (isOriginal) {
+                message = `✅ Original report "${itemName}" deleted. Copies remain with receivers.`;
+            } else if (isSentCopy || isReceived) {
+                message = `✅ Copy report "${itemName}" deleted. Original remains with sender.`;
+            } else if (isSentTable || isSentFrom) {
+                message = `✅ Sent record "${itemName}" deleted. Original remains.`;
+            } else {
+                message = `✅ Report "${itemName}" deleted successfully`;
+            }
+            showToast(message, false);
+            addLog(`🗑️ Report deleted: ${itemName} (${deleteType})`);
+        } else {
+            showToast(`⚠️ Report "${itemName}" removed from view`, false);
+        }
+        
+        // ============================================================
+        // STEP 10: REFRESH DATA
+        // ============================================================
+        await fetchReports();
+        await loadReports();
+        await loadDashboard();
+        await fetchUnviewedCounts();
+        await loadRecycleBinFromDB();
+        
+    } catch(e) {
+        console.error('❌ Delete report error:', e);
+        
+        // ============================================================
+        // STEP 11: FALLBACK - Remove locally even if API fails
+        // ============================================================
+        reportsData = reportsData.filter(r => r.id !== id);
+        uploadedReportsData = uploadedReportsData.filter(r => r.id !== id);
+        
+        if (targetCard && targetCard.parentNode) {
+            targetCard.remove();
+        }
+        
+        showToast('⚠️ Report removed from view', false);
+        
+        await fetchReports();
+        await loadReports();
+        await loadDashboard();
+        
+    } finally {
+        // ============================================================
+        // STEP 12: RESTORE BUTTON
+        // ============================================================
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        if (targetCard) {
+            targetCard.style.opacity = '1';
+            targetCard.style.pointerEvents = 'auto';
+        }
     }
 }
 
