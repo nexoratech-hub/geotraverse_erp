@@ -2437,20 +2437,20 @@ async function fetchReports() {
 }
 
 // ============================================================
-// FETCH UPLOADED REPORTS - WITH CACHE BUSTING
+// FETCH UPLOADED REPORTS - INCLUDES SENT HISTORY
 // ============================================================
 
 async function fetchUploadedReports() {
+    console.log('📡 [fetchUploadedReports] Starting...');
+    
     try {
-        console.log('📡 Fetching uploaded reports...');
-        
         // ============================================================
-        // WEKA CACHE BUSTING
+        // FORCE FRESH - CACHE BUSTING
         // ============================================================
         const cacheBuster = `&_t=${Date.now()}`;
         const url = `get_uploaded_reports.php?department_id=${DEPARTMENT_ID}&all=1${cacheBuster}`;
         
-        console.log('📡 URL:', url);
+        console.log('📡 URL:', API_BASE + url);
         
         const response = await fetch(API_BASE + url, {
             method: 'GET',
@@ -2462,24 +2462,47 @@ async function fetchUploadedReports() {
             }
         });
         
-        const res = await response.json();
-        console.log('📥 Uploaded reports response:', res);
+        const responseText = await response.text();
+        console.log('📥 Raw response length:', responseText.length);
         
-        // ============================================================
-        // HAKIKISHA DATA NI ARRAY
-        // ============================================================
+        let parsedData;
+        try {
+            parsedData = JSON.parse(responseText);
+        } catch(e) {
+            console.error('❌ Failed to parse JSON:', e);
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    parsedData = JSON.parse(jsonMatch[0]);
+                } catch(e2) {
+                    console.error('❌ Failed to extract JSON:', e2);
+                    uploadedReportsData = [];
+                    return [];
+                }
+            } else {
+                console.error('❌ No JSON found in response');
+                uploadedReportsData = [];
+                return [];
+            }
+        }
+        
+        console.log('📥 Parsed data success:', parsedData?.success);
+        console.log('📥 Debug info:', parsedData?.debug);
+        
         let reportsArray = [];
         
-        if (res && res.success) {
-            if (Array.isArray(res.data)) {
-                reportsArray = res.data;
-            } else if (res.data && typeof res.data === 'object') {
-                if (Array.isArray(res.data.reports)) {
-                    reportsArray = res.data.reports;
-                } else if (Array.isArray(res.data.data)) {
-                    reportsArray = res.data.data;
+        if (parsedData && parsedData.success === true) {
+            if (Array.isArray(parsedData.data)) {
+                reportsArray = parsedData.data;
+            } else if (parsedData.data && typeof parsedData.data === 'object') {
+                if (Array.isArray(parsedData.data.data)) {
+                    reportsArray = parsedData.data.data;
+                } else if (Array.isArray(parsedData.data.reports)) {
+                    reportsArray = parsedData.data.reports;
+                } else if (Array.isArray(parsedData.data.uploaded_reports)) {
+                    reportsArray = parsedData.data.uploaded_reports;
                 } else {
-                    const values = Object.values(res.data);
+                    const values = Object.values(parsedData.data);
                     for (let val of values) {
                         if (Array.isArray(val)) {
                             reportsArray = val;
@@ -2487,59 +2510,181 @@ async function fetchUploadedReports() {
                         }
                     }
                 }
+            } else if (Array.isArray(parsedData.reports)) {
+                reportsArray = parsedData.reports;
+            } else if (Array.isArray(parsedData.uploaded_reports)) {
+                reportsArray = parsedData.uploaded_reports;
             }
-            
-            // ============================================================
-            // FILTER REPORTS - ONDOA ZILIZOFUTWA
-            // ============================================================
-            if (Array.isArray(reportsArray) && reportsArray.length > 0) {
-                uploadedReportsData = reportsArray
-                    .filter(d => {
-                        // Hakikisha haijafutwa
-                        if (d.is_deleted == 1) return false;
-                        if (d.deleted_at && d.deleted_at !== null) return false;
-                        
-                        // Angalia kama ni ya department hii au imetumwa kwake
-                        const isOwn = (d.department_id == DEPARTMENT_ID);
-                        const isSentToMe = (d.sent_to_department == DEPARTMENT_ID);
-                        const isFromMe = (d.sent_from_department == DEPARTMENT_ID);
-                        
-                        return isOwn || isSentToMe || isFromMe;
-                    })
-                    .map(d => {
-                        d.id = parseInt(d.id) || 0;
-                        if (!d.source_type) d.source_type = 'original';
-                        return d;
-                    })
-                    .sort((a, b) => (b.id || 0) - (a.id || 0));
-                
-                console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
-            } else {
-                uploadedReportsData = [];
-            }
-        } else {
+        }
+        
+        console.log('📊 Raw reports array length:', reportsArray.length);
+        
+        if (!Array.isArray(reportsArray) || reportsArray.length === 0) {
+            console.log('📊 No uploaded reports found');
             uploadedReportsData = [];
+            return [];
         }
         
         // ============================================================
-        // HESABU UNVIEWED REPORTS
+        // PROCESS AND CLASSIFY REPORTS
         // ============================================================
-        unviewedReportsCount = uploadedReportsData.filter(d => {
-            return d.sent_from_department && 
-                   d.sent_from_department != DEPARTMENT_ID && 
-                   (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
-        }).length;
+        uploadedReportsData = reportsArray
+            .filter(d => {
+                // Skip deleted
+                if (d.is_deleted == 1) return false;
+                if (d.deleted_at && d.deleted_at !== null) return false;
+                
+                console.log(`📄 Report: ${d.id} - ${d.title}`, {
+                    source_type: d.source_type,
+                    is_original: d.is_original,
+                    is_sent_copy: d.is_sent_copy,
+                    is_sent_history: d._is_sent_history,
+                    is_sent_by_me: d._is_sent_by_me,
+                    is_received_by_me: d._is_received_by_me,
+                    from_dept: d.from_department_id,
+                    to_dept: d.to_department_id
+                });
+                
+                // ============================================================
+                // SHOW ALL TYPES:
+                // 1. ORIGINAL (created by me)
+                // 2. COPY (received from others)  
+                // 3. SENT HISTORY (reports I sent to others)
+                // 4. RECEIVED HISTORY (reports I received from others)
+                // ============================================================
+                
+                // CASE 1: ORIGINAL
+                if (d.is_original == 1 || d.source_type === 'original') {
+                    if (d.department_id == DEPARTMENT_ID) {
+                        console.log(`✅ ORIGINAL kept: ${d.id} - ${d.title}`);
+                        return true;
+                    }
+                    return false;
+                }
+                
+                // CASE 2: COPY (received)
+                if (d.is_sent_copy == 1 || d.source_type === 'copy') {
+                    // Received by me
+                    if (d.sent_to_department == DEPARTMENT_ID) {
+                        console.log(`✅ COPY (received) kept: ${d.id} - ${d.title}`);
+                        return true;
+                    }
+                    // Sent by me - keep as history
+                    if (d.sent_from_department == DEPARTMENT_ID) {
+                        console.log(`✅ COPY (sent by me) kept as history: ${d.id} - ${d.title}`);
+                        return true;
+                    }
+                    return false;
+                }
+                
+                // CASE 3: SENT HISTORY
+                if (d.source_type === 'sent_history' || d._is_sent_history === true) {
+                    console.log(`✅ SENT HISTORY kept: ${d.id} - ${d.title}`);
+                    return true;
+                }
+                
+                // CASE 4: RECEIVED HISTORY
+                if (d.source_type === 'sent_received_history' || d._is_received_by_me === true) {
+                    console.log(`✅ RECEIVED HISTORY kept: ${d.id} - ${d.title}`);
+                    return true;
+                }
+                
+                // Default: show if department matches
+                return d.department_id == DEPARTMENT_ID;
+            })
+            .map(d => {
+                // Ensure ID is set
+                d.id = parseInt(d.id) || parseInt(d.sent_id) || 0;
+                
+                // Set source type for display
+                if (d.source_type === 'original' || d.is_original == 1) {
+                    d._display_type = 'Original';
+                    d._display_icon = '📁';
+                    d._display_color = '#059669';
+                } else if (d.source_type === 'copy' || d.is_sent_copy == 1) {
+                    if (d.sent_to_department == DEPARTMENT_ID) {
+                        d._display_type = 'Received Copy';
+                        d._display_icon = '📨';
+                        d._display_color = '#8b5cf6';
+                    } else if (d.sent_from_department == DEPARTMENT_ID) {
+                        d._display_type = 'Sent Copy';
+                        d._display_icon = '📤';
+                        d._display_color = '#f59e0b';
+                    } else {
+                        d._display_type = 'Copy';
+                        d._display_icon = '📄';
+                        d._display_color = '#6b7280';
+                    }
+                } else if (d.source_type === 'sent_history' || d._is_sent_history === true) {
+                    d._display_type = 'Sent History';
+                    d._display_icon = '📤';
+                    d._display_color = '#f59e0b';
+                    d.is_original = 0;
+                    d.is_sent_copy = 1;
+                } else if (d.source_type === 'sent_received_history' || d._is_received_by_me === true) {
+                    d._display_type = 'Received History';
+                    d._display_icon = '📨';
+                    d._display_color = '#8b5cf6';
+                    d.is_original = 0;
+                    d.is_sent_copy = 1;
+                } else {
+                    d._display_type = 'Unknown';
+                    d._display_icon = '📄';
+                    d._display_color = '#6b7280';
+                }
+                
+                // Mark as original or copy
+                d._is_original = (d.is_original == 1);
+                d._is_copy = (d.is_sent_copy == 1);
+                
+                // Set unviewed flag
+                d._is_unviewed = (d.sent_from_department && 
+                                 parseInt(d.sent_from_department) !== DEPARTMENT_ID && 
+                                 (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null));
+                
+                // Ensure title is set
+                if (!d.title) d.title = d.uploaded_report_title || 'Untitled Uploaded Report';
+                
+                // Ensure file_name is set
+                if (!d.file_name) d.file_name = d.uploaded_report_file || 'document.pdf';
+                
+                return d;
+            })
+            // Remove duplicates by ID
+            .filter((d, index, self) => {
+                return index === self.findIndex((t) => t.id === d.id);
+            })
+            .sort((a, b) => {
+                const dateA = new Date(a.created_at || a.sent_at || '1970-01-01');
+                const dateB = new Date(b.created_at || b.sent_at || '1970-01-01');
+                return dateB - dateA;
+            });
         
+        console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
+        console.log('📋 Report types:', uploadedReportsData.map(d => ({
+            id: d.id,
+            title: d.title,
+            display_type: d._display_type,
+            is_original: d._is_original,
+            is_copy: d._is_copy,
+            sent_by_me: d._is_sent_by_me,
+            received_by_me: d._is_received_by_me,
+            source_type: d.source_type
+        })));
+        
+        // Update unviewed count
+        unviewedReportsCount = uploadedReportsData.filter(d => d._is_unviewed).length;
         updateReportBadge();
         
         return uploadedReportsData;
         
     } catch(e) {
-        console.error('❌ Fetch uploaded reports error:', e);
+        console.error('❌ [fetchUploadedReports] Error:', e);
         uploadedReportsData = [];
         return [];
     }
 }
+
 function markReportViewed(id) { 
     if(!viewedReportIds.includes(id)) { 
         viewedReportIds.push(id); 
@@ -3100,11 +3245,12 @@ async function deleteUploadedReport(id) {
 }
 
 // ============================================================
-// LOAD REPORTS - COMPLETE WITH UPLOAD + DOWNLOAD ALL
+// LOAD REPORTS - COMPLETE WITH UPLOADED REPORTS TAB
 // ============================================================
 
 async function loadReports(highlightId = null) {
-    console.log('📊 Loading reports...');
+    console.log('📊 [loadReports] Starting...');
+    console.log('📊 Current tab:', currentReportTab);
     
     // ============================================================
     // CLEAR UI FIRST
@@ -3126,11 +3272,25 @@ async function loadReports(highlightId = null) {
     await fetchUploadedReports();
     await fetchUnviewedCounts();
 
-    console.log('📊 Reports Data:', reportsData.length);
-    console.log('📊 Uploaded Reports Data:', uploadedReportsData.length);
+    console.log('📊 Reports Data (added):', reportsData.length);
+    console.log('📊 Uploaded Reports Data (filtered):', uploadedReportsData.length);
+    
+    // Log sample of uploaded reports for debugging
+    if (uploadedReportsData.length > 0) {
+        console.log('📋 Uploaded reports sample:', uploadedReportsData.slice(0, 3).map(d => ({
+            id: d.id,
+            title: d.title,
+            source_type: d.source_type,
+            is_original: d.is_original,
+            is_sent_copy: d.is_sent_copy,
+            sent_from: d.sent_from_department,
+            sent_to: d.sent_to_department,
+            is_unviewed: d._is_unviewed
+        })));
+    }
 
     // ============================================================
-    // BUILD HTML - TAB CONTAINER
+    // BUILD TABS
     // ============================================================
     let html = `
         <div class="tab-container">
@@ -3146,7 +3306,9 @@ async function loadReports(highlightId = null) {
     `;
 
     // ============================================================
-    // ADDED REPORTS TAB - WITH Excel All & PDF All
+    // ============================================================
+    // ADDED REPORTS TAB
+    // ============================================================
     // ============================================================
     if (currentReportTab === 'added') {
         html += `
@@ -3175,6 +3337,9 @@ async function loadReports(highlightId = null) {
 
         document.getElementById('reportsPage').innerHTML = html;
 
+        // ============================================================
+        // RENDER ADDED REPORTS
+        // ============================================================
         if (reportsData.length === 0) {
             document.getElementById('reportsGrid').innerHTML = `
                 <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
@@ -3183,11 +3348,13 @@ async function loadReports(highlightId = null) {
                     <p class="text-xs mt-1">Click "Add Report" to create your first report</p>
                 </div>
             `;
+            updateReportBadge();
             return;
         }
 
         let reportsHtml = '';
         for (let r of reportsData) {
+            // Skip deleted
             if (r.is_deleted == 1) continue;
             if (r.deleted_by_admin == 1) continue;
             if (r.deleted_by_department == 1) continue;
@@ -3273,129 +3440,196 @@ async function loadReports(highlightId = null) {
             `;
         }
         document.getElementById('reportsGrid').innerHTML = reportsHtml;
+        updateReportBadge();
+        return;
     }
 
     // ============================================================
-    // UPLOADED REPORTS TAB - Upload + Download All ONLY
     // ============================================================
-    else {
-        html += `
-            <div class="flex justify-between flex-wrap gap-3 mb-4">
-                <h2 class="text-xl font-bold">
-                    <i class="fas fa-file-upload text-orange-600 mr-2"></i>
-                    Uploaded Reports (${uploadedReportsData.length})
-                </h2>
-                <div class="flex gap-2 flex-wrap">
-                    <button onclick="openUploadReportModal()" class="btn-warning">
-                        <i class="fas fa-upload mr-1"></i> Upload Report
-                    </button>
-                    <button onclick="exportAllUploadedReportsToPDF()" class="btn-success" style="background:#059669; color:white; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s;">
-                        <i class="fas fa-download mr-1"></i> Download All
-                    </button>
-                </div>
+    // UPLOADED REPORTS TAB - SHOW ORIGINAL + RECEIVED COPIES ONLY
+    // ============================================================
+    // ============================================================
+    
+    html += `
+        <div class="flex justify-between flex-wrap gap-3 mb-4">
+            <h2 class="text-xl font-bold">
+                <i class="fas fa-file-upload text-orange-600 mr-2"></i>
+                Uploaded Reports (${uploadedReportsData.length})
+            </h2>
+            <div class="flex gap-2 flex-wrap">
+                <button onclick="openUploadReportModal()" class="btn-warning">
+                    <i class="fas fa-upload mr-1"></i> Upload Report
+                </button>
+                <button onclick="exportAllUploadedReportsToPDF()" class="btn-success" style="background:#059669; color:white; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s;">
+                    <i class="fas fa-download mr-1"></i> Download All
+                </button>
             </div>
-            <div class="reports-grid" id="uploadedReportsGrid"></div>
+        </div>
+        <div class="reports-grid" id="uploadedReportsGrid"></div>
+    `;
+
+    document.getElementById('reportsPage').innerHTML = html;
+
+    // ============================================================
+    // RENDER UPLOADED REPORTS - ORIGINAL + RECEIVED COPIES ONLY
+    // ============================================================
+    if (uploadedReportsData.length === 0) {
+        document.getElementById('uploadedReportsGrid').innerHTML = `
+            <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
+                <p class="text-sm">No uploaded reports found</p>
+                <p class="text-xs mt-1">Click "Upload Report" to add a document</p>
+                <p class="text-xs text-gray-400 mt-2">You will see your original reports + reports received from other departments</p>
+            </div>
         `;
+        updateReportBadge();
+        return;
+    }
 
-        document.getElementById('reportsPage').innerHTML = html;
+    let reportsHtml = '';
+    for (let doc of uploadedReportsData) {
+        // Skip deleted
+        if (doc.is_deleted == 1) continue;
+        if (doc.deleted_at && doc.deleted_at !== null) continue;
+        
+        // ============================================================
+        // DETERMINE IF THIS IS ORIGINAL OR COPY
+        // ============================================================
+        const isOriginal = doc.is_original == 1 || doc._is_original === true;
+        const isCopy = doc.is_sent_copy == 1 || doc._is_copy === true;
+        const isReceived = doc._is_received_by_me === true;
+        const isSentByMe = doc._is_sent_by_me === true;
+        
+        // ============================================================
+        // ONLY SHOW: ORIGINAL OR RECEIVED COPIES
+        // SKIP: COPIES SENT BY ME
+        // ============================================================
+        if (isSentByMe && isCopy) {
+            console.log(`⏭️ SKIPPING - Copy sent by me: ${doc.id} - ${doc.title}`);
+            continue;
+        }
+        
+        console.log(`✅ SHOWING - ${isOriginal ? 'ORIGINAL' : isCopy ? 'COPY' : 'UNKNOWN'}: ${doc.id} - ${doc.title}`);
+        
+        const isUnviewed = doc._is_unviewed || false;
+        const isHighlighted = highlightId && doc.id === highlightId;
+        
+        // File info
+        let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
+        let fileIcon = getFileIconClass(doc.file_name);
+        let fileIconColor = '';
+        if (fileIcon === 'fa-file-pdf') fileIconColor = 'text-red-500';
+        else if (fileIcon === 'fa-file-image') fileIconColor = 'text-purple-500';
+        else if (fileIcon === 'fa-file-word') fileIconColor = 'text-blue-500';
+        else if (fileIcon === 'fa-file-excel') fileIconColor = 'text-green-500';
+        else fileIconColor = 'text-gray-500';
 
-        if (uploadedReportsData.length === 0) {
-            document.getElementById('uploadedReportsGrid').innerHTML = `
-                <div class="col-span-2 text-center py-12 text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <i class="fas fa-file-alt text-4xl mb-3 text-gray-300 dark:text-gray-600"></i>
-                    <p>No uploaded reports. Click "Upload Report" to add one.</p>
-                </div>
+        // Source badge
+        let sourceBadge = '';
+        let sourceDeptName = 'System';
+        if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
+            sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown';
+            sourceBadge = `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+                    <i class="fas fa-paper-plane text-[8px]"></i>
+                    ${escapeHtml(sourceDeptName)}
+                </span>
             `;
-            return;
+        } else if (doc.uploaded_by) {
+            sourceDeptName = doc.uploaded_by;
         }
 
-        let reportsHtml = '';
-        for (let doc of uploadedReportsData) {
-            if (doc.is_deleted == 1) continue;
-            
-            const isUnviewed = doc.sent_from_department && 
-                doc.sent_from_department != DEPARTMENT_ID && 
-                !viewedReportIds.includes(doc.id);
+        // Source type badge
+        let sourceTypeBadge = '';
+        if (isOriginal) {
+            sourceTypeBadge = `<span class="text-[8px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full mr-1">📁 Original</span>`;
+        } else if (isCopy && isReceived) {
+            sourceTypeBadge = `<span class="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full mr-1">📨 Received</span>`;
+        }
 
-            const isHighlighted = highlightId && doc.id === highlightId;
-            
-            let fileExt = doc.file_name ? doc.file_name.split('.').pop().toLowerCase() : '';
-            let fileIcon = getFileIconClass(doc.file_name);
-            let fileIconColor = '';
-            if (fileIcon === 'fa-file-pdf') fileIconColor = 'text-red-500';
-            else if (fileIcon === 'fa-file-image') fileIconColor = 'text-purple-500';
-            else if (fileIcon === 'fa-file-word') fileIconColor = 'text-blue-500';
-            else if (fileIcon === 'fa-file-excel') fileIconColor = 'text-green-500';
-            else fileIconColor = 'text-gray-500';
-
-            let sourceBadge = '';
-            let sourceDeptName = 'System';
-            if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-                sourceDeptName = departmentNames[doc.sent_from_department] || 'Unknown';
-                sourceBadge = `
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
-                        <i class="fas fa-paper-plane text-[8px]"></i>
-                        ${escapeHtml(sourceDeptName)}
-                    </span>
-                `;
-            } else if (doc.uploaded_by) {
-                sourceDeptName = doc.uploaded_by;
-            }
-
-            reportsHtml += `
-                <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
-                     id="uploaded-report-card-${doc.id}" 
-                     onclick="viewUploadedReportDetail(${doc.id})"
-                     style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
-                    
-                    ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
-                    
-                    <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
-                        <div class="flex items-center gap-2">
-                            <i class="fas ${fileIcon} ${fileIconColor} text-sm"></i>
-                            <h4 class="font-semibold text-sm">${escapeHtml(doc.title)}</h4>
-                        </div>
-                        <div class="flex justify-between items-center mt-1">
-                            <p class="text-[9px] opacity-90">${doc.file_name || 'Document'}</p>
-                            ${sourceBadge}
-                        </div>
+        reportsHtml += `
+            <div class="report-card ${isUnviewed ? 'report-unviewed' : ''} ${isHighlighted ? 'search-highlight' : ''}" 
+                 id="uploaded-report-card-${doc.id}" 
+                 onclick="viewUploadedReportDetail(${doc.id})"
+                 style="cursor:pointer; position:relative; background:white; border-radius:14px; border:1px solid #e5e7eb; overflow:hidden; transition:all 0.2s;">
+                
+                ${isUnviewed ? '<div class="new-badge"><i class="fas fa-star mr-1"></i>NEW</div>' : ''}
+                
+                <div class="report-header-custom" style="background:linear-gradient(135deg, #059669, #047857); padding:12px 16px; color:white;">
+                    <div class="flex items-center gap-2">
+                        <i class="fas ${fileIcon} ${fileIconColor} text-sm"></i>
+                        <h4 class="font-semibold text-sm" style="flex:1;">${escapeHtml(doc.title)}</h4>
+                        ${sourceTypeBadge}
+                    </div>
+                    <div class="flex justify-between items-center mt-1">
+                        <p class="text-[9px] opacity-90">${doc.file_name || 'Document'}</p>
+                        ${sourceBadge}
+                    </div>
+                </div>
+                
+                <div class="p-3">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
+                        <span class="text-[9px] bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
                     </div>
                     
-                    <div class="p-3">
-                        <div class="flex justify-between items-start mb-2">
-                            <span class="text-[9px] text-gray-400">Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-                            <span class="text-[9px] bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">${fileExt.toUpperCase()}</span>
-                        </div>
-                        
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2 line-clamp-2">
-                            ${escapeHtml(doc.description || 'No description')}
-                        </p>
-                        
-                        <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
-                            <button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view">
-                                <i class="fas fa-eye"></i> View
-                            </button>
+                    <div class="text-[10px] mb-2">
+                        <span class="text-gray-400">Source: </span>
+                        <span class="${doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 'text-purple-600 font-semibold' : 'text-gray-500'}">
+                            <i class="fas ${doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 'fa-paper-plane' : 'fa-user'} mr-1"></i>
+                            ${escapeHtml(sourceDeptName)}
+                            ${doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? ' <span class="text-green-500"><i class="fas fa-check-circle"></i> Received</span>' : ''}
+                        </span>
+                    </div>
+                    
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-2 line-clamp-2">
+                        ${escapeHtml(doc.description || 'No description')}
+                    </p>
+                    
+                    <div class="flex gap-2 mt-2 pt-1 border-t border-gray-100 dark:border-gray-700">
+                        <button onclick="event.stopPropagation(); viewUploadedReportDetail(${doc.id})" class="action-btn view">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        ${isOriginal ? `
                             <button onclick="event.stopPropagation(); deleteUploadedReport(${doc.id})" class="action-btn delete">
                                 <i class="fas fa-trash"></i> Delete
                             </button>
-                        </div>
-                        
-                        <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
-                            Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${formatDateTime(doc.created_at)}
-                            ${doc.sent_from_department ? ` | Received from: ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}` : ''}
-                        </div>
+                        ` : `
+                            <button onclick="event.stopPropagation(); deleteUploadedReportCopy(${doc.id})" class="action-btn delete">
+                                <i class="fas fa-trash"></i> Delete Copy
+                            </button>
+                        `}
+                    </div>
+                    
+                    <div class="user-info-line" style="font-size:8px; color:#6b7280; margin-top:4px; padding-top:3px; border-top:1px solid #e5e7eb;">
+                        Uploaded by: ${escapeHtml(doc.uploaded_by || 'System')} on ${formatDateTime(doc.created_at)}
+                        ${doc.sent_from_department ? ` | Received from: ${escapeHtml(departmentNames[doc.sent_from_department] || 'Unknown')}` : ''}
+                        ${doc.sent_count > 0 ? ` | Sent: ${doc.sent_count} times` : ''}
                     </div>
                 </div>
-            `;
-        }
-        document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
+            </div>
+        `;
     }
-
+    document.getElementById('uploadedReportsGrid').innerHTML = reportsHtml;
+    
     // ============================================================
-    // UPDATE REPORT BADGE
+    // HIGHLIGHT IF NEEDED
     // ============================================================
+    if (highlightId) {
+        const el = document.getElementById(`uploaded-report-card-${highlightId}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => {
+                el.classList.add('search-highlight');
+                setTimeout(() => el.classList.remove('search-highlight'), 3000);
+            }, 300);
+        }
+    }
+    
     updateReportBadge();
+    console.log('✅ Uploaded reports rendered:', uploadedReportsData.length);
 }
+
 function switchReportTab(tab) { currentReportTab = tab; loadReports(); }
 
 // ============================================================
@@ -3658,36 +3892,46 @@ async function sendReportToDept(reportId, deptId) {
 }
 
 // ============================================================
-// SEND UPLOADED REPORT - INARUHUSU FORWARDING (ONDOA KIZUIZI)
+// SEND UPLOADED REPORT - FIXED
 // ============================================================
 
 async function sendUploadedReportToDept(reportId, deptId) {
-    console.log('🔵 sendUploadedReportToDept called with:', reportId, deptId);
+    console.log('🔵🔵🔵 [sendUploadedReportToDept] CALLED!');
+    console.log('🔵 Report ID:', reportId, 'Department:', deptId);
     
-    const targetId = parseInt(reportId);
-    let doc = uploadedReportsData.find(d => parseInt(d.id) === targetId);
+    // Find the uploaded report - FIRST check uploadedReportsData
+    let doc = uploadedReportsData.find(function(d) {
+        return parseInt(d.id) === parseInt(reportId);
+    });
+    
+    // If not found, check reportsData (added reports)
+    if (!doc) {
+        doc = reportsData.find(function(d) {
+            return parseInt(d.id) === parseInt(reportId);
+        });
+    }
     
     if (!doc) {
-        showToast('Uploaded report not found. Please refresh.', true);
+        showToast('❌ Uploaded report not found.', true);
         return;
     }
     
-    // ============================================================
-    // ONDOA KIZUIZI CHA FORWARDING - RUHUSU KUTUMA TENA
-    // ============================================================
-    // if (doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID) {
-    //     showToast('❌ Huwezi kutuma tena Uploaded Report uliyopokea kutoka idara nyingine. Tafadhali wasiliana na idara iliyotuma.', true);
-    //     return;
-    // }
+    console.log('📄 Report found:', doc);
     
-    if (deptId == DEPARTMENT_ID) {
-        showToast('Cannot send to your own department', true);
+    if (parseInt(deptId) === DEPARTMENT_ID) {
+        showToast('❌ Cannot send to your own department', true);
         return;
     }
     
-    const deptName = departmentNames[deptId] || 'Department';
+    const dept = allDepartmentsForSend.find(function(d) {
+        return parseInt(d.id) === parseInt(deptId);
+    });
+    const deptName = dept ? dept.name : 'Department';
 
-    const btn = document.querySelector(`#uploadedReportSendDropdown-${reportId} .dropdown-trigger`);
+    // ============================================================
+    // SHOW LOADING
+    // ============================================================
+    const btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
     const originalText = btn ? btn.innerHTML : 'Sending...';
     if (btn) {
         btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
@@ -3696,115 +3940,107 @@ async function sendUploadedReportToDept(reportId, deptId) {
 
     try {
         // ============================================================
-        // BUILD PAYLOAD - INCLUDES FORWARD DATA
+        // BUILD PAYLOAD - SEND TO send_uploaded_report_advanced.php
         // ============================================================
         const payload = {
-            uploaded_report_id: parseInt(doc.id),
+            original_uploaded_report_id: parseInt(doc.id),
             to_department_id: parseInt(deptId),
             from_department_id: DEPARTMENT_ID,
-            from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
-            title: doc.title || 'Uploaded Report',
-            file_name: doc.file_name || '',
-            description: doc.description || '',
-            period: doc.period || 'monthly',
-            uploaded_by: doc.uploaded_by || CURRENT_USER,
-            created_at: doc.created_at || new Date().toISOString(),
-            doc_type: 'uploaded_report',
             sent_by: CURRENT_USER || 'Finance Manager',
-            duplicate_send: true,
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
+            to_department_name: deptName,
+            
+            // Uploaded report data
             uploaded_report_data: {
-                id: doc.id,
-                title: doc.title,
+                id: parseInt(doc.id),
+                title: doc.title || 'Uploaded Report',
                 description: doc.description || '',
                 file_name: doc.file_name || '',
                 file_path: doc.file_path || '',
                 file_size: parseInt(doc.file_size) || 0,
                 file_type: doc.file_type || '',
                 period: doc.period || 'monthly',
-                uploaded_by: doc.uploaded_by || CURRENT_USER,
-                department_id: doc.department_id || DEPARTMENT_ID,
+                uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
+                department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
                 created_at: doc.created_at || new Date().toISOString(),
-                sent_count: (doc.sent_count || 0) + 1,
-                is_sent: 1,
-                last_sent_at: new Date().toISOString(),
-                // FORWARD DATA
+                // FORWARD DATA - TRACK ORIGINAL SENDER
                 original_sender: doc.sent_from_department || null,
                 original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
-                forward_count: (doc.forward_count || 0) + 1
+                is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
+                forward_count: (doc.forward_count || 0) + 1,
+                is_sent_copy: 1,
+                is_original: 0,
+                sent_count: (doc.sent_count || 0) + 1,
+                is_sent: 1,
+                last_sent_at: new Date().toISOString()
             },
+            
             // FORWARD DATA AT TOP LEVEL
             original_sender: doc.sent_from_department || null,
             original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-            is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
+            is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
             forward_count: (doc.forward_count || 0) + 1,
-            message: `📁 UPLOADED REPORT (Forwarded):\n\nTitle: ${doc.title || 'Uploaded Report'}\nFile: ${doc.file_name || 'document.pdf'}\nPeriod: ${doc.period || 'N/A'}\nFrom: Finance Department\nOriginal Sender: ${doc.sent_from_department ? departmentNames[doc.sent_from_department] : 'N/A'}`
+            is_sent_copy: 1,
+            is_original: 0,
+            
+            // Report metadata
+            uploaded_report_title: doc.title || 'Uploaded Report',
+            uploaded_report_period: doc.period || 'monthly',
+            uploaded_report_file: doc.file_name || '',
+            is_viewed: 0,
+            is_deleted: 0,
+            sent_count: 1,
+            is_sent: 1
         };
 
-        console.log('📤 Sending uploaded report to send_uploaded_report_advanced.php:', payload);
+        console.log('📤 PAYLOAD to send_uploaded_report_advanced.php:', JSON.stringify(payload, null, 2));
 
         // ============================================================
-        // SEND TO send_uploaded_report_advanced.php
+        // SEND TO API
         // ============================================================
-        let res = await apiCall('send_uploaded_report_advanced.php', 'POST', payload);
+        const response = await fetch(API_BASE + 'send_uploaded_report_advanced.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
 
-        // Fallback to send_document_advanced.php if needed
-        if (!res || !res.success) {
-            console.log('⚠️ send_uploaded_report_advanced.php failed, trying send_document_advanced.php...');
-            const docPayload = {
-                document_id: parseInt(doc.id),
-                to_department_id: parseInt(deptId),
-                from_department_id: DEPARTMENT_ID,
-                doc_type: 'uploaded_report',
-                document_title: doc.title || 'Uploaded Report',
-                document_file: doc.file_name || '',
-                description: doc.description || '',
-                sent_by: CURRENT_USER || 'Finance Manager',
-                from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
-                duplicate_send: true,
-                document_data: {
-                    id: doc.id,
-                    title: doc.title,
-                    description: doc.description || '',
-                    file_name: doc.file_name || '',
-                    file_path: doc.file_path || '',
-                    file_size: parseInt(doc.file_size) || 0,
-                    file_type: doc.file_type || '',
-                    uploaded_by: doc.uploaded_by || CURRENT_USER,
-                    department_id: doc.department_id || DEPARTMENT_ID,
-                    created_at: doc.created_at || new Date().toISOString(),
-                    // FORWARD DATA
-                    original_sender: doc.sent_from_department || null,
-                    original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                    is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
-                    forward_count: (doc.forward_count || 0) + 1
-                },
-                // FORWARD DATA AT TOP LEVEL
-                original_sender: doc.sent_from_department || null,
-                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
-                is_forward: doc.sent_from_department && doc.sent_from_department != DEPARTMENT_ID ? 1 : 0,
-                forward_count: (doc.forward_count || 0) + 1
-            };
-            res = await apiCall('send_document_advanced.php', 'POST', docPayload);
+        const responseText = await response.text();
+        console.log('📥 RAW RESPONSE:', responseText);
+
+        let res;
+        try {
+            res = JSON.parse(responseText);
+        } catch(e) {
+            console.error('❌ Parse error:', e);
+            showToast('❌ Server error: Invalid response', true);
+            return;
         }
 
+        console.log('📥 PARSED RESPONSE:', res);
+
+        // ============================================================
+        // HANDLE RESPONSE
+        // ============================================================
         if (res && res.success) {
             const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
-            showToast(`✅ Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`, false);
-            addLog(`📤 Uploaded report "${doc.title}" sent to ${deptName}${forwardMsg}`);
+            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+            addLog('📤 Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg);
 
             // ============================================================
-            // UPDATE LOCAL DATA - ONLY FOR THIS DOCUMENT
-            // KEEP A COPY FOR THE SENDER
+            // UPDATE LOCAL DATA - Sender retains original
             // ============================================================
+            doc.sent_count = (doc.sent_count || 0) + 1;
+            doc.last_sent_at = new Date().toISOString();
+            doc.is_sent = 1;
+            doc.forward_count = (doc.forward_count || 0) + 1;
             doc.sent_to_department = deptId;
             doc.sent_from_department = DEPARTMENT_ID;
             doc.is_viewed_by_department = 0;
-            doc.is_sent = 1;
             doc._is_unviewed = true;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            doc.last_sent_at = new Date().toISOString();
-            doc.forward_count = (doc.forward_count || 0) + 1;
 
             // ============================================================
             // ADD NOTIFICATION FOR RECIPIENT
@@ -3817,7 +4053,9 @@ async function sendUploadedReportToDept(reportId, deptId) {
                 item_title: doc.title,
                 message: `📁 Uploaded report "${doc.title}" sent from Finance Department${forwardMsg}`,
                 created_by: CURRENT_USER || 'Finance Manager'
-            }).catch(e => console.log('Notification error:', e));
+            }).catch(function(e) {
+                console.log('Notification error:', e);
+            });
 
             // ============================================================
             // REFRESH DATA
@@ -3828,15 +4066,90 @@ async function sendUploadedReportToDept(reportId, deptId) {
             await fetchNotifications();
             await fetchUnviewedCounts();
 
-            closeModal('viewReportModal');
-            toggleSendDropdown(`uploadedReportSendDropdown-${reportId}`);
+            toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
 
         } else {
-            showToast(res?.message || 'Failed to send uploaded report. Please try again.', true);
+            // ============================================================
+            // TRY FALLBACK - send_document_advanced.php
+            // ============================================================
+            console.log('⚠️ Primary API failed, trying fallback...');
+            
+            const fallbackPayload = {
+                document_id: parseInt(doc.id),
+                to_department_id: parseInt(deptId),
+                from_department_id: DEPARTMENT_ID,
+                doc_type: 'uploaded_report',
+                document_title: doc.title || 'Uploaded Report',
+                document_file: doc.file_name || '',
+                description: doc.description || '',
+                sent_by: CURRENT_USER || 'Finance Manager',
+                from_department_name: departmentNames[DEPARTMENT_ID] || 'Finance Department',
+                duplicate_send: true,
+                document_data: {
+                    id: parseInt(doc.id),
+                    title: doc.title || 'Uploaded Report',
+                    description: doc.description || '',
+                    file_name: doc.file_name || '',
+                    file_path: doc.file_path || '',
+                    file_size: parseInt(doc.file_size) || 0,
+                    file_type: doc.file_type || '',
+                    uploaded_by: doc.uploaded_by || CURRENT_USER || 'Finance Manager',
+                    department_id: parseInt(doc.department_id) || DEPARTMENT_ID,
+                    created_at: doc.created_at || new Date().toISOString(),
+                    original_sender: doc.sent_from_department || null,
+                    original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+                    is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
+                    forward_count: (doc.forward_count || 0) + 1,
+                    sent_count: (doc.sent_count || 0) + 1
+                },
+                original_sender: doc.sent_from_department || null,
+                original_sender_name: doc.sent_from_department ? departmentNames[doc.sent_from_department] : null,
+                is_forward: (doc.sent_from_department && parseInt(doc.sent_from_department) !== DEPARTMENT_ID) ? 1 : 0,
+                forward_count: (doc.forward_count || 0) + 1
+            };
+            
+            const fallbackResponse = await fetch(API_BASE + 'send_document_advanced.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify(fallbackPayload)
+            });
+            
+            const fallbackText = await fallbackResponse.text();
+            let fallbackRes;
+            try {
+                fallbackRes = JSON.parse(fallbackText);
+            } catch(e) {
+                fallbackRes = { success: false, message: 'Fallback failed' };
+            }
+            
+            if (fallbackRes && fallbackRes.success) {
+                const forwardMsg = payload.is_forward ? ' (Forwarded)' : '';
+                showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg + ' (via fallback)', false);
+                addLog('📤 Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg + ' (fallback)');
+                
+                // Update local data
+                doc.sent_count = (doc.sent_count || 0) + 1;
+                doc.last_sent_at = new Date().toISOString();
+                doc.is_sent = 1;
+                
+                await fetchUploadedReports();
+                await loadReports();
+                await loadDashboard();
+                await fetchNotifications();
+                await fetchUnviewedCounts();
+                
+                toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
+            } else {
+                showToast(fallbackRes?.message || res?.message || '❌ Failed to send uploaded report. Please try again.', true);
+            }
         }
 
     } catch(e) {
-        console.error('❌ Send uploaded report error:', e);
+        console.error('❌ ERROR:', e);
         showToast('Network error: ' + e.message, true);
     } finally {
         if (btn) {
@@ -3845,6 +4158,7 @@ async function sendUploadedReportToDept(reportId, deptId) {
         }
     }
 }
+
 // ============================================================
 // ==================== VIEW SENT REPORTS FUNCTIONS ====================
 // ============================================================
