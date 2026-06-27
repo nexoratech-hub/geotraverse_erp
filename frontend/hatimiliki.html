@@ -1502,16 +1502,28 @@ function updateProjectBadge() {
     } 
 }
 
-function updateReportBadge() { 
-    var badge = document.getElementById('reportBadge'); 
-    if (badge) { 
-        if (unviewedReportsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { 
-            badge.classList.add('hidden'); 
-        } 
-    } 
+// ============================================================
+// UPDATE REPORT BADGE
+// ============================================================
+function updateReportBadge() {
+    var badge = document.getElementById('reportBadge');
+    if (!badge) {
+        console.warn('⚠️ reportBadge element not found');
+        return;
+    }
+    
+    console.log('🔔 Updating report badge with count:', unviewedReportsCount);
+    
+    if (unviewedReportsCount > 0) {
+        badge.classList.remove('hidden');
+        badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.innerText = '0';
+    }
 }
 
 function updateRequestBadge() { 
@@ -3129,46 +3141,462 @@ function sendReportToDept(reportId, toDeptId) {
 }
 
 // ============================================================
-// ==================== SEND UPLOADED REPORT ====================
+// SEND UPLOADED REPORT - TUMIA API MAALUM
 // ============================================================
 function sendUploadedReportToDept(reportId, toDeptId) {
+    console.log('📤 sendUploadedReportToDept called:');
+    console.log('   reportId:', reportId, 'type:', typeof reportId);
+    console.log('   toDeptId:', toDeptId);
+    console.log('   uploadedReports length:', uploadedReports.length);
+    
+    // ============================================================
+    // TAFUTA UPLOADED REPORT
+    // ============================================================
     var doc = uploadedReports.find(function(d) { return d.id === reportId; });
-    if (!doc) { showToast('Uploaded report not found', true); return; }
-    if (toDeptId == DEPARTMENT_ID) { showToast('Cannot send to your own department', true); return; }
+    if (!doc) {
+        doc = uploadedReports.find(function(d) { return String(d.id) === String(reportId); });
+    }
+    if (!doc) {
+        var idNum = parseInt(reportId);
+        if (!isNaN(idNum)) {
+            doc = uploadedReports.find(function(d) { return d.id === idNum; });
+        }
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', reportId);
+        console.log('Available uploaded reports:', uploadedReports.map(function(d) { return { id: d.id, title: d.title }; }));
+        return;
+    }
+    
+    console.log('✅ Uploaded report found:', doc.id, doc.title);
+    console.log('📋 Document data:', doc);
+    
+    // ============================================================
+    // CHECK DEPARTMENT
+    // ============================================================
+    if (toDeptId == DEPARTMENT_ID) {
+        showToast('❌ Cannot send to your own department', true);
+        return;
+    }
+    
     var dept = allDepartments.find(function(d) { return d.id == toDeptId; });
-    var deptName = dept ? dept.name : 'Department';
+    var deptName = dept ? dept.name : 'Department ' + toDeptId;
+    
+    // ============================================================
+    // CHECK IF REPORT WAS RECEIVED FROM ANOTHER DEPARTMENT
+    // ============================================================
+    if (doc.sent_from_department && doc.sent_from_department !== DEPARTMENT_ID) {
+        var sentFromName = departmentNames[doc.sent_from_department] || 'Unknown';
+        if (!confirm('⚠️ This uploaded report was received from "' + sentFromName + '". Are you sure you want to forward it?')) {
+            return;
+        }
+    }
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
     var btn = document.querySelector('#uploadedReportSendDropdown-' + reportId + ' .dropdown-trigger');
     var originalText = btn ? btn.innerHTML : 'Sending...';
-    if (btn) { btn.innerHTML = '<span class="loading-spinner"></span> Sending...'; btn.disabled = true; }
-    var payload = { uploaded_report_id: parseInt(reportId), to_department_id: parseInt(toDeptId), from_department_id: DEPARTMENT_ID, sent_by: CURRENT_USER, title: doc.title, file_name: doc.file_name, description: doc.description || '', period: doc.period || 'monthly' };
-    apiCall('send_document_advanced.php', 'POST', payload).then(function(res) {
-        if (res && res.success) {
-            showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName, false);
-            addLog('Uploaded report sent: "' + doc.title + '" to ' + deptName);
-            doc.sent_to_department = toDeptId;
-            doc.sent_from_department = DEPARTMENT_ID;
-            doc.is_viewed_by_department = 0;
-            doc.sent_count = (doc.sent_count || 0) + 1;
-            fetchUploadedReports();
-            loadReports();
-            loadDashboard();
-        } else { showToast(res?.message || 'Failed to send uploaded report', true); }
-    }).catch(function(e) { console.error('Send uploaded report error:', e); showToast('Network error: ' + e.message, true); }).finally(function() { if (btn) { btn.innerHTML = originalText; btn.disabled = false; } toggleSendDropdown('uploadedReportSendDropdown-' + reportId); closeModal('viewReportModal'); });
-}
-
-function deleteUploadedReport(id) {
-    if (confirm('Delete this uploaded report?')) {
-        var doc = uploadedReports.find(function(d) { return d.id === id; });
-        if (doc) {
-            addToRecycleBin(id, 'uploaded_report', doc.title).then(function() {
-                apiCall('delete_uploaded_report.php', 'POST', { id: id, department_id: DEPARTMENT_ID }).then(function(res) {
-                    if (res.success) { showToast('Deleted'); loadReports(); } else { showToast(res.message || 'Failed', true); }
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        btn.disabled = true;
+    }
+    
+    try {
+        // ============================================================
+        // GET FILE INFO
+        // ============================================================
+        var filePath = doc.file_path || doc.file_name || '';
+        var fileName = doc.file_name || 'document.pdf';
+        
+        // Clean file path
+        if (filePath) {
+            while (filePath.indexOf('../') === 0) {
+                filePath = filePath.substring(3);
+            }
+            while (filePath.indexOf('./') === 0) {
+                filePath = filePath.substring(2);
+            }
+        }
+        
+        console.log('📎 File path:', filePath);
+        console.log('📎 File name:', fileName);
+        
+        // ============================================================
+        // BUILD UPLOADED REPORT DATA
+        // ============================================================
+        var uploadedReportData = {
+            id: doc.id,
+            title: doc.title || 'Uploaded Report',
+            file_name: fileName,
+            file_path: filePath,
+            file_size: doc.file_size || 0,
+            file_type: doc.file_type || '',
+            description: doc.description || '',
+            period: doc.period || 'monthly',
+            uploaded_by: doc.uploaded_by || CURRENT_USER || 'Hatimiliki Manager',
+            department_id: doc.department_id || DEPARTMENT_ID,
+            created_at: doc.created_at || new Date().toISOString(),
+            sent_from_department: DEPARTMENT_ID,
+            sent_from_name: departmentNames[DEPARTMENT_ID] || 'Hatimiliki'
+        };
+        
+        // ============================================================
+        // BUILD PAYLOAD - KULINGANA NA MUUNDO WA DB
+        // ============================================================
+        var payload = {
+            // ============================================================
+            // REQUIRED FIELDS - HIZI ZOTE ZINAPASWA KUWEPO
+            // ============================================================
+            original_uploaded_report_id: parseInt(doc.id),
+            to_department_id: parseInt(toDeptId),
+            from_department_id: parseInt(DEPARTMENT_ID),
+            uploaded_report_data: JSON.stringify(uploadedReportData),
+            
+            // ============================================================
+            // OPTIONAL FIELDS
+            // ============================================================
+            from_department_name: departmentNames[DEPARTMENT_ID] || 'Hatimiliki',
+            to_department_name: deptName,
+            uploaded_report_title: doc.title || 'Untitled Report',
+            uploaded_report_period: doc.period || 'monthly',
+            uploaded_report_file: fileName,
+            
+            // ============================================================
+            // SENT BY
+            // ============================================================
+            sent_by: CURRENT_USER || 'Hatimiliki Manager',
+            
+            // ============================================================
+            // FORWARD DATA
+            // ============================================================
+            is_forward: (doc.sent_from_department && doc.sent_from_department !== DEPARTMENT_ID) ? 1 : 0,
+            original_sender: doc.sent_from_department || null,
+            original_sender_name: doc.sent_from_department ? (departmentNames[doc.sent_from_department] || 'Unknown') : null,
+            forward_count: (doc.forward_count || 0) + 1
+        };
+        
+        console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
+        
+        // ============================================================
+        // SEND REQUEST - TUMIA API MAALUM
+        // ============================================================
+        var apiUrl = API_BASE + 'send_uploaded_report_advanced.php';
+        console.log('📡 URL:', apiUrl);
+        
+        fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        })
+        .then(function(response) {
+            console.log('📡 Response status:', response.status);
+            return response.text();
+        })
+        .then(function(responseText) {
+            console.log('📥 Raw response:', responseText);
+            
+            var res;
+            try {
+                res = JSON.parse(responseText);
+            } catch (e) {
+                console.error('❌ Failed to parse response:', e);
+                res = { success: false, message: 'Invalid response from server', raw: responseText };
+            }
+            
+            console.log('📥 Parsed response:', res);
+            
+            // ============================================================
+            // HANDLE RESPONSE
+            // ============================================================
+            if (res && res.success) {
+                var forwardMsg = (doc.sent_from_department && doc.sent_from_department !== DEPARTMENT_ID) ? ' (forwarded)' : '';
+                showToast('✅ Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg, false);
+                addLog('Uploaded report "' + doc.title + '" sent to ' + deptName + forwardMsg);
+                
+                // Update local data
+                doc.sent_to_department = parseInt(toDeptId);
+                doc.sent_from_department = DEPARTMENT_ID;
+                doc.is_viewed_by_department = 0;
+                doc._is_unviewed = true;
+                doc.sent_count = (doc.sent_count || 0) + 1;
+                doc.last_sent_at = new Date().toISOString();
+                doc.is_sent = 1;
+                doc.forward_count = (doc.forward_count || 0) + 1;
+                
+                // Add notification
+                apiCall('add_notification.php', 'POST', {
+                    department_id: parseInt(toDeptId),
+                    from_department_id: parseInt(DEPARTMENT_ID),
+                    item_type: 'uploaded_report',
+                    item_id: parseInt(doc.id),
+                    item_title: doc.title,
+                    message: 'Uploaded report "' + doc.title + '" sent from ' + (departmentNames[DEPARTMENT_ID] || 'Hatimiliki') + forwardMsg
+                })
+                .then(function() {
+                    // ============================================================
+                    // REFRESH DATA
+                    // ============================================================
+                    return Promise.all([
+                        fetchUploadedReports(),
+                        loadReports(),
+                        loadDashboard(),
+                        getUnviewedNotificationsCount()
+                    ]);
+                })
+                .then(function() {
+                    // Close modal and dropdown
+                    closeModal('viewReportModal');
+                    toggleSendDropdown('uploadedReportSendDropdown-' + reportId);
                 });
-            });
+                
+            } else {
+                // ============================================================
+                // HANDLE ERROR
+                // ============================================================
+                var errorMsg = res?.message || res?.error || 'Unknown error';
+                console.error('❌ Send error response:', res);
+                
+                // Check which fields might be missing
+                console.log('📋 Required fields check:');
+                console.log('  - original_uploaded_report_id:', payload.original_uploaded_report_id);
+                console.log('  - to_department_id:', payload.to_department_id);
+                console.log('  - from_department_id:', payload.from_department_id);
+                console.log('  - uploaded_report_data:', payload.uploaded_report_data ? 'Present' : 'Missing');
+                console.log('  - uploaded_report_data length:', payload.uploaded_report_data?.length || 0);
+                
+                showToast('❌ Failed to send: ' + errorMsg, true);
+            }
+        })
+        .catch(function(e) {
+            console.error('❌ Send error:', e);
+            showToast('❌ Network error: ' + e.message, true);
+        })
+        .finally(function() {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+        
+    } catch(e) {
+        console.error('❌ Send error:', e);
+        showToast('❌ Network error: ' + e.message, true);
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
     }
 }
 
+// ============================================================
+// DELETE UPLOADED REPORT - KWA HATIMILIKI DASHBOARD
+// ============================================================
+function deleteUploadedReport(id) {
+    if (!confirm('⚠️ Delete this uploaded report?\n\nThis will move it to the recycle bin.\nYou can restore it later.')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting uploaded report ID:', id);
+    
+    // ============================================================
+    // TAFUTA REPORT
+    // ============================================================
+    var doc = uploadedReports.find(function(d) { return d.id === id; });
+    if (!doc) {
+        doc = uploadedReports.find(function(d) { return String(d.id) === String(id); });
+    }
+    if (!doc) {
+        var idNum = parseInt(id);
+        if (!isNaN(idNum)) {
+            doc = uploadedReports.find(function(d) { return d.id === idNum; });
+        }
+    }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', id);
+        console.log('Available uploaded reports:', uploadedReports.map(function(d) { return { id: d.id, title: d.title }; }));
+        return;
+    }
+    
+    console.log('✅ Report found:', doc.id, doc.title);
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    var card = document.getElementById('uploaded-report-card-' + id);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+        card.style.transition = 'all 0.3s ease';
+    }
+    
+    // Also try alternative card ID
+    var altCard = document.getElementById('uploaded-report-card-' + id);
+    if (altCard && altCard !== card) {
+        altCard.style.opacity = '0.5';
+        altCard.style.pointerEvents = 'none';
+    }
+    
+    // ============================================================
+    // ADD TO RECYCLE BIN
+    // ============================================================
+    addToRecycleBin(id, 'uploaded_report', doc.title || 'Uploaded Report')
+    .then(function() {
+        // ============================================================
+        // CALL DELETE API
+        // ============================================================
+        var payload = {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'Hatimiliki Manager',
+            is_deleted: 1
+        };
+        
+        console.log('📤 Delete payload:', payload);
+        
+        return apiCall('delete_uploaded_report.php', 'POST', payload);
+    })
+    .then(function(res) {
+        console.log('📥 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA
+        // ============================================================
+        uploadedReports = uploadedReports.filter(function(d) { 
+            return d.id != id; 
+        });
+        
+        // Also remove from any other arrays if they exist
+        if (typeof allUploadedReports !== 'undefined') {
+            allUploadedReports = allUploadedReports.filter(function(d) { return d.id != id; });
+        }
+        
+        // ============================================================
+        // REMOVE FROM UI
+        // ============================================================
+        var cardToRemove = document.getElementById('uploaded-report-card-' + id);
+        if (cardToRemove && cardToRemove.parentNode) {
+            cardToRemove.style.opacity = '0';
+            cardToRemove.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (cardToRemove.parentNode) {
+                    cardToRemove.parentNode.removeChild(cardToRemove);
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // UPDATE COUNTS
+        // ============================================================
+        // Recalculate unviewed count from remaining reports
+        var unviewedUploaded = uploadedReports.filter(function(d) {
+            var isUnviewed = false;
+            if (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null || d.is_viewed_by_department === '0') {
+                isUnviewed = true;
+            }
+            if (d.is_unviewed === true || d._is_unviewed === true || d.is_new === true) {
+                isUnviewed = true;
+            }
+            if (d.sent_from_department && d.sent_from_department != DEPARTMENT_ID && 
+                d.is_viewed_by_department == 0 && viewedReportIds.indexOf(d.id) === -1) {
+                isUnviewed = true;
+            }
+            return isUnviewed;
+        }).length;
+        
+        // Add unviewed from added reports
+        var addedUnviewed = reportsList.filter(function(r) {
+            var isUnviewed = false;
+            if (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) {
+                isUnviewed = true;
+            }
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+                r.is_viewed_by_department == 0 && viewedReportIds.indexOf(r.id) === -1) {
+                isUnviewed = true;
+            }
+            if (r.is_unviewed === true || r._is_unviewed === true || r.is_new === true) {
+                isUnviewed = true;
+            }
+            return isUnviewed;
+        }).length;
+        
+        unviewedReportsCount = unviewedUploaded + addedUnviewed;
+        
+        console.log('📊 Updated unviewed reports count:', unviewedReportsCount);
+        
+        // ============================================================
+        // UPDATE BADGE
+        // ============================================================
+        updateReportBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast('✅ Uploaded report moved to recycle bin', false);
+            addLog('Uploaded report deleted: "' + doc.title + '" (ID: ' + doc.id + ')');
+        } else {
+            showToast('⚠️ Uploaded report removed from view (refresh may be needed)', false);
+            addLog('Uploaded report removed: "' + doc.title + '" (ID: ' + doc.id + ')');
+        }
+        
+        // ============================================================
+        // REFRESH DATA
+        // ============================================================
+        return Promise.all([
+            fetchUploadedReports(),
+            loadRecycleBinFromDB(),
+            loadReports(),
+            loadDashboard(),
+            getUnviewedNotificationsCount()
+        ]);
+    })
+    .then(function() {
+        console.log('✅ Data refreshed after delete');
+        // Update counts again after refresh
+        var updatedUploaded = uploadedReports.filter(function(d) {
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null;
+        }).length;
+        var updatedAdded = reportsList.filter(function(r) {
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+        }).length;
+        unviewedReportsCount = updatedUploaded + updatedAdded;
+        updateReportBadge();
+    })
+    .catch(function(e) {
+        console.error('❌ Delete error:', e);
+        showToast('⚠️ Error: ' + e.message, true);
+        
+        // Still remove from UI
+        var cardToRemove = document.getElementById('uploaded-report-card-' + id);
+        if (cardToRemove && cardToRemove.parentNode) {
+            cardToRemove.style.opacity = '0';
+            cardToRemove.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (cardToRemove.parentNode) {
+                    cardToRemove.parentNode.removeChild(cardToRemove);
+                }
+            }, 400);
+        }
+        
+        // Update counts
+        var uploadedUnviewed = uploadedReports.filter(function(d) {
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null;
+        }).length;
+        var addedUnviewed = reportsList.filter(function(r) {
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+        }).length;
+        unviewedReportsCount = uploadedUnviewed + addedUnviewed;
+        updateReportBadge();
+    });
+}
 function addReport() {
     var title = document.getElementById('newReportTitle').value.trim();
     var period = document.getElementById('newReportPeriod').value;
