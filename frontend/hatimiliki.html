@@ -3713,34 +3713,231 @@ function exportAllUploadedReportsToPDF() {
     showToast("PDF preview opened - Click Print");
 }
 
+// ============================================================
+// OPEN UPLOAD REPORT MODAL - RESET PREVIEW
+// ============================================================
 function openUploadReportModal() {
+    console.log('📎 Opening upload report modal');
+    
+    // Reset form fields
     document.getElementById('uploadReportTitle').value = '';
     document.getElementById('uploadReportPeriod').value = 'monthly';
-    document.getElementById('uploadedFilePreview').classList.add('hidden');
+    
+    // Reset file input
+    var fileInput = document.getElementById('reportFileInput');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+    
+    // Reset file preview
     currentUploadedFile = null;
+    var previewContainer = document.getElementById('uploadedFilePreview');
+    if (previewContainer) {
+        previewContainer.classList.add('hidden');
+        previewContainer.style.display = 'none';
+    }
+    
+    var fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (fileNameDisplay) {
+        fileNameDisplay.textContent = '';
+    }
+    
+    var fileSizeDisplay = document.getElementById('fileSizeDisplay');
+    if (fileSizeDisplay) {
+        fileSizeDisplay.textContent = '';
+    }
+    
+    var fileIcon = document.getElementById('uploadedFileIcon');
+    if (fileIcon) {
+        fileIcon.className = 'fas fa-file-alt text-2xl text-emerald-600';
+    }
+    
     openModal('uploadReportModal');
 }
 
-function previewUploadedFile() {
-    if (currentUploadedFile) {
-        var fileType = currentUploadedFile.type;
-        if (fileType.indexOf('image/') === 0) {
-            var reader = new FileReader();
-            reader.onload = function(ev) { showFullImage(ev.target.result); };
-            reader.readAsDataURL(currentUploadedFile);
+// ============================================================
+// ==================== UPLOAD REPORT FUNCTIONS ====================
+// ============================================================
+
+// ============================================================
+// SETUP REPORT FILE UPLOAD - FIXED
+// ============================================================
+function setupReportFileUpload() {
+    var fileInput = document.getElementById('reportFileInput');
+    if (!fileInput) return;
+    
+    // Remove any existing event listeners
+    var newInput = fileInput.cloneNode(true);
+    fileInput.parentNode.replaceChild(newInput, fileInput);
+    
+    newInput.addEventListener('change', function(e) {
+        console.log('📎 File input changed');
+        
+        if (e.target.files && e.target.files[0]) {
+            var file = e.target.files[0];
+            
+            // Validate file size (max 10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                showToast('File too large. Max size is 10MB', true);
+                this.value = '';
+                return;
+            }
+            
+            // Store file globally
+            currentUploadedFile = file;
+            
+            // Get file details
+            var fileName = file.name;
+            var fileSize = (file.size / 1024).toFixed(2);
+            var fileExt = fileName.split('.').pop().toLowerCase();
+            
+            console.log('📎 File selected:', fileName, fileSize, 'KB');
+            
+            // Update preview elements
+            var previewContainer = document.getElementById('uploadedFilePreview');
+            var fileNameDisplay = document.getElementById('fileNameDisplay');
+            var fileSizeDisplay = document.getElementById('fileSizeDisplay');
+            var fileIcon = document.getElementById('uploadedFileIcon');
+            
+            // Set file name
+            if (fileNameDisplay) {
+                fileNameDisplay.textContent = fileName;
+            }
+            
+            // Set file size
+            if (fileSizeDisplay) {
+                fileSizeDisplay.textContent = '(' + fileSize + ' KB)';
+            }
+            
+            // Set file icon based on file type
+            if (fileIcon) {
+                var iconClass = 'fa-file-alt';
+                var iconColor = 'text-emerald-600';
+                
+                if (fileExt === 'pdf') {
+                    iconClass = 'fa-file-pdf';
+                    iconColor = 'text-red-500';
+                } else if (['doc', 'docx', 'odt', 'rtf'].indexOf(fileExt) !== -1) {
+                    iconClass = 'fa-file-word';
+                    iconColor = 'text-blue-500';
+                } else if (['xls', 'xlsx', 'ods', 'csv'].indexOf(fileExt) !== -1) {
+                    iconClass = 'fa-file-excel';
+                    iconColor = 'text-green-500';
+                } else if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].indexOf(fileExt) !== -1) {
+                    iconClass = 'fa-file-image';
+                    iconColor = 'text-purple-500';
+                }
+                
+                fileIcon.className = 'fas ' + iconClass + ' text-2xl ' + iconColor;
+            }
+            
+            // Show preview container
+            if (previewContainer) {
+                previewContainer.classList.remove('hidden');
+                previewContainer.style.display = 'block';
+            }
+            
+            showToast('✅ File "' + fileName + '" selected successfully', false);
+            
         } else {
-            var url = URL.createObjectURL(currentUploadedFile);
-            window.open(url, '_blank');
-            URL.revokeObjectURL(url);
+            // No file selected - reset preview
+            currentUploadedFile = null;
+            var previewContainer = document.getElementById('uploadedFilePreview');
+            if (previewContainer) {
+                previewContainer.classList.add('hidden');
+                previewContainer.style.display = 'none';
+            }
+            var fileNameDisplay = document.getElementById('fileNameDisplay');
+            if (fileNameDisplay) {
+                fileNameDisplay.textContent = '';
+            }
+            var fileSizeDisplay = document.getElementById('fileSizeDisplay');
+            if (fileSizeDisplay) {
+                fileSizeDisplay.textContent = '';
+            }
         }
-    } else { showToast('No file selected', true); }
+    });
 }
 
-function removeUploadedFile() {
-    currentUploadedFile = null;
-    document.getElementById('reportFileInput').value = '';
-    document.getElementById('uploadedFilePreview').classList.add('hidden');
+// ============================================================
+// PREVIEW UPLOADED FILE - FIXED
+// ============================================================
+function previewUploadedFile() {
+    console.log('📎 previewUploadedFile called');
+    console.log('📎 currentUploadedFile:', currentUploadedFile);
+    
+    // If no file is stored, check the input
+    if (!currentUploadedFile) {
+        var fileInput = document.getElementById('reportFileInput');
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            currentUploadedFile = fileInput.files[0];
+        }
+    }
+    
+    if (!currentUploadedFile) {
+        showToast('No file selected to preview', true);
+        return;
+    }
+    
+    var fileType = currentUploadedFile.type;
+    console.log('📎 File type:', fileType);
+    
+    if (fileType.indexOf('image/') === 0) {
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+            showFullImage(ev.target.result);
+        };
+        reader.readAsDataURL(currentUploadedFile);
+        return;
+    }
+    
+    if (fileType === 'application/pdf') {
+        var url = URL.createObjectURL(currentUploadedFile);
+        window.open(url, '_blank');
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+        return;
+    }
+    
+    // For other file types, try to open with browser
+    var url = URL.createObjectURL(currentUploadedFile);
+    window.open(url, '_blank');
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    showToast('Opening file in new window...', false);
 }
+
+// ============================================================
+// REMOVE UPLOADED FILE - FIXED
+// ============================================================
+function removeUploadedFile() {
+    console.log('📎 removeUploadedFile called');
+    
+    currentUploadedFile = null;
+    
+    var fileInput = document.getElementById('reportFileInput');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+    
+    var previewContainer = document.getElementById('uploadedFilePreview');
+    if (previewContainer) {
+        previewContainer.classList.add('hidden');
+        previewContainer.style.display = 'none';
+    }
+    
+    var fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (fileNameDisplay) {
+        fileNameDisplay.textContent = '';
+    }
+    
+    var fileSizeDisplay = document.getElementById('fileSizeDisplay');
+    if (fileSizeDisplay) {
+        fileSizeDisplay.textContent = '';
+    }
+    
+    showToast('File removed', false);
+}
+
+
 
 function saveUploadedReport() {
     var title = document.getElementById('uploadReportTitle').value.trim();
@@ -4281,6 +4478,7 @@ function initializeApp() {
     setupUIComponents();
     setupMoneyInputs();
     setupTitleDeedFileUpload();
+    setupReportFileUpload(); // ✅ ADD THIS LINE
     initDarkMode();
     var savedColor = localStorage.getItem("sidebar_color");
     if (savedColor) { var sidebar = document.getElementById("mainSidebar"); if (sidebar) sidebar.style.background = savedColor; }
