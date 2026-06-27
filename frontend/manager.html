@@ -6645,25 +6645,331 @@ function viewUploadedReportDocument(docId) {
     }
 }
 
+// ============================================================
+// DELETE UPLOADED REPORT - KWA MANAGER DASHBOARD
+// ============================================================
 function deleteUploadedReport(id) {
-    if (confirm('Delete this uploaded report?')) {
-        var doc = uploadedReportsData.find(function(d) { return d.id === id; });
-        if (doc) {
-            addToRecycleBin(id, 'uploaded_report', doc.title).then(function() {
-                apiCall('delete_uploaded_report.php', 'POST', { id: id, deleted_by: CURRENT_USER }).then(function(res) {
-                    if (res.success) {
-                        showToast('Uploaded report moved to recycle bin');
-                        loadReports();
-                        loadDashboard();
-                    } else {
-                        showToast(res.message || 'Failed', true);
-                    }
-                });
-            });
+    if (!confirm('⚠️ Delete this uploaded report?\n\nThis will move it to the recycle bin.\nYou can restore it later.')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting uploaded report ID:', id);
+    
+    // ============================================================
+    // TAFUTA REPORT
+    // ============================================================
+    var doc = uploadedReportsData.find(function(d) { return d.id === id; });
+    if (!doc) {
+        // Jaribu kwa string
+        doc = uploadedReportsData.find(function(d) { return String(d.id) === String(id); });
+    }
+    if (!doc) {
+        var idNum = parseInt(id);
+        if (!isNaN(idNum)) {
+            doc = uploadedReportsData.find(function(d) { return d.id === idNum; });
         }
     }
+    
+    if (!doc) {
+        showToast('❌ Uploaded report not found. Please refresh.', true);
+        console.error('❌ Uploaded report not found for ID:', id);
+        console.log('Available uploaded reports:', uploadedReportsData.map(function(d) { return { id: d.id, title: d.title }; }));
+        return;
+    }
+    
+    console.log('✅ Report found:', doc.id, doc.title);
+    
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    var card = document.getElementById('uploaded-report-card-' + id);
+    if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+        card.style.transition = 'all 0.3s ease';
+    }
+    
+    // Also try alternative card ID
+    var altCard = document.getElementById('uploaded-report-card-' + id);
+    if (altCard && altCard !== card) {
+        altCard.style.opacity = '0.5';
+        altCard.style.pointerEvents = 'none';
+    }
+    
+    // ============================================================
+    // ADD TO RECYCLE BIN
+    // ============================================================
+    addToRecycleBin(id, 'uploaded_report', doc.title || 'Uploaded Report')
+    .then(function() {
+        // ============================================================
+        // CALL DELETE API
+        // ============================================================
+        var payload = {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),
+            deleted_by: CURRENT_USER || 'Manager User',
+            is_deleted: 1
+        };
+        
+        console.log('📤 Delete payload:', payload);
+        
+        return apiCall('delete_uploaded_report.php', 'POST', payload);
+    })
+    .then(function(res) {
+        console.log('📥 Delete response:', res);
+        
+        // ============================================================
+        // REMOVE FROM LOCAL DATA
+        // ============================================================
+        uploadedReportsData = uploadedReportsData.filter(function(d) { 
+            return d.id != id; 
+        });
+        
+        // Also remove from any other arrays if they exist
+        if (typeof allUploadedReports !== 'undefined') {
+            allUploadedReports = allUploadedReports.filter(function(d) { return d.id != id; });
+        }
+        
+        // ============================================================
+        // REMOVE FROM UI
+        // ============================================================
+        var cardToRemove = document.getElementById('uploaded-report-card-' + id);
+        if (cardToRemove && cardToRemove.parentNode) {
+            cardToRemove.style.opacity = '0';
+            cardToRemove.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (cardToRemove.parentNode) {
+                    cardToRemove.parentNode.removeChild(cardToRemove);
+                }
+            }, 400);
+        }
+        
+        // ============================================================
+        // UPDATE COUNTS
+        // ============================================================
+        // Recalculate unviewed count from remaining reports
+        unviewedReportsCount = uploadedReportsData.filter(function(d) {
+            var isUnviewed = false;
+            if (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null || d.is_viewed_by_department === '0') {
+                isUnviewed = true;
+            }
+            if (d.is_unviewed === true || d._is_unviewed === true || d.is_new === true) {
+                isUnviewed = true;
+            }
+            if (d.sent_from_department && d.sent_from_department != DEPARTMENT_ID && 
+                d.is_viewed_by_department == 0 && viewedReportIds.indexOf(d.id) === -1) {
+                isUnviewed = true;
+            }
+            return isUnviewed;
+        }).length;
+        
+        // Add unviewed from added reports
+        var addedUnviewed = reportsData.filter(function(r) {
+            var isUnviewed = false;
+            if (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) {
+                isUnviewed = true;
+            }
+            if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
+                r.is_viewed_by_department == 0 && viewedReportIds.indexOf(r.id) === -1) {
+                isUnviewed = true;
+            }
+            if (r.is_unviewed === true || r._is_unviewed === true || r.is_new === true) {
+                isUnviewed = true;
+            }
+            return isUnviewed;
+        }).length;
+        
+        unviewedReportsCount = uploadedReportsData.filter(function(d) {
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null;
+        }).length + addedUnviewed;
+        
+        updateReportBadge();
+        
+        // ============================================================
+        // SHOW SUCCESS
+        // ============================================================
+        if (res && res.success) {
+            showToast('✅ Uploaded report moved to recycle bin', false);
+            addToActionHistory('Uploaded report deleted: "' + doc.title + '" (ID: ' + doc.id + ')', CURRENT_USER);
+        } else {
+            showToast('⚠️ Uploaded report removed from view (refresh may be needed)', false);
+            addToActionHistory('Uploaded report removed: "' + doc.title + '" (ID: ' + doc.id + ')', CURRENT_USER);
+        }
+        
+        // ============================================================
+        // REFRESH DATA
+        // ============================================================
+        return Promise.all([
+            fetchUploadedReports(),
+            loadRecycleBinFromDB(),
+            loadReports(),
+            loadDashboard(),
+            fetchUnviewedCounts()
+        ]);
+    })
+    .then(function() {
+        console.log('✅ Data refreshed after delete');
+    })
+    .catch(function(e) {
+        console.error('❌ Delete error:', e);
+        showToast('⚠️ Error: ' + e.message, true);
+        
+        // Still remove from UI
+        var cardToRemove = document.getElementById('uploaded-report-card-' + id);
+        if (cardToRemove && cardToRemove.parentNode) {
+            cardToRemove.style.opacity = '0';
+            cardToRemove.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (cardToRemove.parentNode) {
+                    cardToRemove.parentNode.removeChild(cardToRemove);
+                }
+            }, 400);
+        }
+        
+        // Update counts
+        var addedUnviewed = reportsData.filter(function(r) {
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+        }).length;
+        unviewedReportsCount = uploadedReportsData.filter(function(d) {
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null;
+        }).length + addedUnviewed;
+        updateReportBadge();
+    });
 }
 
+// ============================================================
+// FETCH UNVIEWED COUNTS - KWA MANAGER DASHBOARD
+// ============================================================
+function fetchUnviewedCounts() {
+    console.log('📊 fetchUnviewedCounts called');
+    
+    return apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID)
+    .then(function(res) {
+        console.log('📥 fetchUnviewedCounts response:', res);
+        
+        if (res.success && res.data) {
+            // ============================================================
+            // HESABU KUTOKA LOCAL DATA KWA ACCURACY
+            // ============================================================
+            // Projects
+            var unviewedProjects = projectsData.filter(function(p) {
+                return p._is_unviewed === true;
+            }).length;
+            
+            // Reports (Added + Uploaded)
+            var unviewedAddedReports = reportsData.filter(function(r) {
+                return r._is_unviewed === true || r.is_unviewed === true || r.is_new === true;
+            }).length;
+            
+            var unviewedUploadedReports = uploadedReportsData.filter(function(d) {
+                var isUnviewed = false;
+                if (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null || d.is_viewed_by_department === '0') {
+                    isUnviewed = true;
+                }
+                if (d.is_unviewed === true || d._is_unviewed === true || d.is_new === true) {
+                    isUnviewed = true;
+                }
+                if (d.sent_from_department && d.sent_from_department != DEPARTMENT_ID && 
+                    d.is_viewed_by_department == 0 && viewedReportIds.indexOf(d.id) === -1) {
+                    isUnviewed = true;
+                }
+                return isUnviewed;
+            }).length;
+            
+            var totalUnviewedReports = unviewedAddedReports + unviewedUploadedReports;
+            
+            // Requests
+            var unviewedRequests = fundRequestsData.filter(function(r) {
+                return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null;
+            }).length;
+            
+            // ============================================================
+            // TUMIA COUNTS KUTOKA LOCAL DATA (ACCURATE)
+            // ============================================================
+            unviewedProjectsCount = unviewedProjects;
+            unviewedReportsCount = totalUnviewedReports;
+            unviewedRequestsCount = unviewedRequests;
+            
+            console.log('📊 Unviewed counts:', {
+                projects: unviewedProjectsCount,
+                reports: unviewedReportsCount,
+                requests: unviewedRequestsCount
+            });
+            
+            // ============================================================
+            // UPDATE BADGES
+            // ============================================================
+            updateProjectBadge();
+            updateReportBadge();
+            updateRequestBadge();
+            
+            return {
+                projects: unviewedProjectsCount,
+                reports: unviewedReportsCount,
+                fund_requests: unviewedRequestsCount
+            };
+        }
+        
+        // ============================================================
+        // FALLBACK - HESABU KUTOKA LOCAL DATA
+        // ============================================================
+        var fallbackProjects = projectsData.filter(function(p) { return p._is_unviewed === true; }).length;
+        var fallbackAddedReports = reportsData.filter(function(r) { 
+            return r._is_unviewed === true || r.is_unviewed === true || r.is_new === true; 
+        }).length;
+        var fallbackUploadedReports = uploadedReportsData.filter(function(d) { 
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null; 
+        }).length;
+        var fallbackRequests = fundRequestsData.filter(function(r) { 
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null; 
+        }).length;
+        
+        unviewedProjectsCount = fallbackProjects;
+        unviewedReportsCount = fallbackAddedReports + fallbackUploadedReports;
+        unviewedRequestsCount = fallbackRequests;
+        
+        updateProjectBadge();
+        updateReportBadge();
+        updateRequestBadge();
+        
+        return {
+            projects: unviewedProjectsCount,
+            reports: unviewedReportsCount,
+            fund_requests: unviewedRequestsCount
+        };
+    })
+    .catch(function(e) {
+        console.error('❌ fetchUnviewedCounts error:', e);
+        
+        // ============================================================
+        // FALLBACK - HESABU KUTOKA LOCAL DATA IKIWA API INAFELI
+        // ============================================================
+        var fallbackProjects = projectsData.filter(function(p) { return p._is_unviewed === true; }).length;
+        var fallbackAddedReports = reportsData.filter(function(r) { 
+            return r._is_unviewed === true || r.is_unviewed === true || r.is_new === true; 
+        }).length;
+        var fallbackUploadedReports = uploadedReportsData.filter(function(d) { 
+            return d.is_viewed_by_department == 0 || d.is_viewed_by_department === null; 
+        }).length;
+        var fallbackRequests = fundRequestsData.filter(function(r) { 
+            return r.is_viewed_by_department == 0 || r.is_viewed_by_department === null; 
+        }).length;
+        
+        unviewedProjectsCount = fallbackProjects;
+        unviewedReportsCount = fallbackAddedReports + fallbackUploadedReports;
+        unviewedRequestsCount = fallbackRequests;
+        
+        updateProjectBadge();
+        updateReportBadge();
+        updateRequestBadge();
+        
+        return {
+            projects: unviewedProjectsCount,
+            reports: unviewedReportsCount,
+            fund_requests: unviewedRequestsCount
+        };
+    });
+}
 // ============================================================
 // ==================== VIEW REPORT DETAILS ====================
 // ============================================================
