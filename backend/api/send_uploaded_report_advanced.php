@@ -1,7 +1,7 @@
 <?php
 // backend/api/send_uploaded_report_advanced.php
-// Send uploaded report - ALLOWS FORWARDING
-// Sender keeps their existing copy, Receiver gets new copy
+// Send uploaded report - BLOCKS FORWARDING
+// Only original sender can send, receivers cannot forward
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -49,7 +49,6 @@ $originalReportId = (int)$input['original_uploaded_report_id'];
 $toDeptId = (int)$input['to_department_id'];
 $fromDeptId = (int)$input['from_department_id'];
 $sentBy = isset($input['sent_by']) ? $input['sent_by'] : 'System';
-$isForward = isset($input['is_forward']) ? (int)$input['is_forward'] : 0;
 
 // Get sender department name
 $fromDeptName = 'Department ' . $fromDeptId;
@@ -65,8 +64,138 @@ try {
 }
 
 // ============================================================
-// GET UPLOADED REPORT DATA
 // ============================================================
+// 1. CHECK IF THIS IS A FORWARD (Received Report)
+// ============================================================
+// ============================================================
+
+// Check if the sender (from_department_id) has a copy of this report
+// If they have a copy (is_sent_copy = 1) and it was sent to them,
+// then this is a FORWARD attempt - BLOCK IT
+$checkStmt = $pdo->prepare("SELECT id, is_original, is_sent_copy, department_id, sent_from_department 
+                            FROM uploaded_reports 
+                            WHERE original_uploaded_report_id = ? 
+                            AND department_id = ? 
+                            AND is_sent_copy = 1 
+                            AND is_deleted = 0 
+                            LIMIT 1");
+$checkStmt->execute([$originalReportId, $fromDeptId]);
+$senderCopy = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+// If sender has a copy (meaning they received it), BLOCK forwarding
+if ($senderCopy) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => '⛔ You cannot forward this report. You received it from another department. Only the original sender can send it.',
+        'error_code' => 'FORWARD_NOT_ALLOWED',
+        'report_id' => $originalReportId,
+        'your_copy_id' => $senderCopy['id'],
+        'original_sender' => $senderCopy['sent_from_department'],
+        'note' => 'This report was sent to you. You cannot forward it to others.'
+    ]);
+    exit;
+}
+
+// Also check if this is a copy from sent_uploaded_reports
+$sentCheck = $pdo->prepare("SELECT id, from_department_id, to_department_id 
+                            FROM sent_uploaded_reports 
+                            WHERE original_uploaded_report_id = ? 
+                            AND to_department_id = ? 
+                            AND is_deleted = 0 
+                            LIMIT 1");
+$sentCheck->execute([$originalReportId, $fromDeptId]);
+$sentRecord = $sentCheck->fetch(PDO::FETCH_ASSOC);
+
+if ($sentRecord) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => '⛔ You cannot forward this report. It was already sent to you by another department.',
+        'error_code' => 'FORWARD_NOT_ALLOWED',
+        'report_id' => $originalReportId,
+        'sent_record_id' => $sentRecord['id'],
+        'original_sender' => $sentRecord['from_department_id'],
+        'note' => 'This report was previously sent to your department. You cannot forward it.'
+    ]);
+    exit;
+}
+
+// ============================================================
+// 2. CHECK IF THIS IS THE ORIGINAL SENDER
+// ============================================================
+// Check if this department owns the original
+$originalCheck = $pdo->prepare("SELECT id, department_id FROM uploaded_reports 
+                                WHERE id = ? AND is_original = 1 AND is_deleted = 0");
+$originalCheck->execute([$originalReportId]);
+$original = $originalCheck->fetch(PDO::FETCH_ASSOC);
+
+if (!$original || $original['department_id'] != $fromDeptId) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => '⛔ Only the original sender can send this report. You cannot forward it.',
+        'error_code' => 'NOT_ORIGINAL_SENDER',
+        'report_id' => $originalReportId,
+        'original_owner' => $original['department_id'] ?? 'Unknown'
+    ]);
+    exit;
+}
+
+// ============================================================
+// 3. CHECK IF ALREADY SENT TO THIS DEPARTMENT
+// ============================================================
+$checkSentStmt = $pdo->prepare("SELECT id FROM sent_uploaded_reports 
+                                WHERE original_uploaded_report_id = ? 
+                                AND to_department_id = ? 
+                                AND is_deleted = 0 
+                                LIMIT 1");
+$checkSentStmt->execute([$originalReportId, $toDeptId]);
+$existing = $checkSentStmt->fetch(PDO::FETCH_ASSOC);
+
+if ($existing) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => '⚠️ This report has already been sent to this department.',
+        'error_code' => 'ALREADY_SENT',
+        'report_id' => $originalReportId,
+        'to_department' => $toDeptId
+    ]);
+    exit;
+}
+
+// ============================================================
+// 4. CHECK IF RECEIVER ALREADY HAS A COPY
+// ============================================================
+$receiverCheck = $pdo->prepare("SELECT id FROM uploaded_reports 
+                                WHERE original_uploaded_report_id = ? 
+                                AND department_id = ? 
+                                AND is_sent_copy = 1 
+                                AND is_deleted = 0 
+                                LIMIT 1");
+$receiverCheck->execute([$originalReportId, $toDeptId]);
+$existingCopy = $receiverCheck->fetch(PDO::FETCH_ASSOC);
+
+if ($existingCopy) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => '⚠️ This department already has a copy of this report.',
+        'error_code' => 'COPY_ALREADY_EXISTS',
+        'copy_id' => $existingCopy['id'],
+        'to_department' => $toDeptId
+    ]);
+    exit;
+}
+
+// ============================================================
+// ============================================================
+// 5. PROCEED WITH SENDING (ONLY ORIGINAL SENDER)
+// ============================================================
+// ============================================================
+
+// Get uploaded report data
 $reportData = [];
 $reportTitle = 'Uploaded Report';
 $reportFile = '';
@@ -112,29 +241,7 @@ if (empty($reportData)) {
     }
 }
 
-// 4. If still empty, check if this is a copy (forward)
-if (empty($reportData)) {
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM uploaded_reports 
-                               WHERE original_uploaded_report_id = ? 
-                               AND department_id = ? 
-                               AND is_sent_copy = 1 
-                               AND is_deleted = 0 
-                               LIMIT 1");
-        $stmt->execute([$originalReportId, $fromDeptId]);
-        $copyData = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($copyData) {
-            $reportData = $copyData;
-            $reportTitle = $copyData['title'] ?? $reportTitle;
-            $reportFile = $copyData['file_name'] ?? $reportFile;
-            $reportPeriod = $copyData['period'] ?? $reportPeriod;
-        }
-    } catch(PDOException $e) {
-        // Ignore
-    }
-}
-
-// 5. Ensure report_data is not empty
+// 4. Ensure report_data is not empty
 if (empty($reportData)) {
     $reportData = [
         'id' => $originalReportId,
@@ -187,68 +294,6 @@ try {
     ob_clean();
     echo json_encode(['success' => false, 'message' => 'Table creation failed: ' . $e->getMessage()]);
     exit;
-}
-
-// ============================================================
-// CHECK IF ALREADY SENT TO THIS DEPARTMENT
-// ============================================================
-try {
-    $checkStmt = $pdo->prepare("SELECT id, sent_count FROM sent_uploaded_reports 
-                                WHERE original_uploaded_report_id = ? 
-                                AND to_department_id = ? 
-                                AND is_deleted = 0 
-                                LIMIT 1");
-    $checkStmt->execute([$originalReportId, $toDeptId]);
-    $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($existing) {
-        $updateStmt = $pdo->prepare("UPDATE sent_uploaded_reports SET 
-            sent_count = sent_count + 1,
-            last_sent_at = NOW(),
-            is_sent = 1
-            WHERE id = ?");
-        $updateStmt->execute([$existing['id']]);
-        
-        ob_clean();
-        echo json_encode([
-            'success' => true,
-            'message' => 'Report already sent. Updated sent count.',
-            'sent_id' => $existing['id'],
-            'already_sent' => true,
-            'sent_count' => $existing['sent_count'] + 1
-        ]);
-        exit;
-    }
-} catch(PDOException $e) {
-    // Ignore
-}
-
-// ============================================================
-// CHECK IF RECEIVER ALREADY HAS A COPY
-// ============================================================
-try {
-    $receiverCheck = $pdo->prepare("SELECT id FROM uploaded_reports 
-                                    WHERE original_uploaded_report_id = ? 
-                                    AND department_id = ? 
-                                    AND is_sent_copy = 1 
-                                    AND is_deleted = 0 
-                                    LIMIT 1");
-    $receiverCheck->execute([$originalReportId, $toDeptId]);
-    $existingCopy = $receiverCheck->fetch(PDO::FETCH_ASSOC);
-    
-    if ($existingCopy) {
-        ob_clean();
-        echo json_encode([
-            'success' => false,
-            'message' => '⚠️ This department already has a copy of this report.',
-            'error_code' => 'COPY_ALREADY_EXISTS',
-            'copy_id' => $existingCopy['id'],
-            'to_department' => $toDeptId
-        ]);
-        exit;
-    }
-} catch(PDOException $e) {
-    // Ignore
 }
 
 // ============================================================
@@ -340,28 +385,6 @@ try {
     $copyId = $pdo->lastInsertId();
     
     // ============================================================
-    // SENDER KEEPS THEIR COPY - NO NEW COPY CREATED
-    // ============================================================
-    
-    // ============================================================
-    // UPDATE SENDER'S COPY - Mark as forwarded
-    // ============================================================
-    try {
-        $updateCopyStmt = $pdo->prepare("UPDATE uploaded_reports SET 
-            sent_to_department = ?,
-            sent_from_department = ?,
-            is_sent = 1,
-            sent_count = COALESCE(sent_count, 0) + 1,
-            last_sent_at = NOW()
-            WHERE original_uploaded_report_id = ? 
-            AND department_id = ? 
-            AND is_sent_copy = 1");
-        $updateCopyStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $fromDeptId]);
-    } catch(PDOException $e) {
-        // Ignore
-    }
-    
-    // ============================================================
     // UPDATE ORIGINAL UPLOADED REPORT - Mark as sent
     // ============================================================
     try {
@@ -394,8 +417,7 @@ try {
                 is_viewed
             ) VALUES (?, ?, 'uploaded_report', ?, ?, ?, NOW(), 0)");
             
-            $forwardMsg = $isForward ? ' (Forwarded)' : '';
-            $message = "📁 Uploaded report \"{$reportTitle}\" sent from {$fromDeptName}{$forwardMsg}";
+            $message = "📁 Uploaded report \"{$reportTitle}\" sent from {$fromDeptName}";
             $notifStmt->execute([$toDeptId, $fromDeptId, $originalReportId, $reportTitle, $message]);
         }
     } catch(PDOException $e) {
@@ -405,7 +427,7 @@ try {
     ob_clean();
     echo json_encode([
         'success' => true,
-        'message' => 'Uploaded report sent successfully' . ($isForward ? ' (Forwarded)' : ''),
+        'message' => 'Uploaded report sent successfully',
         'sent_id' => $sentId,
         'copy_id' => $copyId,
         'original_id' => $originalReportId,
@@ -414,8 +436,7 @@ try {
         'from_department' => $fromDeptId,
         'from_department_name' => $fromDeptName,
         'report_title' => $reportTitle,
-        'is_forward' => $isForward,
-        'note' => 'Copy created for receiver only. Sender keeps their existing copy.'
+        'note' => 'Only original sender can send. Copy created for receiver.'
     ]);
 
 } catch(PDOException $e) {

@@ -1,7 +1,9 @@
 <?php
 // backend/api/get_uploaded_reports.php
-// Returns: ORIGINAL (owned) + RECEIVED COPIES only
-// Each department sees only ONE copy per report
+// Returns ALL reports for a department:
+// 1. ORIGINAL (owned)
+// 2. COPIES (received) - Sender keeps their copy
+// 3. SENT HISTORY (for tracking)
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -76,15 +78,18 @@ try {
     }
 
     // ============================================================
-    // 2. RECEIVED COPIES (from uploaded_reports)
+    // 2. COPY REPORTS (from uploaded_reports)
     // ============================================================
-    // SHOW: Only copies received by this department (sent_to_department = department_id)
-    // DO NOT SHOW: Copies sent by this department
+    // SHOW: ALL copies where department_id = this department
+    // This includes BOTH received copies AND copies kept by sender
     // ============================================================
     $query = "SELECT 
                 r.*,
                 'copy' as source_type,
-                1 as is_received,
+                CASE 
+                    WHEN r.sent_to_department = ? THEN 1 
+                    ELSE 0 
+                END as is_received,
                 r.sent_from_department as sent_from_name,
                 d1.name as from_dept_name,
                 d2.name as to_dept_name
@@ -93,8 +98,7 @@ try {
               LEFT JOIN departments d2 ON d2.id = r.sent_to_department
               WHERE r.is_sent_copy = 1
                 AND r.is_deleted = 0
-                AND r.sent_to_department = ?
-                AND r.department_id = ?
+                AND r.department_id = ?   -- This department owns this copy
               ORDER BY r.id DESC";
     
     $stmt = $pdo->prepare($query);
@@ -110,12 +114,27 @@ try {
         }
         $row['to_dept_name'] = $row['to_dept_name'] ?? 'Unknown';
         
-        $row['_is_unviewed'] = ($row['is_viewed_by_department'] == 0 || $row['is_viewed_by_department'] === null);
-        $row['_is_sent_by_me'] = false;
-        $row['_is_received_by_me'] = true;
+        // Check if this was received or sent by this department
+        $isReceived = ($row['sent_to_department'] == $department_id);
+        $isSentByMe = ($row['sent_from_department'] == $department_id);
+        
+        $row['_is_unviewed'] = ($isReceived && ($row['is_viewed_by_department'] == 0 || $row['is_viewed_by_department'] === null));
+        $row['_is_sent_by_me'] = $isSentByMe;
+        $row['_is_received_by_me'] = $isReceived;
         $row['is_sent'] = 1;
-        $row['_display_type'] = '📨 Received Copy';
-        $row['_display_icon'] = '📨';
+        
+        // Set display type based on whether this is received or sent
+        if ($isReceived) {
+            $row['_display_type'] = '📨 Received Copy';
+            $row['_display_icon'] = '📨';
+        } else if ($isSentByMe) {
+            $row['_display_type'] = '📤 My Copy (Forwarded)';
+            $row['_display_icon'] = '📤';
+        } else {
+            $row['_display_type'] = '📄 Copy';
+            $row['_display_icon'] = '📄';
+        }
+        
         $row['_is_original'] = false;
         $row['_is_copy'] = true;
         $reports[] = $row;
@@ -124,9 +143,6 @@ try {
 
     // ============================================================
     // 3. SENT HISTORY (from sent_uploaded_reports)
-    // ============================================================
-    // SHOW: History of reports sent by this department
-    // DO NOT SHOW AS COPIES - just history
     // ============================================================
     $query = "SELECT 
                 sr.id as sent_id,
@@ -153,12 +169,12 @@ try {
               FROM sent_uploaded_reports sr
               LEFT JOIN departments d1 ON d1.id = sr.from_department_id
               LEFT JOIN departments d2 ON d2.id = sr.to_department_id
-              WHERE sr.from_department_id = ?
+              WHERE (sr.from_department_id = ? OR sr.to_department_id = ?)
                 AND sr.is_deleted = 0
               ORDER BY sr.sent_at DESC";
     
     $stmt = $pdo->prepare($query);
-    $stmt->execute([$department_id]);
+    $stmt->execute([$department_id, $department_id]);
     
     while ($row = $stmt->fetch()) {
         if (isset($seenIds[$row['original_uploaded_report_id']])) {
@@ -172,6 +188,9 @@ try {
                 $reportData = [];
             }
         }
+        
+        $isSentByMe = ($row['from_department_id'] == $department_id);
+        $isReceivedByMe = ($row['to_department_id'] == $department_id);
         
         $report = [
             'id' => $row['sent_id'],
@@ -198,14 +217,14 @@ try {
             'is_original' => 0,
             'is_sent_copy' => 0,
             'source_type' => $row['source_type'],
-            '_is_sent_by_me' => true,
-            '_is_received_by_me' => false,
-            '_is_unviewed' => false,
+            '_is_sent_by_me' => $isSentByMe,
+            '_is_received_by_me' => $isReceivedByMe,
+            '_is_unviewed' => ($isReceivedByMe && ($row['is_viewed'] == 0 || $row['is_viewed'] === null)),
             '_is_sent_history' => true,
             '_is_copy' => false,
             '_is_original' => false,
-            '_display_type' => '📤 Sent History',
-            '_display_icon' => '📤',
+            '_display_type' => $isSentByMe ? '📤 Sent History' : '📨 Received History',
+            '_display_icon' => $isSentByMe ? '📤' : '📨',
             'is_sent_copy' => 0
         ];
         
@@ -241,7 +260,7 @@ try {
         return $r['source_type'] === 'copy'; 
     }));
     
-    $sentHistoryCount = count(array_filter($reports, function($r) { 
+    $historyCount = count(array_filter($reports, function($r) { 
         return $r['source_type'] === 'sent_history'; 
     }));
 
@@ -262,9 +281,9 @@ try {
         'debug' => [
             'original_count' => $originalCount,
             'copy_count' => $copyCount,
-            'sent_history_count' => $sentHistoryCount,
+            'history_count' => $historyCount,
             'total' => count($reports),
-            'note' => 'Each department sees: ORIGINAL (owned) + RECEIVED COPIES + SENT HISTORY'
+            'note' => 'Shows: ORIGINAL + ALL COPIES (received AND kept by sender) + HISTORY'
         ]
     ]);
 
