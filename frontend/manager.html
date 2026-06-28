@@ -7480,66 +7480,324 @@ function openGenerateReportModal() {
     openModal('generateReportModal');
 }
 
+// ============================================================
+// GENERATE AND SAVE REPORT - KAMILI (Manager Dashboard)
+// ============================================================
 function generateAndSaveReport() {
     var title = document.getElementById('genReportTitle').value.trim() || 'Report ' + new Date().toLocaleString();
     var period = document.getElementById('genPeriodType').value;
-    var startDate, endDate, now = new Date();
-    if (period === 'daily') { startDate = new Date(now); startDate.setHours(0,0,0,0); endDate = new Date(now); endDate.setHours(23,59,59,999); }
-    else if (period === 'weekly') { startDate = new Date(now); startDate.setDate(now.getDate() - 7); endDate = new Date(now); }
-    else if (period === 'monthly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 1); endDate = new Date(now); }
-    else if (period === 'quarterly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 3); endDate = new Date(now); }
-    else { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); endDate = new Date(now); }
     
-    Promise.all([fetchProjects(), fetchFundRequests(), fetchDailyWork()]).then(function() {
-        var totalIncome = 0, totalExpense = 0;
-        var filteredRequests = fundRequestsData.filter(function(t) {
-            var tDate = new Date(t.request_date);
-            return tDate >= startDate && tDate <= endDate;
+    var startDate, endDate;
+    var now = new Date();
+    if (period === 'daily') {
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+        endDate.setHours(23, 59, 59, 999);
+    } else if (period === 'weekly') {
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'monthly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'quarterly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 3);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else {
+        startDate = new Date(now);
+        startDate.setFullYear(now.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    }
+    
+    showToast('Generating report...', false);
+    
+    // ============================================================
+    // FETCH ALL DATA
+    // ============================================================
+    Promise.all([fetchProjects(), fetchFundRequests(), fetchDailyWork(), fetchReports()])
+    .then(function() {
+        
+        // ============================================================
+        // 1. PROJECTS SUMMARY - All Projects
+        // ============================================================
+        var totalProjects = projectsData.length;
+        
+        // Projects in period
+        var projectsInPeriod = projectsData.filter(function(p) {
+            var createdDate = new Date(p.created_at);
+            return createdDate >= startDate && createdDate <= endDate;
         });
-        filteredRequests.forEach(function(t) {
-            if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0;
-            if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0;
-        });
-        var filteredDailyWork = dailyworkData.filter(function(w) {
+        
+        // Projects by status (All Time)
+        var pendingCount = projectsData.filter(function(p) { return p.status === 'pending'; }).length;
+        var activeCount = projectsData.filter(function(p) { return p.status === 'in_progress'; }).length;
+        var progressCount = projectsData.filter(function(p) { return p.status === 'in_progress'; }).length;
+        var completedCount = projectsData.filter(function(p) { return p.status === 'completed'; }).length;
+        var approvedCount = projectsData.filter(function(p) { return p.status === 'approved'; }).length;
+        
+        // Projects in period by status
+        var pendingInPeriod = projectsInPeriod.filter(function(p) { return p.status === 'pending'; }).length;
+        var activeInPeriod = projectsInPeriod.filter(function(p) { return p.status === 'in_progress'; }).length;
+        var progressInPeriod = projectsInPeriod.filter(function(p) { return p.status === 'in_progress'; }).length;
+        var completedInPeriod = projectsInPeriod.filter(function(p) { return p.status === 'completed'; }).length;
+        var approvedInPeriod = projectsInPeriod.filter(function(p) { return p.status === 'approved'; }).length;
+        
+        // Total project amount
+        var totalProjectAmount = projectsData.reduce(function(sum, p) {
+            return sum + (parseFloat(p.amount) || 0);
+        }, 0);
+        
+        // ============================================================
+        // 2. DAILY WORK SUMMARY - Filter by period
+        // ============================================================
+        var dailyWorkInPeriod = dailyworkData.filter(function(w) {
             var wDate = new Date(w.date);
             return wDate >= startDate && wDate <= endDate;
         });
-        var totalDailyBudget = filteredDailyWork.reduce(function(s, w) { return s + (parseFloat(w.budget) || 0); }, 0);
-        var totalDailyAmount = filteredDailyWork.reduce(function(s, w) { return s + (parseFloat(w.amount) || 0); }, 0);
         
-        var content = period.toUpperCase() + ' REPORT\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Generated by: ' + CURRENT_USER + '\n';
-        content += 'Generated: ' + new Date().toLocaleString() + '\n';
-        content += 'Period: ' + startDate.toLocaleDateString() + ' to ' + endDate.toLocaleDateString() + '\n';
-        content += 'Department: Manager\n\n';
-        content += '📈 FINANCIAL SUMMARY\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Total Income: ' + formatMoney(totalIncome) + '\n';
-        content += 'Total Expenses: ' + formatMoney(totalExpense) + '\n';
-        content += 'Net Profit: ' + formatMoney(totalIncome - totalExpense) + '\n\n';
-        content += '📋 PROJECT STATUS\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Total Projects: ' + projectsData.length + '\n';
-        content += 'Pending: ' + projectsData.filter(function(p) { return p.status === 'pending'; }).length + '\n';
-        content += 'In Progress: ' + projectsData.filter(function(p) { return p.status === 'in_progress'; }).length + '\n';
-        content += 'Completed: ' + projectsData.filter(function(p) { return p.status === 'completed'; }).length + '\n\n';
-        content += '📋 REQUESTS SUMMARY\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Total Requests: ' + fundRequestsData.length + '\n';
-        content += 'Total Requested Amount: ' + formatMoney(fundRequestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0)) + '\n';
-        content += 'Pending: ' + fundRequestsData.filter(function(r) { return r.status === 'pending'; }).length + '\n';
-        content += 'Approved: ' + fundRequestsData.filter(function(r) { return r.status === 'approved'; }).length + '\n\n';
-        content += '📅 DAILY WORK SUMMARY\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Records in period: ' + filteredDailyWork.length + '\n';
-        content += 'Total Budget: ' + formatMoney(totalDailyBudget) + '\n';
-        content += 'Total Amount: ' + formatMoney(totalDailyAmount) + '\n';
-        content += 'Variance: ' + formatMoney(totalDailyAmount - totalDailyBudget) + '\n\n';
-        content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-        content += 'Report generated by: ' + CURRENT_USER + '\n';
-        content += 'Date: ' + new Date().toLocaleString() + '\n';
+        var totalBudget = 0;
+        var totalExpenses = 0;
+        var totalIncome = 0;
+        var totalAmount = 0;
+        var totalQuantity = 0;
         
+        for (var i = 0; i < dailyWorkInPeriod.length; i++) {
+            var w = dailyWorkInPeriod[i];
+            totalBudget += parseFloat(w.budget) || 0;
+            totalExpenses += parseFloat(w.amount) || 0;
+            totalIncome += parseFloat(w.total_amount || w.income || 0);
+            totalAmount += parseFloat(w.amount || 0);
+            totalQuantity += parseInt(w.quantity_produced || 0);
+        }
+        var remainingBudget = totalBudget - totalExpenses;
+        
+        // Daily work by status (in period)
+        var completedDailyWork = dailyWorkInPeriod.filter(function(w) {
+            return w.status === 'completed' || w.status === 'Completed';
+        }).length;
+        var partialDailyWork = dailyWorkInPeriod.filter(function(w) {
+            return w.status === 'partial' || w.status === 'Partial';
+        }).length;
+        var pendingDailyWork = dailyWorkInPeriod.filter(function(w) {
+            return w.status === 'pending' || w.status === 'Pending';
+        }).length;
+        var inProgressDailyWork = dailyWorkInPeriod.filter(function(w) {
+            return w.status === 'in_progress' || w.status === 'In Progress';
+        }).length;
+        
+        // ============================================================
+        // 3. REQUESTS SUMMARY - Filter by period
+        // ============================================================
+        var requestsInPeriod = fundRequestsData.filter(function(r) {
+            var rDate = new Date(r.request_date || r.created_at);
+            return rDate >= startDate && rDate <= endDate;
+        });
+        
+        var totalRequestedAmount = 0;
+        var approvedRequestAmount = 0;
+        var pendingRequestAmount = 0;
+        var cancelledRequestAmount = 0;
+        var incomeRequestAmount = 0;
+        var expenseRequestAmount = 0;
+        
+        for (var j = 0; j < requestsInPeriod.length; j++) {
+            var r = requestsInPeriod[j];
+            var amount = parseFloat(r.amount) || 0;
+            totalRequestedAmount += amount;
+            
+            if (r.status === 'approved' || r.status === 'Approved' || r.status === 'paid') {
+                approvedRequestAmount += amount;
+            } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+                cancelledRequestAmount += amount;
+            } else {
+                pendingRequestAmount += amount;
+            }
+            
+            if (r.type === 'income') {
+                incomeRequestAmount += amount;
+            } else if (r.type === 'expense') {
+                expenseRequestAmount += amount;
+            }
+        }
+        
+        // Request counts
+        var totalRequests = requestsInPeriod.length;
+        var approvedCountRequests = requestsInPeriod.filter(function(r) {
+            return r.status === 'approved' || r.status === 'Approved' || r.status === 'paid';
+        }).length;
+        var pendingCountRequests = requestsInPeriod.filter(function(r) {
+            return r.status === 'pending' || r.status === 'Pending';
+        }).length;
+        var cancelledCountRequests = requestsInPeriod.filter(function(r) {
+            return r.status === 'cancelled' || r.status === 'Cancelled';
+        }).length;
+        var incomeCountRequests = requestsInPeriod.filter(function(r) {
+            return r.type === 'income';
+        }).length;
+        var expenseCountRequests = requestsInPeriod.filter(function(r) {
+            return r.type === 'expense';
+        }).length;
+        
+        // Net profit from requests
+        var netProfit = incomeRequestAmount - expenseRequestAmount;
+        
+        // ============================================================
+        // 4. REPORTS SUMMARY
+        // ============================================================
+        var totalAddedReports = reportsData.length;
+        var totalUploadedReports = uploadedReportsData.length;
+        var totalAllReports = totalAddedReports + totalUploadedReports;
+        
+        var sentReports = reportsData.filter(function(r) { return r.status === 'sent'; }).length;
+        var draftReports = reportsData.filter(function(r) { return r.status === 'draft' || r.status === 'pending'; }).length;
+        
+        // ============================================================
+        // 5. BUILD REPORT CONTENT
+        // ============================================================
+        var content = '';
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║                 ' + period.toUpperCase() + ' REPORT                          ║\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n\n';
+        content += '📋 REPORT INFORMATION\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Generated by   : ' + CURRENT_USER + '\n';
+        content += '  Generated on   : ' + new Date().toLocaleString() + '\n';
+        content += '  Department     : Manager (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '  Period         : ' + startDate.toLocaleDateString() + '  →  ' + endDate.toLocaleDateString() + '\n\n';
+        
+        // ============================================================
+        // PROJECTS SUMMARY
+        // ============================================================
+        content += '📋 PROJECTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Projects (All Time)  : ' + totalProjects + '\n\n';
+        
+        content += '  📈 Projects in Period (' + period + ')   : ' + projectsInPeriod.length + '\n';
+        content += '     ├── Pending                 : ' + pendingInPeriod + '\n';
+        content += '     ├── In Progress (Active)    : ' + activeInPeriod + '\n';
+        content += '     ├── Completed               : ' + completedInPeriod + '\n';
+        content += '     └── Approved                : ' + approvedInPeriod + '\n\n';
+        
+        content += '  📊 Projects by Status (All Time):\n';
+        content += '     ├── Pending                 : ' + pendingCount + '\n';
+        content += '     ├── In Progress (Active)    : ' + activeCount + '\n';
+        content += '     ├── Completed               : ' + completedCount + '\n';
+        content += '     └── Approved                : ' + approvedCount + '\n\n';
+        
+        content += '  💰 Total Project Amount (All Time): ' + formatMoney(totalProjectAmount) + '\n\n';
+        
+        // ============================================================
+        // DAILY WORK SUMMARY
+        // ============================================================
+        content += '📊 DAILY WORK SUMMARY (' + period + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Records in Period     : ' + dailyWorkInPeriod.length + '\n\n';
+        
+        content += '  💰 FINANCIAL TOTALS:\n';
+        content += '     ├── Total Budget Allocated  : ' + formatMoney(totalBudget) + '\n';
+        content += '     ├── Total Expenses          : ' + formatMoney(totalExpenses) + '\n';
+        content += '     ├── Total Income Generated  : ' + formatMoney(totalIncome) + '\n';
+        content += '     └── Remaining Budget        : ' + formatMoney(remainingBudget) + '  ' + (remainingBudget >= 0 ? '✅ Surplus' : '❌ Deficit') + '\n\n';
+        
+        content += '  📦 PRODUCTION TOTALS:\n';
+        content += '     ├── Total Quantity Produced : ' + totalQuantity.toLocaleString() + ' units\n';
+        content += '     └── Total Amount Spent      : ' + formatMoney(totalAmount) + '\n\n';
+        
+        content += '  📌 Records by Status:\n';
+        content += '     ├── Completed               : ' + completedDailyWork + '\n';
+        content += '     ├── In Progress             : ' + inProgressDailyWork + '\n';
+        content += '     ├── Partial                 : ' + partialDailyWork + '\n';
+        content += '     └── Pending                 : ' + pendingDailyWork + '\n\n';
+        
+        // ============================================================
+        // REQUESTS SUMMARY
+        // ============================================================
+        content += '💰 REQUESTS SUMMARY (' + period + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Requests in Period    : ' + totalRequests + '  (All Time: ' + fundRequestsData.length + ')\n\n';
+        
+        content += '  📊 REQUESTS BY TYPE:\n';
+        content += '     ├── Income Requests         : ' + incomeCountRequests + '\n';
+        content += '     └── Expense Requests        : ' + expenseCountRequests + '\n\n';
+        
+        content += '  💰 AMOUNTS BY TYPE:\n';
+        content += '     ├── Total Income Requested  : ' + formatMoney(incomeRequestAmount) + '\n';
+        content += '     ├── Total Expenses Requested: ' + formatMoney(expenseRequestAmount) + '\n';
+        content += '     └── Net Profit/Loss         : ' + formatMoney(netProfit) + '  ' + (netProfit >= 0 ? '✅ Profit' : '❌ Loss') + '\n\n';
+        
+        content += '  📋 REQUESTS BY STATUS:\n';
+        content += '     ├── Total Requested Amount  : ' + formatMoney(totalRequestedAmount) + '\n';
+        content += '     ├── Approved Amount         : ' + formatMoney(approvedRequestAmount) + '  (' + approvedCountRequests + ' requests)\n';
+        content += '     ├── Pending Amount          : ' + formatMoney(pendingRequestAmount) + '  (' + pendingCountRequests + ' requests)\n';
+        content += '     └── Cancelled Amount        : ' + formatMoney(cancelledRequestAmount) + '  (' + cancelledCountRequests + ' requests)\n\n';
+        
+        // ============================================================
+        // REPORTS SUMMARY
+        // ============================================================
+        content += '📊 REPORTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Reports (All)         : ' + totalAllReports + '\n';
+        content += '     ├── Added Reports           : ' + totalAddedReports + '\n';
+        content += '     ├── Uploaded Reports        : ' + totalUploadedReports + '\n';
+        content += '     ├── Sent Reports            : ' + sentReports + '\n';
+        content += '     └── Draft Reports           : ' + draftReports + '\n\n';
+        
+        // ============================================================
+        // REQUESTS SUMMARY TABLE - WITH REQUESTED AMOUNTS
+        // ============================================================
+        var totalRequestsAll = fundRequestsData.length;
+        var allRequestedAmount = fundRequestsData.reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        
+        var allPendingCount = fundRequestsData.filter(function(r) { return r.status === 'pending' || r.status === 'Pending'; }).length;
+        var allApprovedCount = fundRequestsData.filter(function(r) { return r.status === 'approved' || r.status === 'Approved' || r.status === 'paid'; }).length;
+        var allCancelledCount = fundRequestsData.filter(function(r) { return r.status === 'cancelled' || r.status === 'Cancelled'; }).length;
+        
+        var allPendingAmount = fundRequestsData.filter(function(r) { 
+            return r.status === 'pending' || r.status === 'Pending'; 
+        }).reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        
+        var allApprovedAmount = fundRequestsData.filter(function(r) { 
+            return r.status === 'approved' || r.status === 'Approved' || r.status === 'paid'; 
+        }).reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        
+        var allCancelledAmount = fundRequestsData.filter(function(r) { 
+            return r.status === 'cancelled' || r.status === 'Cancelled'; 
+        }).reduce(function(sum, r) { return sum + (parseFloat(r.amount) || 0); }, 0);
+        
+        var allPendingPercent = totalRequestsAll > 0 ? ((allPendingCount / totalRequestsAll) * 100).toFixed(1) : 0;
+        var allApprovedPercent = totalRequestsAll > 0 ? ((allApprovedCount / totalRequestsAll) * 100).toFixed(1) : 0;
+        var allCancelledPercent = totalRequestsAll > 0 ? ((allCancelledCount / totalRequestsAll) * 100).toFixed(1) : 0;
+        
+        content += '📊 REQUESTED AMOUNTS SUMMARY TABLE (All Time)\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Status           | Count | Amount (TZS)     | Percentage\n';
+        content += '  ───────────────────────────────────────────────────────────────\n';
+        content += '  Approved         | ' + String(allApprovedCount).padStart(4) + ' | ' + String(formatMoney(allApprovedAmount)).padStart(14) + ' | ' + String(allApprovedPercent).padStart(6) + '%\n';
+        content += '  Pending          | ' + String(allPendingCount).padStart(4) + ' | ' + String(formatMoney(allPendingAmount)).padStart(14) + ' | ' + String(allPendingPercent).padStart(6) + '%\n';
+        content += '  Cancelled        | ' + String(allCancelledCount).padStart(4) + ' | ' + String(formatMoney(allCancelledAmount)).padStart(14) + ' | ' + String(allCancelledPercent).padStart(6) + '%\n';
+        content += '  ───────────────────────────────────────────────────────────────\n';
+        content += '  TOTAL            | ' + String(totalRequestsAll).padStart(4) + ' | ' + String(formatMoney(allRequestedAmount)).padStart(14) + ' | 100.0%\n\n';
+        
+        // ============================================================
+        // FOOTER
+        // ============================================================
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║  END OF REPORT                                                  ║\n';
+        content += '║  Generated by: ' + CURRENT_USER + '\n';
+        content += '║  Date: ' + new Date().toLocaleString() + '\n';
+        content += '║  Department: Manager (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n';
+        
+        // ============================================================
+        // SAVE REPORT
+        // ============================================================
         apiCall('add_report.php', 'POST', {
             title: title,
             period: period,
@@ -7549,15 +7807,19 @@ function generateAndSaveReport() {
             created_by: CURRENT_USER
         }).then(function(res) {
             if (res.success) {
-                showToast('✅ ' + period + ' report generated and saved');
-                addToActionHistory('Report generated: ' + title, CURRENT_USER);
+                showToast('✅ ' + period + ' report generated and saved successfully!');
+                addToActionHistory('Report generated: ' + title + ' (' + period + ')', CURRENT_USER);
                 closeModal('generateReportModal');
                 loadReports();
                 loadDashboard();
             } else {
-                showToast(res.message || 'Failed', true);
+                showToast(res.message || 'Failed to generate report', true);
             }
         });
+        
+    }).catch(function(e) {
+        console.error('Generate report error:', e);
+        showToast('Error generating report: ' + e.message, true);
     });
 }
 

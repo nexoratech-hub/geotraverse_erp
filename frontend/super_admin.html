@@ -7887,32 +7887,471 @@ function openGenerateReportModal() {
     openModal('generateReportModal');
 }
 
+// ============================================================
+// GENERATE AND SAVE REPORT - KAMILI (Kwa Departments Zote)
+// ============================================================
 async function generateAndSaveReport() {
     const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`;
     const period = document.getElementById('genPeriodType').value;
-    let startDate, endDate, now = new Date();
-    if (period === 'daily') { startDate = new Date(now); startDate.setHours(0,0,0,0); endDate = new Date(now); endDate.setHours(23,59,59,999); }
-    else if (period === 'weekly') { startDate = new Date(now); startDate.setDate(now.getDate() - 7); endDate = new Date(now); }
-    else if (period === 'monthly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 1); endDate = new Date(now); }
-    else if (period === 'quarterly') { startDate = new Date(now); startDate.setMonth(now.getMonth() - 3); endDate = new Date(now); }
-    else { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); endDate = new Date(now); }
-
-    await Promise.all([fetchProjects(), fetchBudgetRequests(), fetchDailyWork(), fetchTransactions()]);
-    let totalBudgetRequests = budgetRequests.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-    let totalProjectAmount = projectsData.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
     
-    // Transactions summary
-    let totalIncome = 0, totalExpense = 0;
-    for (let t of transactionsData) {
-        if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0;
-        if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0;
+    // ============================================================
+    // DETERMINE PERIOD
+    // ============================================================
+    let startDate, endDate;
+    const now = new Date();
+    if (period === 'daily') {
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+        endDate.setHours(23, 59, 59, 999);
+    } else if (period === 'weekly') {
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'monthly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else if (period === 'quarterly') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 3);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+    } else {
+        startDate = new Date(now);
+        startDate.setFullYear(now.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
     }
-    let netProfit = totalIncome - totalExpense;
 
-    let content = `${period.toUpperCase()} REPORT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGenerated: ${new Date().toLocaleString()}\nPeriod: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\nDepartment: Super Admin\n\n📊 PROJECT SUMMARY\nTotal Projects: ${projectsData.length}\nTotal Project Amount: ${formatMoney(totalProjectAmount)}\nPending: ${projectsData.filter(p=>p.status==='pending').length}\nIn Progress: ${projectsData.filter(p=>p.status==='in_progress').length}\nCompleted: ${projectsData.filter(p=>p.status==='completed').length}\n\n💰 BUDGET REQUESTS SUMMARY\nTotal Budget Requests: ${budgetRequests.length}\nTotal Amount Requested: ${formatMoney(totalBudgetRequests)}\nPending: ${budgetRequests.filter(r=>r.status==='pending').length}\nApproved: ${budgetRequests.filter(r=>r.status==='approved').length}\n\n💰 FINANCIAL SUMMARY (Transactions)\nTotal Income: ${formatMoney(totalIncome)}\nTotal Expenses: ${formatMoney(totalExpense)}\nNet Profit: ${formatMoney(netProfit)}\n\n📅 DAILY WORK SUMMARY\nTotal Daily Records: ${dailyworkData.length}\nTotal Budget: ${formatMoney(dailyworkData.reduce((sum, w) => sum + (parseFloat(w.budget)||0), 0))}\nTotal Expenses: ${formatMoney(dailyworkData.reduce((sum, w) => sum + (parseFloat(w.amount)||0), 0))}\n`;
-    let res = await apiCall('add_report.php', 'POST', { title, period, content, department_id: 1, status: 'draft', created_by: currentUserFullName });
-    if(res.success) { showToast(`✅ ${period} report generated and saved`); closeModal('generateReportModal'); await loadReports(); await loadDashboard(); }
-    else { showToast(res.message || 'Failed', true); }
+    showToast('🔄 Generating report...', false);
+
+    try {
+        // ============================================================
+        // FETCH ALL DATA - ORIGINAL TU (No Sent/Copy)
+        // ============================================================
+        await Promise.all([
+            fetchProjects(),
+            fetchBudgetRequests(),
+            fetchDailyWork(),
+            fetchTransactions(),
+            fetchEmployees(),
+            fetchReports(),
+            fetchUploadedReports()
+        ]);
+
+        // ============================================================
+        // FILTER TO GET ONLY ORIGINAL DATA (No Sent/Copy)
+        // ============================================================
+        
+        // 1. ORIGINAL PROJECTS ONLY (is_original = 1 OR source_type = 'original')
+        const originalProjects = projectsData.filter(function(p) {
+            return p.is_original == 1 || p.source_type === 'original' || 
+                   (p.department_id && !p.sent_from_dept);
+        });
+        
+        // 2. ORIGINAL DAILY WORK ONLY (is_original = 1 OR source_type = 'original')
+        const originalDailyWork = dailyworkData.filter(function(w) {
+            return w.is_original == 1 || w.source_type === 'original' || 
+                   (!w.sent_from_dept && !w.is_sent_copy);
+        });
+        
+        // 3. ORIGINAL REQUESTS ONLY (is_original = 1 OR source_type = 'original')
+        const originalRequests = budgetRequests.filter(function(r) {
+            return r.is_original == 1 || r.source_type === 'original' || 
+                   (!r.sent_from_department && !r.is_sent_copy);
+        });
+        
+        // 4. ORIGINAL TRANSACTIONS ONLY
+        const originalTransactions = transactionsData.filter(function(t) {
+            return t.is_original == 1 || t.source_type === 'original' || 
+                   (!t.sent_from_department && !t.is_sent_copy);
+        });
+        
+        // 5. ORIGINAL REPORTS ONLY
+        const originalReports = reportsData.filter(function(r) {
+            return r.is_original == 1 || r.source_type === 'original' || 
+                   (r.department_id && !r.sent_from_department);
+        });
+        
+        // 6. ORIGINAL UPLOADED REPORTS ONLY
+        const originalUploadedReports = uploadedReportsData.filter(function(r) {
+            return r.is_original == 1 || r.source_type === 'original' || 
+                   (!r.sent_from_department && !r.is_sent_copy);
+        });
+
+        console.log('📊 ORIGINAL DATA COUNTS:');
+        console.log('  Projects:', originalProjects.length, 'of', projectsData.length);
+        console.log('  Daily Work:', originalDailyWork.length, 'of', dailyworkData.length);
+        console.log('  Requests:', originalRequests.length, 'of', budgetRequests.length);
+        console.log('  Transactions:', originalTransactions.length, 'of', transactionsData.length);
+        console.log('  Reports:', originalReports.length, 'of', reportsData.length);
+        console.log('  Uploaded Reports:', originalUploadedReports.length, 'of', uploadedReportsData.length);
+
+        // ============================================================
+        // 1. OVERALL SUMMARY (All Departments Combined)
+        // ============================================================
+        
+        // Filter data by period
+        const projectsInPeriod = originalProjects.filter(function(p) {
+            const createdDate = new Date(p.created_at);
+            return createdDate >= startDate && createdDate <= endDate;
+        });
+        
+        const dailyWorkInPeriod = originalDailyWork.filter(function(w) {
+            const wDate = new Date(w.date);
+            return wDate >= startDate && wDate <= endDate;
+        });
+        
+        const requestsInPeriod = originalRequests.filter(function(r) {
+            const rDate = new Date(r.request_date || r.created_at);
+            return rDate >= startDate && rDate <= endDate;
+        });
+        
+        const transactionsInPeriod = originalTransactions.filter(function(t) {
+            const tDate = new Date(t.transaction_date || t.created_at);
+            return tDate >= startDate && tDate <= endDate;
+        });
+        
+        const reportsInPeriod = originalReports.filter(function(r) {
+            const rDate = new Date(r.created_at);
+            return rDate >= startDate && rDate <= endDate;
+        });
+        
+        const uploadedInPeriod = originalUploadedReports.filter(function(r) {
+            const rDate = new Date(r.created_at);
+            return rDate >= startDate && rDate <= endDate;
+        });
+
+        // Calculate overall totals
+        let totalBudget = 0, totalExpenses = 0, totalIncome = 0;
+        for (let w of dailyWorkInPeriod) {
+            totalBudget += parseFloat(w.budget) || 0;
+            totalExpenses += parseFloat(w.amount) || 0;
+            totalIncome += parseFloat(w.total_amount || w.income || 0);
+        }
+        const remainingBudget = totalBudget - totalExpenses;
+        
+        let totalRequestedAmount = 0, approvedAmount = 0, pendingAmount = 0, cancelledAmount = 0;
+        for (let r of requestsInPeriod) {
+            const amt = parseFloat(r.amount) || 0;
+            totalRequestedAmount += amt;
+            if (r.status === 'approved' || r.status === 'Approved') approvedAmount += amt;
+            else if (r.status === 'cancelled' || r.status === 'Cancelled') cancelledAmount += amt;
+            else pendingAmount += amt;
+        }
+        
+        let totalIncomeTrans = 0, totalExpenseTrans = 0;
+        for (let t of transactionsInPeriod) {
+            const amt = parseFloat(t.amount) || 0;
+            if (t.type === 'income') totalIncomeTrans += amt;
+            else totalExpenseTrans += amt;
+        }
+        const netProfitTrans = totalIncomeTrans - totalExpenseTrans;
+
+        // ============================================================
+        // 2. DEPARTMENT-WISE SUMMARY
+        // ============================================================
+        
+        // Get all departments (excluding Super Admin)
+        const deptIds = Object.keys(departmentNames).filter(function(id) {
+            return parseInt(id) !== 1;
+        }).map(function(id) { return parseInt(id); });
+        
+        // Build department-wise data
+        let deptData = [];
+        
+        for (let deptId of deptIds) {
+            const deptName = departmentNames[deptId] || 'Unknown';
+            
+            // Projects for this department
+            const deptProjects = originalProjects.filter(function(p) {
+                return parseInt(p.department_id) === deptId;
+            });
+            const deptProjectsInPeriod = deptProjects.filter(function(p) {
+                const createdDate = new Date(p.created_at);
+                return createdDate >= startDate && createdDate <= endDate;
+            });
+            
+            // Daily Work for this department
+            const deptDailyWork = originalDailyWork.filter(function(w) {
+                return parseInt(w.department_id) === deptId;
+            });
+            const deptDailyWorkInPeriod = deptDailyWork.filter(function(w) {
+                const wDate = new Date(w.date);
+                return wDate >= startDate && wDate <= endDate;
+            });
+            
+            // Budget for daily work
+            let deptBudget = 0, deptExpenses = 0, deptIncome = 0;
+            for (let w of deptDailyWorkInPeriod) {
+                deptBudget += parseFloat(w.budget) || 0;
+                deptExpenses += parseFloat(w.amount) || 0;
+                deptIncome += parseFloat(w.total_amount || w.income || 0);
+            }
+            const deptRemaining = deptBudget - deptExpenses;
+            
+            // Requests for this department
+            const deptRequests = originalRequests.filter(function(r) {
+                return parseInt(r.department_id) === deptId;
+            });
+            const deptRequestsInPeriod = deptRequests.filter(function(r) {
+                const rDate = new Date(r.request_date || r.created_at);
+                return rDate >= startDate && rDate <= endDate;
+            });
+            
+            let deptRequestedAmount = 0, deptApprovedAmount = 0, deptPendingAmount = 0, deptCancelledAmount = 0;
+            let deptIncomeReq = 0, deptExpenseReq = 0;
+            for (let r of deptRequestsInPeriod) {
+                const amt = parseFloat(r.amount) || 0;
+                deptRequestedAmount += amt;
+                if (r.type === 'income') deptIncomeReq += amt;
+                else deptExpenseReq += amt;
+                if (r.status === 'approved' || r.status === 'Approved') deptApprovedAmount += amt;
+                else if (r.status === 'cancelled' || r.status === 'Cancelled') deptCancelledAmount += amt;
+                else deptPendingAmount += amt;
+            }
+            
+            // Transactions for this department
+            const deptTransactions = originalTransactions.filter(function(t) {
+                return parseInt(t.department_id) === deptId;
+            });
+            const deptTransactionsInPeriod = deptTransactions.filter(function(t) {
+                const tDate = new Date(t.transaction_date || t.created_at);
+                return tDate >= startDate && tDate <= endDate;
+            });
+            
+            let deptIncomeTrans = 0, deptExpenseTrans = 0;
+            for (let t of deptTransactionsInPeriod) {
+                const amt = parseFloat(t.amount) || 0;
+                if (t.type === 'income') deptIncomeTrans += amt;
+                else deptExpenseTrans += amt;
+            }
+            const deptNetProfit = deptIncomeTrans - deptExpenseTrans;
+            
+            // Reports for this department
+            const deptReports = originalReports.filter(function(r) {
+                return parseInt(r.department_id) === deptId;
+            });
+            const deptReportsInPeriod = deptReports.filter(function(r) {
+                const rDate = new Date(r.created_at);
+                return rDate >= startDate && rDate <= endDate;
+            });
+            
+            // Uploaded Reports for this department
+            const deptUploaded = originalUploadedReports.filter(function(r) {
+                return parseInt(r.department_id) === deptId;
+            });
+            const deptUploadedInPeriod = deptUploaded.filter(function(r) {
+                const rDate = new Date(r.created_at);
+                return rDate >= startDate && rDate <= endDate;
+            });
+            
+            deptData.push({
+                id: deptId,
+                name: deptName,
+                projects: {
+                    total: deptProjects.length,
+                    inPeriod: deptProjectsInPeriod.length,
+                    pending: deptProjects.filter(function(p) { return p.status === 'pending'; }).length,
+                    inProgress: deptProjects.filter(function(p) { return p.status === 'in_progress'; }).length,
+                    completed: deptProjects.filter(function(p) { return p.status === 'completed'; }).length,
+                    approved: deptProjects.filter(function(p) { return p.status === 'approved'; }).length
+                },
+                dailyWork: {
+                    total: deptDailyWork.length,
+                    inPeriod: deptDailyWorkInPeriod.length,
+                    budget: deptBudget,
+                    expenses: deptExpenses,
+                    income: deptIncome,
+                    remaining: deptRemaining,
+                    completed: deptDailyWorkInPeriod.filter(function(w) { return w.status === 'completed' || w.status === 'Completed'; }).length,
+                    inProgress: deptDailyWorkInPeriod.filter(function(w) { return w.status === 'in_progress' || w.status === 'In Progress'; }).length,
+                    partial: deptDailyWorkInPeriod.filter(function(w) { return w.status === 'partial' || w.status === 'Partial'; }).length,
+                    pending: deptDailyWorkInPeriod.filter(function(w) { return w.status === 'pending' || w.status === 'Pending'; }).length
+                },
+                requests: {
+                    total: deptRequests.length,
+                    inPeriod: deptRequestsInPeriod.length,
+                    requestedAmount: deptRequestedAmount,
+                    approvedAmount: deptApprovedAmount,
+                    pendingAmount: deptPendingAmount,
+                    cancelledAmount: deptCancelledAmount,
+                    incomeReq: deptIncomeReq,
+                    expenseReq: deptExpenseReq,
+                    approvedCount: deptRequestsInPeriod.filter(function(r) { return r.status === 'approved' || r.status === 'Approved'; }).length,
+                    pendingCount: deptRequestsInPeriod.filter(function(r) { return r.status === 'pending' || r.status === 'Pending'; }).length,
+                    cancelledCount: deptRequestsInPeriod.filter(function(r) { return r.status === 'cancelled' || r.status === 'Cancelled'; }).length
+                },
+                transactions: {
+                    total: deptTransactions.length,
+                    inPeriod: deptTransactionsInPeriod.length,
+                    income: deptIncomeTrans,
+                    expenses: deptExpenseTrans,
+                    netProfit: deptNetProfit
+                },
+                reports: {
+                    total: deptReports.length,
+                    inPeriod: deptReportsInPeriod.length,
+                    uploaded: deptUploaded.length,
+                    uploadedInPeriod: deptUploadedInPeriod.length
+                }
+            });
+        }
+
+        // ============================================================
+        // BUILD REPORT CONTENT
+        // ============================================================
+        var content = '';
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║                 ' + period.toUpperCase() + ' REPORT                          ║\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n\n';
+        content += '📋 REPORT INFORMATION\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Generated by   : ' + currentUserFullName + '\n';
+        content += '  Generated on   : ' + new Date().toLocaleString() + '\n';
+        content += '  Department     : Super Admin (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '  Period         : ' + startDate.toLocaleDateString() + '  →  ' + endDate.toLocaleDateString() + '\n';
+        content += '  Data Source    : ORIGINAL DATA ONLY (No sent/copy records)\n\n';
+
+        // ============================================================
+        // OVERALL SUMMARY
+        // ============================================================
+        content += '📊 OVERALL SUMMARY (All Departments Combined)\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Projects in Period     : ' + projectsInPeriod.length + '\n';
+        content += '  📋 Daily Work Records     : ' + dailyWorkInPeriod.length + '\n';
+        content += '     ├── Total Budget       : ' + formatMoney(totalBudget) + '\n';
+        content += '     ├── Total Expenses     : ' + formatMoney(totalExpenses) + '\n';
+        content += '     └── Remaining          : ' + formatMoney(remainingBudget) + '  ' + (remainingBudget >= 0 ? '✅ Surplus' : '❌ Deficit') + '\n';
+        content += '  📋 Budget Requests        : ' + requestsInPeriod.length + '\n';
+        content += '     ├── Total Requested    : ' + formatMoney(totalRequestedAmount) + '\n';
+        content += '     ├── Approved           : ' + formatMoney(approvedAmount) + '\n';
+        content += '     ├── Pending            : ' + formatMoney(pendingAmount) + '\n';
+        content += '     └── Cancelled          : ' + formatMoney(cancelledAmount) + '\n';
+        content += '  📋 Transactions           : ' + transactionsInPeriod.length + '\n';
+        content += '     ├── Income             : ' + formatMoney(totalIncomeTrans) + '\n';
+        content += '     ├── Expenses           : ' + formatMoney(totalExpenseTrans) + '\n';
+        content += '     └── Net Profit/Loss    : ' + formatMoney(netProfitTrans) + '  ' + (netProfitTrans >= 0 ? '✅ Profit' : '❌ Loss') + '\n';
+        content += '  📋 Reports                : ' + (reportsInPeriod.length + uploadedInPeriod.length) + '\n\n';
+
+        // ============================================================
+        // DEPARTMENT-WISE DETAILS
+        // ============================================================
+        for (let dept of deptData) {
+            // Skip departments with no data in period
+            const hasData = dept.projects.inPeriod > 0 || dept.dailyWork.inPeriod > 0 || 
+                           dept.requests.inPeriod > 0 || dept.transactions.inPeriod > 0 ||
+                           dept.reports.inPeriod > 0 || dept.reports.uploadedInPeriod > 0;
+            
+            if (!hasData) continue;
+            
+            content += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+            content += '🏢 ' + dept.name.toUpperCase() + ' DEPARTMENT\n';
+            content += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+            
+            // Projects
+            if (dept.projects.total > 0 || dept.projects.inPeriod > 0) {
+                content += '\n  📋 PROJECTS:\n';
+                content += '     ├── Total Projects       : ' + dept.projects.total + '\n';
+                content += '     ├── Projects in Period   : ' + dept.projects.inPeriod + '\n';
+                content += '     ├── Pending              : ' + dept.projects.pending + '\n';
+                content += '     ├── In Progress          : ' + dept.projects.inProgress + '\n';
+                content += '     ├── Completed            : ' + dept.projects.completed + '\n';
+                content += '     └── Approved             : ' + dept.projects.approved + '\n';
+            }
+            
+            // Daily Work
+            if (dept.dailyWork.total > 0 || dept.dailyWork.inPeriod > 0) {
+                content += '\n  📊 DAILY WORK:\n';
+                content += '     ├── Total Records        : ' + dept.dailyWork.total + '\n';
+                content += '     ├── Records in Period    : ' + dept.dailyWork.inPeriod + '\n';
+                content += '     ├── Total Budget         : ' + formatMoney(dept.dailyWork.budget) + '\n';
+                content += '     ├── Total Expenses       : ' + formatMoney(dept.dailyWork.expenses) + '\n';
+                content += '     ├── Total Income         : ' + formatMoney(dept.dailyWork.income) + '\n';
+                content += '     └── Remaining Budget     : ' + formatMoney(dept.dailyWork.remaining) + '  ' + (dept.dailyWork.remaining >= 0 ? '✅' : '❌') + '\n';
+                
+                if (dept.dailyWork.inPeriod > 0) {
+                    content += '     Records by Status:\n';
+                    content += '        ├── Completed     : ' + dept.dailyWork.completed + '\n';
+                    content += '        ├── In Progress   : ' + dept.dailyWork.inProgress + '\n';
+                    content += '        ├── Partial       : ' + dept.dailyWork.partial + '\n';
+                    content += '        └── Pending       : ' + dept.dailyWork.pending + '\n';
+                }
+            }
+            
+            // Budget Requests
+            if (dept.requests.total > 0 || dept.requests.inPeriod > 0) {
+                content += '\n  💰 BUDGET REQUESTS:\n';
+                content += '     ├── Total Requests      : ' + dept.requests.total + '\n';
+                content += '     ├── Requests in Period  : ' + dept.requests.inPeriod + '\n';
+                content += '     ├── Total Requested     : ' + formatMoney(dept.requests.requestedAmount) + '\n';
+                content += '     ├── Income Requests     : ' + formatMoney(dept.requests.incomeReq) + '\n';
+                content += '     ├── Expense Requests    : ' + formatMoney(dept.requests.expenseReq) + '\n';
+                content += '     ├── Approved            : ' + formatMoney(dept.requests.approvedAmount) + '  (' + dept.requests.approvedCount + ' requests)\n';
+                content += '     ├── Pending             : ' + formatMoney(dept.requests.pendingAmount) + '  (' + dept.requests.pendingCount + ' requests)\n';
+                content += '     └── Cancelled           : ' + formatMoney(dept.requests.cancelledAmount) + '  (' + dept.requests.cancelledCount + ' requests)\n';
+            }
+            
+            // Transactions
+            if (dept.transactions.total > 0 || dept.transactions.inPeriod > 0) {
+                content += '\n  💳 TRANSACTIONS:\n';
+                content += '     ├── Total Transactions  : ' + dept.transactions.total + '\n';
+                content += '     ├── Transactions Period : ' + dept.transactions.inPeriod + '\n';
+                content += '     ├── Income              : ' + formatMoney(dept.transactions.income) + '\n';
+                content += '     ├── Expenses            : ' + formatMoney(dept.transactions.expenses) + '\n';
+                content += '     └── Net Profit/Loss     : ' + formatMoney(dept.transactions.netProfit) + '  ' + (dept.transactions.netProfit >= 0 ? '✅' : '❌') + '\n';
+            }
+            
+            // Reports
+            if (dept.reports.total > 0 || dept.reports.inPeriod > 0 || dept.reports.uploaded > 0) {
+                content += '\n  📊 REPORTS:\n';
+                content += '     ├── Added Reports       : ' + dept.reports.total + '\n';
+                content += '     ├── Added in Period     : ' + dept.reports.inPeriod + '\n';
+                content += '     ├── Uploaded Reports    : ' + dept.reports.uploaded + '\n';
+                content += '     └── Uploaded in Period  : ' + dept.reports.uploadedInPeriod + '\n';
+            }
+        }
+
+        // ============================================================
+        // FOOTER
+        // ============================================================
+        content += '\n\n╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║  END OF REPORT                                                  ║\n';
+        content += '║  Generated by: ' + currentUserFullName + '\n';
+        content += '║  Date: ' + new Date().toLocaleString() + '\n';
+        content += '║  Department: Super Admin (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '║  Data Source: ORIGINAL DATA ONLY (No sent/copy records)\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n';
+
+        // ============================================================
+        // SAVE REPORT
+        // ============================================================
+        var res = await apiCall('add_report.php', 'POST', {
+            title: title,
+            period: period,
+            content: content,
+            department_id: DEPARTMENT_ID,
+            status: 'draft',
+            created_by: currentUserFullName || 'Super Admin'
+        });
+
+        if (res && res.success) {
+            showToast('✅ ' + period + ' report generated and saved successfully!');
+            addLog('📊 Report generated: ' + title + ' (' + period + ')');
+            closeModal('generateReportModal');
+            await loadReports();
+            await loadDashboard();
+        } else {
+            showToast(res?.message || '❌ Failed to generate report', true);
+        }
+
+    } catch (e) {
+        console.error('❌ Generate report error:', e);
+        showToast('❌ Error generating report: ' + e.message, true);
+    }
 }
 
 // ============================================================

@@ -5836,7 +5836,7 @@ function openGenerateReportModal() {
 }
 
 // ============================================================
-// GENERATE AND SAVE REPORT - KAMILI
+// GENERATE AND SAVE REPORT - KAMILI (Aluminium & Iron Dashboard)
 // ============================================================
 async function generateAndSaveReport() { 
     const title = document.getElementById('genReportTitle').value.trim() || `Report ${new Date().toLocaleString()}`; 
@@ -5893,38 +5893,61 @@ async function generateAndSaveReport() {
         ]); 
         
         // ============================================================
-        // 1. PROJECTS SUMMARY - ALL PROJECTS (Aluminium + Iron)
+        // 1. ALUMINIUM PROJECTS SUMMARY
         // ============================================================
-        const allProjects = [...aluminiumProjects, ...ironProjects];
-        const totalProjects = allProjects.length;
+        const aluActive = aluminiumProjects.filter(p => p.is_deleted !== 1);
+        const aluTotal = aluActive.length;
         
-        // Filter projects created in period
-        const projectsInPeriod = allProjects.filter(p => {
+        // Aluminium projects in period
+        const aluInPeriod = aluActive.filter(p => {
             const createdDate = new Date(p.created_at);
             return createdDate >= startDate && createdDate <= endDate;
         });
         
-        // Project status counts (ALL projects)
-        const pendingCount = allProjects.filter(p => p.status === 'pending').length;
-        const inProgressCount = allProjects.filter(p => p.status === 'in_progress').length;
-        const completedCount = allProjects.filter(p => p.status === 'completed').length;
-        const approvedCount = allProjects.filter(p => p.status === 'approved').length;
+        // Aluminium by status (All Time)
+        const aluPending = aluActive.filter(p => p.status === 'pending').length;
+        const aluInProgress = aluActive.filter(p => p.status === 'in_progress').length;
+        const aluCompleted = aluActive.filter(p => p.status === 'completed').length;
+        const aluApproved = aluActive.filter(p => p.status === 'approved').length;
         
-        // Projects by type
-        const aluminiumCount = aluminiumProjects.length;
-        const ironCount = ironProjects.length;
+        // Aluminium in period by status
+        const aluPendingInPeriod = aluInPeriod.filter(p => p.status === 'pending').length;
+        const aluInProgressInPeriod = aluInPeriod.filter(p => p.status === 'in_progress').length;
+        const aluCompletedInPeriod = aluInPeriod.filter(p => p.status === 'completed').length;
+        const aluApprovedInPeriod = aluInPeriod.filter(p => p.status === 'approved').length;
         
-        // Projects in period by status
-        const pendingInPeriod = projectsInPeriod.filter(p => p.status === 'pending').length;
-        const inProgressInPeriod = projectsInPeriod.filter(p => p.status === 'in_progress').length;
-        const completedInPeriod = projectsInPeriod.filter(p => p.status === 'completed').length;
-        const approvedInPeriod = projectsInPeriod.filter(p => p.status === 'approved').length;
-        
-        // Total amount of all projects
-        const totalProjectAmount = allProjects.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        // Total aluminium amount
+        const aluTotalAmount = aluActive.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
         
         // ============================================================
-        // 2. DAILY WORK SUMMARY - Filter by period
+        // 2. IRON PROJECTS SUMMARY
+        // ============================================================
+        const ironActive = ironProjects.filter(p => p.is_deleted !== 1);
+        const ironTotal = ironActive.length;
+        
+        // Iron projects in period
+        const ironInPeriod = ironActive.filter(p => {
+            const createdDate = new Date(p.created_at);
+            return createdDate >= startDate && createdDate <= endDate;
+        });
+        
+        // Iron by status (All Time)
+        const ironPending = ironActive.filter(p => p.status === 'pending').length;
+        const ironInProgress = ironActive.filter(p => p.status === 'in_progress').length;
+        const ironCompleted = ironActive.filter(p => p.status === 'completed').length;
+        const ironApproved = ironActive.filter(p => p.status === 'approved').length;
+        
+        // Iron in period by status
+        const ironPendingInPeriod = ironInPeriod.filter(p => p.status === 'pending').length;
+        const ironInProgressInPeriod = ironInPeriod.filter(p => p.status === 'in_progress').length;
+        const ironCompletedInPeriod = ironInPeriod.filter(p => p.status === 'completed').length;
+        const ironApprovedInPeriod = ironInPeriod.filter(p => p.status === 'approved').length;
+        
+        // Total iron amount
+        const ironTotalAmount = ironActive.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        
+        // ============================================================
+        // 3. DAILY WORK SUMMARY - Filter by period
         // ============================================================
         const dailyWorkInPeriod = dailyworkData.filter(w => {
             const wDate = new Date(w.date);
@@ -5953,7 +5976,7 @@ async function generateAndSaveReport() {
         const partialDailyWork = dailyWorkInPeriod.filter(w => w.status === 'partial' || w.status === 'Partial').length;
         
         // ============================================================
-        // 3. REQUESTS SUMMARY - Filter by period
+        // 4. REQUESTS SUMMARY - Filter by period
         // ============================================================
         const requestsInPeriod = requestsData.filter(r => {
             const rDate = new Date(r.request_date || r.created_at);
@@ -6001,93 +6024,125 @@ async function generateAndSaveReport() {
         // ============================================================
         // BUILD REPORT CONTENT
         // ============================================================
-        let content = `${periodType.toUpperCase()} REPORT\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Generated by: ${CURRENT_USER}\n`;
-        content += `Generated: ${new Date().toLocaleString()}\n`;
-        content += `Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\n`;
-        content += `Department: Aluminium & Iron (ID: ${DEPARTMENT_ID})\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        let content = '';
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║                 ' + periodType.toUpperCase() + ' REPORT                          ║\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n\n';
+        content += '📋 REPORT INFORMATION\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Generated by   : ' + CURRENT_USER + '\n';
+        content += '  Generated on   : ' + new Date().toLocaleString() + '\n';
+        content += '  Department     : Aluminium & Iron (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '  Period         : ' + startDate.toLocaleDateString() + '  →  ' + endDate.toLocaleDateString() + '\n\n';
         
         // ============================================================
-        // PROJECTS SUMMARY
+        // ALUMINIUM PROJECTS SUMMARY
         // ============================================================
-        content += `📋 PROJECTS SUMMARY\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Total Projects (All Time): ${totalProjects}\n`;
-        content += `  ├── Aluminium Projects: ${aluminiumCount}\n`;
-        content += `  └── Iron Projects: ${ironCount}\n`;
-        content += `\n`;
-        content += `Projects in Period (${periodType}): ${projectsInPeriod.length}\n`;
-        content += `  ├── Pending: ${pendingInPeriod}\n`;
-        content += `  ├── In Progress: ${inProgressInPeriod}\n`;
-        content += `  ├── Completed: ${completedInPeriod}\n`;
-        content += `  └── Approved: ${approvedInPeriod}\n`;
-        content += `\n`;
-        content += `Projects by Status (All Time):\n`;
-        content += `  ├── Pending: ${pendingCount}\n`;
-        content += `  ├── In Progress: ${inProgressCount}\n`;
-        content += `  ├── Completed: ${completedCount}\n`;
-        content += `  └── Approved: ${approvedCount}\n`;
-        content += `\n`;
-        content += `Total Project Amount (All Time): ${formatMoney(totalProjectAmount)}\n`;
-        content += `\n`;
+        content += '🔶 ALUMINIUM PROJECTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Aluminium Projects (All Time)  : ' + aluTotal + '\n\n';
+        
+        content += '  📈 Aluminium Projects in Period (' + periodType + ')   : ' + aluInPeriod.length + '\n';
+        content += '     ├── Pending                 : ' + aluPendingInPeriod + '\n';
+        content += '     ├── In Progress             : ' + aluInProgressInPeriod + '\n';
+        content += '     ├── Completed               : ' + aluCompletedInPeriod + '\n';
+        content += '     └── Approved                : ' + aluApprovedInPeriod + '\n\n';
+        
+        content += '  📊 Aluminium by Status (All Time):\n';
+        content += '     ├── Pending                 : ' + aluPending + '\n';
+        content += '     ├── In Progress             : ' + aluInProgress + '\n';
+        content += '     ├── Completed               : ' + aluCompleted + '\n';
+        content += '     └── Approved                : ' + aluApproved + '\n\n';
+        
+        content += '  💰 Total Aluminium Amount (All Time): ' + formatMoney(aluTotalAmount) + '\n\n';
+        
+        // ============================================================
+        // IRON PROJECTS SUMMARY
+        // ============================================================
+        content += '🔩 IRON PROJECTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Iron Projects (All Time)  : ' + ironTotal + '\n\n';
+        
+        content += '  📈 Iron Projects in Period (' + periodType + ')   : ' + ironInPeriod.length + '\n';
+        content += '     ├── Pending                 : ' + ironPendingInPeriod + '\n';
+        content += '     ├── In Progress             : ' + ironInProgressInPeriod + '\n';
+        content += '     ├── Completed               : ' + ironCompletedInPeriod + '\n';
+        content += '     └── Approved                : ' + ironApprovedInPeriod + '\n\n';
+        
+        content += '  📊 Iron by Status (All Time):\n';
+        content += '     ├── Pending                 : ' + ironPending + '\n';
+        content += '     ├── In Progress             : ' + ironInProgress + '\n';
+        content += '     ├── Completed               : ' + ironCompleted + '\n';
+        content += '     └── Approved                : ' + ironApproved + '\n\n';
+        
+        content += '  💰 Total Iron Amount (All Time): ' + formatMoney(ironTotalAmount) + '\n\n';
+        
+        // ============================================================
+        // COMBINED PROJECTS SUMMARY
+        // ============================================================
+        const totalProjects = aluTotal + ironTotal;
+        const totalAmount = aluTotalAmount + ironTotalAmount;
+        const totalInPeriod = aluInPeriod.length + ironInPeriod.length;
+        
+        content += '📋 COMBINED PROJECTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Projects (All Time)  : ' + totalProjects + '\n';
+        content += '  💰 Total Amount (All Time)    : ' + formatMoney(totalAmount) + '\n';
+        content += '  📈 Projects in Period         : ' + totalInPeriod + '\n\n';
         
         // ============================================================
         // DAILY WORK SUMMARY
         // ============================================================
-        content += `📊 DAILY WORK SUMMARY (${periodType})\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Total Records in Period: ${dailyWorkInPeriod.length}\n`;
-        content += `\n`;
-        content += `💰 FINANCIAL TOTALS:\n`;
-        content += `  ├── Total Budget Allocated: ${formatMoney(totalBudget)}\n`;
-        content += `  ├── Total Expenses: ${formatMoney(totalExpenses)}\n`;
-        content += `  └── Remaining Budget: ${formatMoney(remainingBudget)} (${remainingBudget >= 0 ? '✅ Surplus' : '❌ Deficit'})\n`;
-        content += `\n`;
-        content += `📦 PRODUCTION TOTALS:\n`;
-        content += `  ├── Total Quantity Produced: ${totalQuantity.toLocaleString()} units\n`;
-        content += `  └── Total Income Generated: ${formatMoney(totalIncome)}\n`;
-        content += `\n`;
-        content += `📌 Records by Status:\n`;
-        content += `  ├── Completed: ${completedDailyWork}\n`;
-        content += `  ├── In Progress: ${inProgressDailyWork}\n`;
-        content += `  ├── Partial: ${partialDailyWork}\n`;
-        content += `  └── Pending: ${pendingDailyWork}\n`;
-        content += `\n`;
+        content += '📊 DAILY WORK SUMMARY (' + periodType + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Records in Period     : ' + dailyWorkInPeriod.length + '\n\n';
+        
+        content += '  💰 FINANCIAL TOTALS:\n';
+        content += '     ├── Total Budget Allocated  : ' + formatMoney(totalBudget) + '\n';
+        content += '     ├── Total Expenses          : ' + formatMoney(totalExpenses) + '\n';
+        content += '     └── Remaining Budget        : ' + formatMoney(remainingBudget) + '  ' + (remainingBudget >= 0 ? '✅ Surplus' : '❌ Deficit') + '\n\n';
+        
+        content += '  📦 PRODUCTION TOTALS:\n';
+        content += '     ├── Total Income Generated  : ' + formatMoney(totalIncome) + '\n';
+        content += '     └── Total Quantity Produced : ' + totalQuantity.toLocaleString() + ' units\n\n';
+        
+        content += '  📌 Records by Status:\n';
+        content += '     ├── Completed               : ' + completedDailyWork + '\n';
+        content += '     ├── In Progress             : ' + inProgressDailyWork + '\n';
+        content += '     ├── Partial                 : ' + partialDailyWork + '\n';
+        content += '     └── Pending                 : ' + pendingDailyWork + '\n\n';
         
         // ============================================================
         // REQUESTS SUMMARY
         // ============================================================
-        content += `💰 REQUESTS SUMMARY (${periodType})\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Total Requests in Period: ${totalRequests}\n`;
-        content += `\n`;
-        content += `📊 REQUESTS BY TYPE:\n`;
-        content += `  ├── Income Requests: ${incomeCountRequests}\n`;
-        content += `  └── Expense Requests: ${expenseCountRequests}\n`;
-        content += `\n`;
-        content += `💰 AMOUNTS BY TYPE:\n`;
-        content += `  ├── Total Income Requested: ${formatMoney(incomeRequestAmount)}\n`;
-        content += `  ├── Total Expenses Requested: ${formatMoney(expenseRequestAmount)}\n`;
-        content += `  └── Net Profit/Loss: ${formatMoney(netProfit)} (${netProfit >= 0 ? '✅ Profit' : '❌ Loss'})\n`;
-        content += `\n`;
-        content += `📋 REQUESTS BY STATUS:\n`;
-        content += `  ├── Total Requested Amount: ${formatMoney(totalRequestedAmount)}\n`;
-        content += `  ├── Approved Amount: ${formatMoney(approvedRequestAmount)} (${approvedCountRequests} requests)\n`;
-        content += `  ├── Pending Amount: ${formatMoney(pendingRequestAmount)} (${pendingCountRequests} requests)\n`;
-        content += `  └── Cancelled Amount: ${formatMoney(cancelledRequestAmount)} (${cancelledCountRequests} requests)\n`;
-        content += `\n`;
+        content += '💰 REQUESTS SUMMARY (' + periodType + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Requests in Period    : ' + totalRequests + '\n\n';
+        
+        content += '  📊 REQUESTS BY TYPE:\n';
+        content += '     ├── Income Requests         : ' + incomeCountRequests + '\n';
+        content += '     └── Expense Requests        : ' + expenseCountRequests + '\n\n';
+        
+        content += '  💰 AMOUNTS BY TYPE:\n';
+        content += '     ├── Total Income Requested  : ' + formatMoney(incomeRequestAmount) + '\n';
+        content += '     ├── Total Expenses Requested: ' + formatMoney(expenseRequestAmount) + '\n';
+        content += '     └── Net Profit/Loss         : ' + formatMoney(netProfit) + '  ' + (netProfit >= 0 ? '✅ Profit' : '❌ Loss') + '\n\n';
+        
+        content += '  📋 REQUESTS BY STATUS:\n';
+        content += '     ├── Total Requested Amount  : ' + formatMoney(totalRequestedAmount) + '\n';
+        content += '     ├── Approved Amount         : ' + formatMoney(approvedRequestAmount) + '  (' + approvedCountRequests + ' requests)\n';
+        content += '     ├── Pending Amount          : ' + formatMoney(pendingRequestAmount) + '  (' + pendingCountRequests + ' requests)\n';
+        content += '     └── Cancelled Amount        : ' + formatMoney(cancelledRequestAmount) + '  (' + cancelledCountRequests + ' requests)\n\n';
         
         // ============================================================
         // FOOTER
         // ============================================================
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `📋 Report generated by: ${CURRENT_USER}\n`;
-        content += `📅 Date: ${new Date().toLocaleString()}\n`;
-        content += `🏢 Department: Aluminium & Iron (ID: ${DEPARTMENT_ID})\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `End of Report`;
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║  END OF REPORT                                                  ║\n';
+        content += '║  Generated by: ' + CURRENT_USER + '\n';
+        content += '║  Date: ' + new Date().toLocaleString() + '\n';
+        content += '║  Department: Aluminium & Iron (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n';
         
         // ============================================================
         // SAVE REPORT
@@ -6114,6 +6169,7 @@ async function generateAndSaveReport() {
         showToast('Error generating report: ' + e.message, true); 
     } 
 }
+
 function exportAllUploadedReportsToExcel() { 
     if (uploadedReportsData.length === 0) { showToast('No reports to export', true); return; } 
     let ws = [['Title', 'File Name', 'Description', 'Period', 'Uploaded By', 'Uploaded At', 'File Size']]; 

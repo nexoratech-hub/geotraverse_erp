@@ -5126,7 +5126,7 @@ async function fetchDailyWork() {
 }
 
 // ============================================================
-// GENERATE AND SAVE REPORT - WITH REQUESTED AMOUNTS SUMMARIES
+// GENERATE AND SAVE REPORT - KAMILI (Finance Dashboard)
 // ============================================================
 
 async function generateAndSaveReport() { 
@@ -5176,65 +5176,90 @@ async function generateAndSaveReport() {
     
     try {
         // ============================================================
-        // FETCH DATA
+        // FETCH ALL DATA
         // ============================================================
         await Promise.all([
-            loadAllTransactions(), 
+            loadAllTransactionsForDashboard(), 
             fetchBudgetRequests(), 
             fetchReports(),
             fetchDailyWork()
         ]); 
         
         // ============================================================
-        // CALCULATE TRANSACTIONS TOTALS
+        // 1. TRANSACTIONS TOTALS (All Time)
         // ============================================================
-        let filtered = myTransactions.filter(t => { 
-            let td = new Date(t.transaction_date); 
+        let allIncome = 0, allExpense = 0, allPaid = 0, allPending = 0;
+        let allIncomeCount = 0, allExpenseCount = 0;
+        let paidCount = 0, pendingCountTrans = 0, partialCount = 0;
+        
+        for (let t of allTransactionsData) {
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = amount - paid;
+            
+            if (t.type === 'income') {
+                allIncome += paid;
+                allIncomeCount++;
+            } else {
+                allExpense += paid;
+                allExpenseCount++;
+            }
+            allPaid += paid;
+            allPending += pending;
+            
+            if (t.status === 'paid') paidCount++;
+            else if (t.status === 'partial') partialCount++;
+            else if (t.status === 'pending') pendingCountTrans++;
+        }
+        let allNetProfit = allIncome - allExpense;
+        let allTotalAmount = allIncome + allExpense;
+        
+        // ============================================================
+        // 2. TRANSACTIONS IN PERIOD
+        // ============================================================
+        const periodTransactions = allTransactionsData.filter(function(t) {
+            const td = new Date(t.transaction_date);
             return td >= startDate && td <= endDate;
         });
         
-        let totalIncome = 0, totalExpense = 0; 
-        filtered.forEach(t => {
-            if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; 
-            if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0;
-        });
+        let periodIncome = 0, periodExpense = 0, periodPaid = 0, periodPending = 0;
+        let periodIncomeCount = 0, periodExpenseCount = 0;
+        
+        for (let t of periodTransactions) {
+            let amount = parseFloat(t.amount) || 0;
+            let paid = parseFloat(t.paid_amount) || 0;
+            let pending = amount - paid;
+            
+            if (t.type === 'income') {
+                periodIncome += paid;
+                periodIncomeCount++;
+            } else {
+                periodExpense += paid;
+                periodExpenseCount++;
+            }
+            periodPaid += paid;
+            periodPending += pending;
+        }
+        let periodNetProfit = periodIncome - periodExpense;
+        let periodTotalAmount = periodIncome + periodExpense;
         
         // ============================================================
-        // CALCULATE BUDGET REQUESTS - REQUESTED AMOUNTS SUMMARIES
+        // 3. BUDGET REQUESTS - REQUESTED AMOUNTS (All Time)
         // ============================================================
-        // All requests
-        let allRequests = requestsData.filter(r => r.is_deleted !== 1);
+        let allRequests = requestsData.filter(function(r) { return r.is_deleted !== 1; });
         let totalRequests = allRequests.length;
         let totalRequestedAmount = 0;
         
-        // Requests by status
-        let pendingRequests = 0;
-        let pendingAmount = 0;
-        let approvedRequests = 0;
-        let approvedAmount = 0;
-        let cancelledRequests = 0;
-        let cancelledAmount = 0;
+        let pendingRequests = 0, pendingAmount = 0;
+        let approvedRequests = 0, approvedAmount = 0;
+        let cancelledRequests = 0, cancelledAmount = 0;
+        let incomeRequests = 0, incomeAmount = 0;
+        let expenseRequests = 0, expenseAmount = 0;
         
-        // Requests by type (Income vs Expense)
-        let incomeRequests = 0;
-        let incomeAmount = 0;
-        let expenseRequests = 0;
-        let expenseAmount = 0;
-        
-        // Filter requests by period
-        let periodRequests = requestsData.filter(r => {
-            let rd = new Date(r.request_date || r.created_at);
-            return rd >= startDate && rd <= endDate;
-        });
-        let periodTotalRequests = periodRequests.length;
-        let periodTotalAmount = 0;
-        
-        // Calculate all totals
-        allRequests.forEach(r => {
+        for (let r of allRequests) {
             let amount = parseFloat(r.amount) || 0;
             totalRequestedAmount += amount;
             
-            // By status
             if (r.status === 'pending' || r.status === 'Pending') {
                 pendingRequests++;
                 pendingAmount += amount;
@@ -5246,7 +5271,6 @@ async function generateAndSaveReport() {
                 cancelledAmount += amount;
             }
             
-            // By type
             if (r.type === 'income') {
                 incomeRequests++;
                 incomeAmount += amount;
@@ -5254,132 +5278,191 @@ async function generateAndSaveReport() {
                 expenseRequests++;
                 expenseAmount += amount;
             }
-        });
+        }
         
-        // Calculate period totals
-        periodRequests.forEach(r => {
-            periodTotalAmount += parseFloat(r.amount) || 0;
-        });
-        
-        // Calculate percentages
         let pendingPercent = totalRequests > 0 ? ((pendingRequests / totalRequests) * 100).toFixed(1) : 0;
         let approvedPercent = totalRequests > 0 ? ((approvedRequests / totalRequests) * 100).toFixed(1) : 0;
         let cancelledPercent = totalRequests > 0 ? ((cancelledRequests / totalRequests) * 100).toFixed(1) : 0;
         
-        // Daily work totals
-        let totalDailyBudget = 0, totalDailyExpenses = 0;
-        let filteredDailyWork = dailyworkData.filter(w => {
-            let wd = new Date(w.date);
+        // ============================================================
+        // 4. BUDGET REQUESTS IN PERIOD
+        // ============================================================
+        const periodRequests = allRequests.filter(function(r) {
+            const rd = new Date(r.request_date || r.created_at);
+            return rd >= startDate && rd <= endDate;
+        });
+        let periodRequestCount = periodRequests.length;
+        let periodRequestAmount = 0;
+        let periodApprovedAmount = 0, periodPendingAmount = 0, periodCancelledAmount = 0;
+        
+        for (let r of periodRequests) {
+            let amount = parseFloat(r.amount) || 0;
+            periodRequestAmount += amount;
+            
+            if (r.status === 'approved' || r.status === 'Approved') {
+                periodApprovedAmount += amount;
+            } else if (r.status === 'pending' || r.status === 'Pending') {
+                periodPendingAmount += amount;
+            } else if (r.status === 'cancelled' || r.status === 'Cancelled') {
+                periodCancelledAmount += amount;
+            }
+        }
+        
+        // ============================================================
+        // 5. REPORTS SUMMARY
+        // ============================================================
+        let totalAddedReports = reportsData.length;
+        let totalUploadedReports = uploadedReportsData.length;
+        let totalAllReports = totalAddedReports + totalUploadedReports;
+        
+        let sentReports = reportsData.filter(function(r) { return r.status === 'sent'; }).length;
+        let draftReports = reportsData.filter(function(r) { return r.status === 'draft' || r.status === 'pending'; }).length;
+        
+        // ============================================================
+        // 6. DAILY WORK SUMMARY
+        // ============================================================
+        const dailyWorkInPeriod = dailyworkData.filter(function(w) {
+            const wd = new Date(w.date);
             return wd >= startDate && wd <= endDate;
         });
-        filteredDailyWork.forEach(w => {
+        
+        let totalDailyBudget = 0, totalDailyExpenses = 0, totalDailyIncome = 0;
+        let dailyCompleted = 0, dailyInProgress = 0, dailyPending = 0;
+        
+        for (let w of dailyWorkInPeriod) {
             totalDailyBudget += parseFloat(w.budget) || 0;
             totalDailyExpenses += parseFloat(w.amount) || 0;
-        });
+            totalDailyIncome += parseFloat(w.total_amount || w.income || 0);
+            
+            if (w.status === 'completed' || w.status === 'Completed') dailyCompleted++;
+            else if (w.status === 'in_progress' || w.status === 'In Progress') dailyInProgress++;
+            else if (w.status === 'pending' || w.status === 'Pending') dailyPending++;
+        }
+        let dailyRemaining = totalDailyBudget - totalDailyExpenses;
         
         // ============================================================
-        // BUILD REPORT CONTENT
+        // 7. BUILD REPORT CONTENT
         // ============================================================
-        let content = `${period.toUpperCase()} REPORT - FINANCE DEPARTMENT\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Generated by: ${CURRENT_USER}\n`;
-        content += `Generated on: ${new Date().toLocaleString()}\n`;
-        content += `Period: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}\n`;
-        content += `Department: Finance (ID: ${DEPARTMENT_ID})\n\n`;
+        let content = '';
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║                 ' + period.toUpperCase() + ' REPORT                          ║\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n\n';
+        content += '📋 REPORT INFORMATION\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Generated by   : ' + CURRENT_USER + '\n';
+        content += '  Generated on   : ' + new Date().toLocaleString() + '\n';
+        content += '  Department     : Finance (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '  Period         : ' + startDate.toLocaleDateString() + '  →  ' + endDate.toLocaleDateString() + '\n\n';
         
         // ============================================================
-        // FINANCIAL SUMMARY
+        // FINANCIAL SUMMARY - All Time
         // ============================================================
-        content += `📈 FINANCIAL SUMMARY\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Total Income (Period): ${formatMoney(totalIncome)}\n`;
-        content += `Total Expenses (Period): ${formatMoney(totalExpense)}\n`;
-        content += `Net Profit (Period): ${formatMoney(totalIncome - totalExpense)}\n\n`;
+        content += '💰 FINANCIAL SUMMARY (All Time)\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Transactions       : ' + allTransactionsData.length + '\n';
+        content += '     ├── Income               : ' + allIncomeCount + ' transactions (TZS ' + formatMoney(allIncome) + ')\n';
+        content += '     ├── Expenses             : ' + allExpenseCount + ' transactions (TZS ' + formatMoney(allExpense) + ')\n';
+        content += '     └── Net Profit           : TZS ' + formatMoney(allNetProfit) + '  ' + (allNetProfit >= 0 ? '✅ Profit' : '❌ Loss') + '\n';
+        content += '  💳 Total Paid              : TZS ' + formatMoney(allPaid) + '\n';
+        content += '  ⏳ Total Pending            : TZS ' + formatMoney(allPending) + '\n\n';
         
         // ============================================================
-        // BUDGET REQUESTS SUMMARY - REQUESTED AMOUNTS
+        // FINANCIAL SUMMARY - Period
         // ============================================================
-        content += `📋 BUDGET REQUESTS SUMMARY\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `📊 REQUESTED AMOUNTS (ALL REQUESTS)\n`;
-        content += `───────────────────────────────────────────────────────────────\n`;
-        content += `Total Requests: ${totalRequests}\n`;
-        content += `Total Requested Amount: ${formatMoney(totalRequestedAmount)}\n\n`;
-        
-        // By Status
-        content += `📌 BY STATUS:\n`;
-        content += `  ✅ Approved: ${approvedRequests} requests (${approvedPercent}%)\n`;
-        content += `     Approved Amount: ${formatMoney(approvedAmount)}\n`;
-        content += `  ⏳ Pending: ${pendingRequests} requests (${pendingPercent}%)\n`;
-        content += `     Pending Amount: ${formatMoney(pendingAmount)}\n`;
-        content += `  ❌ Cancelled: ${cancelledRequests} requests (${cancelledPercent}%)\n`;
-        content += `     Cancelled Amount: ${formatMoney(cancelledAmount)}\n\n`;
-        
-        // By Type
-        content += `📌 BY TYPE:\n`;
-        content += `  💰 Income Requests: ${incomeRequests} requests\n`;
-        content += `     Income Amount: ${formatMoney(incomeAmount)}\n`;
-        content += `  💸 Expense Requests: ${expenseRequests} requests\n`;
-        content += `     Expense Amount: ${formatMoney(expenseAmount)}\n\n`;
-        
-        // Period Requests
-        content += `📌 REQUESTS IN THIS PERIOD:\n`;
-        content += `  Total Requests (${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}): ${periodTotalRequests}\n`;
-        content += `  Total Amount in Period: ${formatMoney(periodTotalAmount)}\n\n`;
+        content += '📈 FINANCIAL SUMMARY (' + period + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Period Transactions     : ' + periodTransactions.length + '\n';
+        content += '     ├── Income               : ' + periodIncomeCount + ' transactions (TZS ' + formatMoney(periodIncome) + ')\n';
+        content += '     ├── Expenses             : ' + periodExpenseCount + ' transactions (TZS ' + formatMoney(periodExpense) + ')\n';
+        content += '     ├── Net Profit           : TZS ' + formatMoney(periodNetProfit) + '  ' + (periodNetProfit >= 0 ? '✅ Profit' : '❌ Loss') + '\n';
+        content += '     ├── Total Paid           : TZS ' + formatMoney(periodPaid) + '\n';
+        content += '     └── Total Pending        : TZS ' + formatMoney(periodPending) + '\n\n';
         
         // ============================================================
-        // TRANSACTIONS SUMMARY
+        // BUDGET REQUESTS SUMMARY - All Time
         // ============================================================
-        content += `📋 TRANSACTIONS SUMMARY\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Total Transactions (All Time): ${myTransactions.length}\n`;
-        content += `Income Transactions: ${myTransactions.filter(t => t.type === 'income').length}\n`;
-        content += `Expense Transactions: ${myTransactions.filter(t => t.type === 'expense').length}\n\n`;
+        content += '📋 BUDGET REQUESTS SUMMARY (All Time)\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Requests          : ' + totalRequests + '\n';
+        content += '  💰 Total Requested Amount  : TZS ' + formatMoney(totalRequestedAmount) + '\n\n';
+        content += '  📌 BY STATUS:\n';
+        content += '     ├── Approved             : ' + approvedRequests + ' requests (' + approvedPercent + '%)\n';
+        content += '     │   Amount               : TZS ' + formatMoney(approvedAmount) + '\n';
+        content += '     ├── Pending              : ' + pendingRequests + ' requests (' + pendingPercent + '%)\n';
+        content += '     │   Amount               : TZS ' + formatMoney(pendingAmount) + '\n';
+        content += '     └── Cancelled            : ' + cancelledRequests + ' requests (' + cancelledPercent + '%)\n';
+        content += '         Amount               : TZS ' + formatMoney(cancelledAmount) + '\n\n';
+        
+        // ============================================================
+        // BUDGET REQUESTS BY TYPE
+        // ============================================================
+        content += '  📌 BY TYPE:\n';
+        content += '     ├── Income Requests      : ' + incomeRequests + ' requests\n';
+        content += '     │   Amount               : TZS ' + formatMoney(incomeAmount) + '\n';
+        content += '     └── Expense Requests     : ' + expenseRequests + ' requests\n';
+        content += '         Amount               : TZS ' + formatMoney(expenseAmount) + '\n\n';
+        
+        // ============================================================
+        // BUDGET REQUESTS IN PERIOD
+        // ============================================================
+        content += '📋 REQUESTS IN PERIOD (' + period + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📊 Total Requests in Period: ' + periodRequestCount + '\n';
+        content += '  💰 Total Requested Amount  : TZS ' + formatMoney(periodRequestAmount) + '\n';
+        content += '     ├── Approved             : TZS ' + formatMoney(periodApprovedAmount) + '\n';
+        content += '     ├── Pending              : TZS ' + formatMoney(periodPendingAmount) + '\n';
+        content += '     └── Cancelled            : TZS ' + formatMoney(periodCancelledAmount) + '\n\n';
+        
+        // ============================================================
+        // REQUESTS SUMMARY TABLE
+        // ============================================================
+        content += '📊 REQUESTED AMOUNTS SUMMARY TABLE\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  Status           | Count | Amount (TZS)     | Percentage\n';
+        content += '  ───────────────────────────────────────────────────────────────\n';
+        content += '  Approved         | ' + String(approvedRequests).padStart(4) + ' | ' + String(formatMoney(approvedAmount)).padStart(14) + ' | ' + String(approvedPercent).padStart(6) + '%\n';
+        content += '  Pending          | ' + String(pendingRequests).padStart(4) + ' | ' + String(formatMoney(pendingAmount)).padStart(14) + ' | ' + String(pendingPercent).padStart(6) + '%\n';
+        content += '  Cancelled        | ' + String(cancelledRequests).padStart(4) + ' | ' + String(formatMoney(cancelledAmount)).padStart(14) + ' | ' + String(cancelledPercent).padStart(6) + '%\n';
+        content += '  ───────────────────────────────────────────────────────────────\n';
+        content += '  TOTAL            | ' + String(totalRequests).padStart(4) + ' | ' + String(formatMoney(totalRequestedAmount)).padStart(14) + ' | 100.0%\n\n';
+        
+        // ============================================================
+        // REPORTS SUMMARY
+        // ============================================================
+        content += '📊 REPORTS SUMMARY\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Reports (All)     : ' + totalAllReports + '\n';
+        content += '     ├── Added Reports        : ' + totalAddedReports + '\n';
+        content += '     ├── Uploaded Reports     : ' + totalUploadedReports + '\n';
+        content += '     ├── Sent Reports         : ' + sentReports + '\n';
+        content += '     └── Draft Reports        : ' + draftReports + '\n\n';
         
         // ============================================================
         // DAILY WORK SUMMARY
         // ============================================================
-        content += `📅 DAILY WORK SUMMARY\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Records in period: ${filteredDailyWork.length}\n`;
-        content += `Total Budget: ${formatMoney(totalDailyBudget)}\n`;
-        content += `Total Expenses: ${formatMoney(totalDailyExpenses)}\n`;
-        content += `Variance: ${formatMoney(totalDailyExpenses - totalDailyBudget)}\n\n`;
+        content += '📅 DAILY WORK SUMMARY (' + period + ')\n';
+        content += '────────────────────────────────────────────────────────────────────\n';
+        content += '  📋 Total Records in Period  : ' + dailyWorkInPeriod.length + '\n';
+        content += '  💰 FINANCIAL TOTALS:\n';
+        content += '     ├── Total Budget          : TZS ' + formatMoney(totalDailyBudget) + '\n';
+        content += '     ├── Total Expenses        : TZS ' + formatMoney(totalDailyExpenses) + '\n';
+        content += '     ├── Total Income          : TZS ' + formatMoney(totalDailyIncome) + '\n';
+        content += '     └── Remaining Budget      : TZS ' + formatMoney(dailyRemaining) + '  ' + (dailyRemaining >= 0 ? '✅ Surplus' : '❌ Deficit') + '\n';
+        content += '  📌 Records by Status:\n';
+        content += '     ├── Completed             : ' + dailyCompleted + '\n';
+        content += '     ├── In Progress           : ' + dailyInProgress + '\n';
+        content += '     └── Pending               : ' + dailyPending + '\n\n';
         
         // ============================================================
-        // SUMMARY TABLE - REQUESTED AMOUNTS
+        // FOOTER
         // ============================================================
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `📊 REQUESTED AMOUNTS SUMMARY TABLE\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Status           | Count | Amount (TZS)     | Percentage\n`;
-        content += `───────────────────────────────────────────────────────────────\n`;
-        content += `Approved         | ${String(approvedRequests).padStart(4)} | ${String(formatMoney(approvedAmount)).padStart(14)} | ${String(approvedPercent).padStart(6)}%\n`;
-        content += `Pending          | ${String(pendingRequests).padStart(4)} | ${String(formatMoney(pendingAmount)).padStart(14)} | ${String(pendingPercent).padStart(6)}%\n`;
-        content += `Cancelled        | ${String(cancelledRequests).padStart(4)} | ${String(formatMoney(cancelledAmount)).padStart(14)} | ${String(cancelledPercent).padStart(6)}%\n`;
-        content += `───────────────────────────────────────────────────────────────\n`;
-        content += `TOTAL            | ${String(totalRequests).padStart(4)} | ${String(formatMoney(totalRequestedAmount)).padStart(14)} | 100.0%\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        content += '╔══════════════════════════════════════════════════════════════════╗\n';
+        content += '║  END OF REPORT                                                  ║\n';
+        content += '║  Generated by: ' + CURRENT_USER + '\n';
+        content += '║  Date: ' + new Date().toLocaleString() + '\n';
+        content += '║  Department: Finance (ID: ' + DEPARTMENT_ID + ')\n';
+        content += '╚══════════════════════════════════════════════════════════════════╝\n';
         
-        // ============================================================
-        // TYPE SUMMARY
-        // ============================================================
-        content += `📊 REQUESTED AMOUNTS BY TYPE\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Type             | Count | Amount (TZS)     | Percentage\n`;
-        content += `───────────────────────────────────────────────────────────────\n`;
-        let incomePercent = totalRequests > 0 ? ((incomeRequests / totalRequests) * 100).toFixed(1) : 0;
-        let expensePercent = totalRequests > 0 ? ((expenseRequests / totalRequests) * 100).toFixed(1) : 0;
-        content += `Income           | ${String(incomeRequests).padStart(4)} | ${String(formatMoney(incomeAmount)).padStart(14)} | ${String(incomePercent).padStart(6)}%\n`;
-        content += `Expense          | ${String(expenseRequests).padStart(4)} | ${String(formatMoney(expenseAmount)).padStart(14)} | ${String(expensePercent).padStart(6)}%\n`;
-        content += `───────────────────────────────────────────────────────────────\n`;
-        content += `TOTAL            | ${String(totalRequests).padStart(4)} | ${String(formatMoney(totalRequestedAmount)).padStart(14)} | 100.0%\n`;
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        
-        content += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        content += `Report generated automatically by GeoTraverse ERP System\n`;
-        content += `Finance Department - Official Report\n`;
-
         // ============================================================
         // SEND TO API
         // ============================================================
