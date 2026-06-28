@@ -952,14 +952,56 @@ function toggleSendDropdown(dropdownId) {
     if (dd) dd.style.display = dd.style.display === 'block' ? 'none' : 'block'; 
 }
 
-function addLog(action) { 
-    if (typeof activityLogs === 'undefined' || !Array.isArray(activityLogs)) {
-        activityLogs = [];
+// ============================================================
+// ==================== LOGGING FUNCTIONS ====================
+// ============================================================
+
+// ============================================================
+// ADD LOG - Kwa Manager Dashboard
+// ============================================================
+function addLog(action) {
+    try {
+        var logs = JSON.parse(localStorage.getItem('manager_activity_logs') || '[]');
+        logs.unshift({ 
+            action: action, 
+            user: CURRENT_USER || 'Manager User',
+            created_at: new Date().toISOString() 
+        });
+        if (logs.length > 100) logs.pop();
+        localStorage.setItem('manager_activity_logs', JSON.stringify(logs));
+    } catch(e) {
+        console.log("Log error:", e);
     }
-    activityLogs.unshift({ action: action, created_at: new Date().toISOString() }); 
-    if (activityLogs.length > 100) activityLogs.pop(); 
 }
 
+// ============================================================
+// ADD TO ACTION HISTORY - Kwa Manager Dashboard
+// ============================================================
+function addToActionHistory(action, user) {
+    try {
+        var logs = JSON.parse(localStorage.getItem('manager_activity_logs') || '[]');
+        logs.unshift({ 
+            action: action, 
+            user: user || CURRENT_USER || 'Manager User',
+            created_at: new Date().toISOString() 
+        });
+        if (logs.length > 100) logs.pop();
+        localStorage.setItem('manager_activity_logs', JSON.stringify(logs));
+    } catch(e) {
+        console.log("Log error:", e);
+    }
+}
+
+// ============================================================
+// GET LOGS - Kwa Manager Dashboard
+// ============================================================
+function getLogs() {
+    try {
+        return JSON.parse(localStorage.getItem('manager_activity_logs') || '[]');
+    } catch(e) {
+        return [];
+    }
+}
 // ============================================================
 // ==================== CONFIGURATION ====================
 // ============================================================
@@ -2378,16 +2420,219 @@ function editDailyWork(id) {
     }
 }
 
+// ============================================================
+// DELETE DAILY WORK - WITH BOTH LOG FUNCTIONS
+// ============================================================
 function deleteDailyWork(id) {
-    if (confirm('Delete this daily work record?')) {
-        apiCall('delete_dailywork.php', 'POST', { id: parseInt(id), is_deleted: 1 }).then(function(res) {
-            if (res.success) {
-                showToast('Deleted');
-                if (currentProjectId) { fetchDailyWork(); loadDailyWorkForProject(currentProjectId); }
-                loadDashboard();
-            } else { showToast(res.message || 'Failed', true); }
-        });
+    if (!id) {
+        showToast('❌ Daily work ID is required', true);
+        return;
     }
+    
+    if (!confirm('Delete this daily work record?')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting daily work ID:', id);
+    console.log('📤 Department ID:', DEPARTMENT_ID);
+    
+    // ============================================================
+    // ✅ GET CURRENT USER WITH FALLBACK
+    // ============================================================
+    var userName = CURRENT_USER || 'Manager User';
+    
+    // Try to get from session storage
+    try {
+        var sessionUser = sessionStorage.getItem('user_name');
+        if (sessionUser) {
+            userName = sessionUser;
+        }
+    } catch(e) {}
+    
+    console.log('👤 Deleting as:', userName);
+    
+    // ============================================================
+    // ✅ FIND THE DAILY WORK RECORD
+    // ============================================================
+    var w = dailyworkData.find(function(item) { 
+        return item.id === id; 
+    });
+    
+    if (!w) {
+        showToast('❌ Daily work record not found', true);
+        return;
+    }
+    
+    console.log('📄 Daily work found:', w);
+    
+    // ============================================================
+    // ✅ SHOW LOADING STATE
+    // ============================================================
+    var row = document.getElementById('daily-row-' + id);
+    var btn = row ? row.querySelector('.action-btn.delete') : null;
+    var originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    }
+    if (row) {
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
+    }
+    
+    // ============================================================
+    // ✅ BUILD PAYLOAD
+    // ============================================================
+    var payload = {
+        id: parseInt(id),
+        department_id: parseInt(DEPARTMENT_ID),
+        is_deleted: 1,
+        deleted_by: userName
+    };
+    
+    console.log('📤 Delete payload:', payload);
+    
+    // ============================================================
+    // ✅ CALL API
+    // ============================================================
+    apiCall('delete_dailywork.php', 'POST', payload)
+        .then(function(res) {
+            console.log('📥 Delete response:', res);
+            
+            if (res && res.success) {
+                var message = res.message || 'Daily work record deleted successfully';
+                showToast('✅ ' + message, false);
+                
+                // ✅ Use addToActionHistory instead of addLog
+                if (typeof addToActionHistory === 'function') {
+                    addToActionHistory('Daily work record deleted (ID: ' + id + ')', userName);
+                } else if (typeof addLog === 'function') {
+                    addLog('Daily work record deleted (ID: ' + id + ')');
+                } else {
+                    console.log('📝 Daily work deleted:', id);
+                }
+                
+                // ============================================================
+                // ✅ REMOVE FROM LOCAL DATA
+                // ============================================================
+                dailyworkData = dailyworkData.filter(function(item) { 
+                    return item.id !== id; 
+                });
+                
+                // Also remove from any project's daily_work array
+                for (var i = 0; i < projectsData.length; i++) {
+                    var p = projectsData[i];
+                    if (p.daily_work) {
+                        p.daily_work = p.daily_work.filter(function(item) { 
+                            return item.id !== id; 
+                        });
+                        p.daily_work_count = p.daily_work.length;
+                        if (typeof calculateDailyWorkSummary === 'function') {
+                            p.daily_work_summary = calculateDailyWorkSummary(p.daily_work);
+                        }
+                    }
+                }
+                
+                // ============================================================
+                // ✅ REMOVE FROM UI
+                // ============================================================
+                if (row) {
+                    row.style.transition = 'all 0.3s ease';
+                    row.style.opacity = '0';
+                    row.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        if (row.parentNode) {
+                            row.remove();
+                        }
+                    }, 300);
+                }
+                
+                // ============================================================
+                // ✅ UPDATE DAILY WORK SUMMARY
+                // ============================================================
+                if (currentProjectId) {
+                    if (typeof updateDailyWorkSummary === 'function') {
+                        updateDailyWorkSummary();
+                    }
+                    if (typeof loadDailyWorkForProject === 'function') {
+                        loadDailyWorkForProject(currentProjectId);
+                    }
+                }
+                
+                // ============================================================
+                // ✅ REFRESH DATA
+                // ============================================================
+                if (typeof fetchDailyWork === 'function') {
+                    fetchDailyWork();
+                }
+                if (typeof loadDashboard === 'function') {
+                    loadDashboard();
+                }
+                
+            } else {
+                var errorMsg = res?.message || 'Failed to delete daily work';
+                showToast('❌ ' + errorMsg, true);
+                
+                // ============================================================
+                // ✅ REMOVE FROM UI IF RECORD NOT FOUND
+                // ============================================================
+                if (res && res.success === false && res.message && 
+                    (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
+                    if (row) {
+                        row.style.opacity = '0';
+                        row.style.transform = 'scale(0.95)';
+                        setTimeout(function() {
+                            if (row.parentNode) {
+                                row.remove();
+                            }
+                        }, 300);
+                    }
+                    dailyworkData = dailyworkData.filter(function(item) { 
+                        return item.id !== id; 
+                    });
+                }
+            }
+            
+        })
+        .catch(function(e) {
+            console.error('Delete daily work error:', e);
+            showToast('Network error: ' + e.message, true);
+            
+            // ============================================================
+            // ✅ REMOVE FROM UI ON NETWORK ERROR
+            // ============================================================
+            if (row) {
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                setTimeout(function() {
+                    if (row.parentNode) {
+                        row.remove();
+                    }
+                }, 300);
+            }
+            dailyworkData = dailyworkData.filter(function(item) { 
+                return item.id !== id; 
+            });
+            
+        })
+        .finally(function() {
+            // ============================================================
+            // ✅ RESTORE BUTTON
+            // ============================================================
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+            if (row) {
+                row.style.opacity = '1';
+                row.style.pointerEvents = 'auto';
+            }
+        });
 }
 
 function exportDailyWorkToExcel() {
@@ -4831,22 +5076,6 @@ window.formatAmountInput = formatAmountInput;
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
-<script>
-let notificationClient = null;
 
-document.addEventListener('DOMContentLoaded', function() {
-    notificationClient = new GeoTraverseNotificationClient({
-        departmentId: 2,
-        departmentName: 'Finance',
-        userName: sessionStorage.getItem('user_name') || 'Finance User',
-        wsUrl: 'ws://localhost:3001',
-        badgeElement: document.getElementById('notificationBadge'),
-        notificationSound: true,
-        desktopNotifications: true
-    });
-    
-    window.notificationClient = notificationClient;
-});
-</script>
 </body>
 </html>

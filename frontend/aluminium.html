@@ -3666,12 +3666,242 @@ async function updateDailyWorkFromModal() {
     finally { sendBtn.innerHTML = originalText; sendBtn.disabled = false; }
 }
 
-async function deleteDailyWork(id) {
-    if (confirm('Are you sure you want to delete this daily work record?')) {
-        let res = await apiCall('delete_dailywork.php', 'POST', { id: parseInt(id), is_deleted: 1 });
-        if (res && res.success) { showToast('Daily work deleted successfully'); await fetchDailyWork(); if (currentProjectId) { await loadDailyWorkTable(currentProjectId); } await loadDashboard(); }
-        else { showToast(res?.message || 'Failed to delete', true); }
+// ============================================================
+// DELETE DAILY WORK - WITH projectsData CHECK
+// ============================================================
+function deleteDailyWork(id) {
+    if (!id) {
+        showToast('❌ Daily work ID is required', true);
+        return;
     }
+    
+    if (!confirm('Delete this daily work record?')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting daily work ID:', id);
+    console.log('📤 Department ID:', DEPARTMENT_ID);
+    
+    // ============================================================
+    // ✅ GET CURRENT USER WITH FALLBACK
+    // ============================================================
+    var userName = CURRENT_USER || 'Aluminium Manager';
+    
+    try {
+        var sessionUser = sessionStorage.getItem('user_name');
+        if (sessionUser) {
+            userName = sessionUser;
+        }
+    } catch(e) {}
+    
+    // ============================================================
+    // ✅ FIND THE DAILY WORK RECORD
+    // ============================================================
+    var w = dailyworkData.find(function(item) { 
+        return item.id === id; 
+    });
+    
+    if (!w) {
+        showToast('❌ Daily work record not found', true);
+        return;
+    }
+    
+    console.log('📄 Daily work found:', w);
+    
+    // ============================================================
+    // ✅ SHOW LOADING STATE
+    // ============================================================
+    var row = document.getElementById('daily-row-' + id);
+    var btn = row ? row.querySelector('.action-btn.delete') : null;
+    var originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    }
+    if (row) {
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
+    }
+    
+    // ============================================================
+    // ✅ BUILD PAYLOAD
+    // ============================================================
+    var payload = {
+        id: parseInt(id),
+        department_id: parseInt(DEPARTMENT_ID),
+        is_deleted: 1,
+        deleted_by: userName
+    };
+    
+    console.log('📤 Delete payload:', payload);
+    
+    // ============================================================
+    // ✅ CALL API
+    // ============================================================
+    apiCall('delete_dailywork.php', 'POST', payload)
+        .then(function(res) {
+            console.log('📥 Delete response:', res);
+            
+            if (res && res.success) {
+                var message = res.message || 'Daily work record deleted successfully';
+                showToast('✅ ' + message, false);
+                
+                // ✅ Log using available function
+                if (typeof addToActionHistory === 'function') {
+                    addToActionHistory('Daily work record deleted (ID: ' + id + ')', userName);
+                } else if (typeof addLog === 'function') {
+                    addLog('Daily work record deleted (ID: ' + id + ')');
+                } else {
+                    console.log('📝 Daily work deleted:', id);
+                }
+                
+                // ============================================================
+                // ✅ REMOVE FROM LOCAL DATA
+                // ============================================================
+                dailyworkData = dailyworkData.filter(function(item) { 
+                    return item.id !== id; 
+                });
+                
+                // ============================================================
+                // ✅ REMOVE FROM PROJECTS DATA - WITH SAFETY CHECK
+                // ============================================================
+                // Check if projectsData exists (could be different name)
+                var projectsArray = null;
+                
+                // Try different possible variable names
+                if (typeof projectsData !== 'undefined') {
+                    projectsArray = projectsData;
+                } else if (typeof aluminiumProjects !== 'undefined') {
+                    projectsArray = aluminiumProjects;
+                } else if (typeof projects !== 'undefined' && Array.isArray(projects)) {
+                    projectsArray = projects;
+                } else if (typeof allProjects !== 'undefined') {
+                    projectsArray = allProjects;
+                }
+                
+                // Only proceed if we found a projects array
+                if (projectsArray) {
+                    console.log('📋 Found projects array:', projectsArray.length);
+                    
+                    for (var i = 0; i < projectsArray.length; i++) {
+                        var p = projectsArray[i];
+                        if (p.daily_work) {
+                            p.daily_work = p.daily_work.filter(function(item) { 
+                                return item.id !== id; 
+                            });
+                            p.daily_work_count = p.daily_work.length;
+                            if (typeof calculateDailyWorkSummary === 'function') {
+                                p.daily_work_summary = calculateDailyWorkSummary(p.daily_work);
+                            }
+                        }
+                    }
+                } else {
+                    console.log('ℹ️ No projects array found, skipping project update');
+                }
+                
+                // ============================================================
+                // ✅ REMOVE FROM UI
+                // ============================================================
+                if (row) {
+                    row.style.transition = 'all 0.3s ease';
+                    row.style.opacity = '0';
+                    row.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        if (row.parentNode) {
+                            row.remove();
+                        }
+                    }, 300);
+                }
+                
+                // ============================================================
+                // ✅ UPDATE DAILY WORK SUMMARY
+                // ============================================================
+                if (currentProjectId) {
+                    if (typeof updateDailyWorkSummary === 'function') {
+                        updateDailyWorkSummary();
+                    }
+                    if (typeof loadDailyWorkForProject === 'function') {
+                        loadDailyWorkForProject(currentProjectId);
+                    }
+                }
+                
+                // ============================================================
+                // ✅ REFRESH DATA
+                // ============================================================
+                if (typeof fetchDailyWork === 'function') {
+                    fetchDailyWork();
+                }
+                if (typeof loadDashboard === 'function') {
+                    loadDashboard();
+                }
+                if (typeof loadProjects === 'function') {
+                    loadProjects();
+                }
+                
+            } else {
+                var errorMsg = res?.message || 'Failed to delete daily work';
+                showToast('❌ ' + errorMsg, true);
+                
+                // ============================================================
+                // ✅ REMOVE FROM UI IF RECORD NOT FOUND
+                // ============================================================
+                if (res && res.success === false && res.message && 
+                    (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
+                    if (row) {
+                        row.style.opacity = '0';
+                        row.style.transform = 'scale(0.95)';
+                        setTimeout(function() {
+                            if (row.parentNode) {
+                                row.remove();
+                            }
+                        }, 300);
+                    }
+                    dailyworkData = dailyworkData.filter(function(item) { 
+                        return item.id !== id; 
+                    });
+                }
+            }
+            
+        })
+        .catch(function(e) {
+            console.error('Delete daily work error:', e);
+            showToast('Network error: ' + e.message, true);
+            
+            // ============================================================
+            // ✅ REMOVE FROM UI ON NETWORK ERROR
+            // ============================================================
+            if (row) {
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                setTimeout(function() {
+                    if (row.parentNode) {
+                        row.remove();
+                    }
+                }, 300);
+            }
+            dailyworkData = dailyworkData.filter(function(item) { 
+                return item.id !== id; 
+            });
+            
+        })
+        .finally(function() {
+            // ============================================================
+            // ✅ RESTORE BUTTON
+            // ============================================================
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+            if (row) {
+                row.style.opacity = '1';
+                row.style.pointerEvents = 'auto';
+            }
+        });
 }
 
 function toggleDailyWorkTable() {
@@ -6574,22 +6804,6 @@ window.sendReportToDept = sendReportToDept;
 
 init();
 </script>
-<script>
-let notificationClient = null;
 
-document.addEventListener('DOMContentLoaded', function() {
-    notificationClient = new GeoTraverseNotificationClient({
-        departmentId: 2,
-        departmentName: 'Finance',
-        userName: sessionStorage.getItem('user_name') || 'Finance User',
-        wsUrl: 'ws://localhost:3001',
-        badgeElement: document.getElementById('notificationBadge'),
-        notificationSound: true,
-        desktopNotifications: true
-    });
-    
-    window.notificationClient = notificationClient;
-});
-</script>
 </body>
 </html>
