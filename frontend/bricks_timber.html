@@ -1010,11 +1010,141 @@ async function updateDailyWorkAPI(id, data) {
     }
 }
 
+// ============================================================
+// DELETE DAILY WORK API - MUST BE DEFINED FIRST
+// ============================================================
 async function deleteDailyWorkAPI(id) { 
     try {
-        return await apiCall('delete_dailywork.php', 'POST', { id, is_deleted: 1 }); 
+        return await apiCall('delete_dailywork.php', 'POST', { 
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),  // ✅ REQUIRED
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'Bricks & Timber Manager'
+        }); 
     } catch(e) {
+        console.error('Delete API error:', e);
         return { success: false, message: e.message };
+    }
+}
+
+// ============================================================
+// DELETE DAILY WORK RECORD - USES deleteDailyWorkAPI
+// ============================================================
+async function deleteDailyWorkRecord(id) { 
+    if (!id) {
+        showToast('❌ Daily work ID is required', true);
+        return;
+    }
+    
+    if (!confirm('Delete this daily work record?')) {
+        return;
+    }
+    
+    console.log('🗑️ Deleting daily work ID:', id);
+    console.log('📤 Department ID:', DEPARTMENT_ID);
+    
+    // Find the record for better messaging
+    let allWork = [...bricksDailyWork, ...timberDailyWork];
+    let record = allWork.find(w => w.id === id);
+    let recordName = record ? record.project_name || 'Daily Work' : 'Daily Work';
+    
+    // Show loading state
+    let row = document.getElementById('bricks-work-' + id) || document.getElementById('timber-work-' + id);
+    let btn = row ? row.querySelector('.action-btn.delete') : null;
+    let originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    }
+    if (row) {
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // Call API with department ID
+        let res = await deleteDailyWorkAPI(id);
+        
+        console.log('📥 Delete response:', res);
+        
+        if (res && res.success) { 
+            let msg = res.message || 'Daily work record deleted successfully';
+            showToast('✅ ' + msg, false); 
+            addToActionHistory('Daily work deleted: ' + recordName, CURRENT_USER);
+            
+            // Remove from local data
+            bricksDailyWork = bricksDailyWork.filter(w => w.id !== id);
+            timberDailyWork = timberDailyWork.filter(w => w.id !== id);
+            
+            // Remove from UI
+            if (row) {
+                row.style.transition = 'all 0.3s ease';
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                setTimeout(function() {
+                    if (row.parentNode) {
+                        row.remove();
+                    }
+                }, 300);
+            }
+            
+            // Refresh data
+            await loadBricksDailyWork();
+            await loadTimberDailyWork();
+            await loadDashboard(); 
+            
+        } else { 
+            let errorMsg = res?.message || 'Failed to delete daily work';
+            showToast('❌ ' + errorMsg, true);
+            
+            // Remove from UI if record not found
+            if (res && res.success === false && res.message && 
+                (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
+                if (row) {
+                    row.style.opacity = '0';
+                    row.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        if (row.parentNode) {
+                            row.remove();
+                        }
+                    }, 300);
+                }
+                bricksDailyWork = bricksDailyWork.filter(w => w.id !== id);
+                timberDailyWork = timberDailyWork.filter(w => w.id !== id);
+            }
+        }
+    } catch(e) {
+        console.error('Delete daily work error:', e);
+        showToast('Network error: ' + e.message, true);
+        
+        // Remove from UI on network error
+        if (row) {
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(function() {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        bricksDailyWork = bricksDailyWork.filter(w => w.id !== id);
+        timberDailyWork = timberDailyWork.filter(w => w.id !== id);
+        
+    } finally {
+        // Restore button
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+        if (row) {
+            row.style.opacity = '1';
+            row.style.pointerEvents = 'auto';
+        }
     }
 }
 

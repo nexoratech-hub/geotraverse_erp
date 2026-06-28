@@ -1921,60 +1921,246 @@ function editDailyWork(id) {
 }
 
 // ============================================================
-// DELETE DAILY WORK - CHECK PERMISSIONS
+// DELETE DAILY WORK - FIXED WITH DEPARTMENT ID
 // ============================================================
 async function deleteDailyWork(id) {
-    if (!confirm('Delete this daily work record?')) return;
-    
-    const w = dailyworkData.find(w => w.id === id);
-    if (!w) {
-        showToast('Daily work record not found', true);
+    if (!id) {
+        showToast('❌ Daily work ID is required', true);
         return;
     }
     
-    // Find the project
-    const p = projectsData.find(proj => proj.id === w.project_id);
+    if (!confirm('Delete this daily work record?')) {
+        return;
+    }
     
-    // Check if project was received
+    console.log('🗑️ Deleting daily work ID:', id);
+    console.log('📤 Department ID:', DEPARTMENT_ID);
+    
+    // ============================================================
+    // FIND THE DAILY WORK RECORD
+    // ============================================================
+    let w = dailyworkData.find(item => item.id === id);
+    if (!w) {
+        // Try to find in project daily_work
+        for (let p of projectsData) {
+            if (p.daily_work) {
+                const found = p.daily_work.find(item => item.id === id);
+                if (found) {
+                    w = found;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!w) {
+        showToast('❌ Daily work record not found', true);
+        return;
+    }
+    
+    console.log('📄 Daily work found:', w);
+    
+    // ============================================================
+    // CHECK IF PROJECT WAS RECEIVED - CANNOT DELETE
+    // ============================================================
+    const p = projectsData.find(proj => proj.id === w.project_id);
     if (p && p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
         showToast('❌ Cannot delete daily work for a project received from another department', true);
         return;
     }
     
-    // Check if this is a sent record
+    // ============================================================
+    // CHECK IF THIS IS A SENT RECORD - CANNOT DELETE
+    // ============================================================
     if (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
         showToast('❌ Cannot delete a daily work record that was sent from another department', true);
         return;
     }
     
-    // Check if this is a summary record
-    if (w.source === 'summary') {
-        showToast('❌ Cannot delete a summary record', true);
-        return;
+    // ============================================================
+    // SHOW LOADING STATE
+    // ============================================================
+    let row = document.getElementById('daily-row-' + id);
+    let btn = row ? row.querySelector('.action-btn.delete') : null;
+    let originalText = btn ? btn.innerHTML : 'Deleting...';
+    
+    if (btn) {
+        btn.innerHTML = '<span class="loading-spinner"></span>';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    }
+    if (row) {
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
     }
     
+    // ============================================================
+    // BUILD PAYLOAD WITH DEPARTMENT ID
+    // ============================================================
+    let payload = {
+        id: parseInt(id),
+        department_id: parseInt(DEPARTMENT_ID),  // ✅ REQUIRED
+        is_deleted: 1,
+        deleted_by: CURRENT_USER || 'Survey Manager'
+    };
+    
+    console.log('📤 Delete payload:', payload);
+    
     try {
-        const res = await apiCall('delete_dailywork.php', 'POST', { 
-            id: parseInt(id), 
-            is_deleted: 1 
-        });
+        // ============================================================
+        // CALL API
+        // ============================================================
+        const res = await apiCall('delete_dailywork.php', 'POST', payload);
+        
+        console.log('📥 Delete response:', res);
         
         if (res && res.success) {
-            showToast('Daily work deleted successfully');
-            dailyworkData = dailyworkData.filter(w => w.id !== id);
+            let message = res.message || 'Daily work record deleted successfully';
+            showToast('✅ ' + message, false);
+            addLog('Daily work record deleted (ID: ' + id + ')');
             
+            // ============================================================
+            // REMOVE FROM LOCAL DATA
+            // ============================================================
+            dailyworkData = dailyworkData.filter(item => item.id !== id);
+            
+            // Remove from project's daily_work
+            for (let proj of projectsData) {
+                if (proj.daily_work) {
+                    proj.daily_work = proj.daily_work.filter(item => item.id !== id);
+                    proj.daily_work_count = proj.daily_work.length;
+                    if (typeof calculateDailyWorkSummary === 'function') {
+                        proj.daily_work_summary = calculateDailyWorkSummary(proj.daily_work);
+                    }
+                }
+                if (proj._daily_work_records) {
+                    proj._daily_work_records = proj._daily_work_records.filter(item => item.id !== id);
+                }
+                if (proj.daily_work_records) {
+                    proj.daily_work_records = proj.daily_work_records.filter(item => item.id !== id);
+                }
+            }
+            
+            // ============================================================
+            // REMOVE FROM UI
+            // ============================================================
+            if (row) {
+                row.style.transition = 'all 0.3s ease';
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (row.parentNode) {
+                        row.remove();
+                    }
+                }, 300);
+            }
+            
+            // ============================================================
+            // UPDATE DAILY WORK SUMMARY
+            // ============================================================
             if (currentProjectId) {
+                // Refresh the project view
                 await loadDailyWorkForProject(currentProjectId);
                 await viewProject(currentProjectId);
             }
+            
+            // ============================================================
+            // REFRESH DATA
+            // ============================================================
             await loadDashboard();
+            
         } else {
-            showToast(res?.message || 'Failed to delete', true);
+            let errorMsg = res?.message || 'Failed to delete daily work';
+            showToast('❌ ' + errorMsg, true);
+            
+            // ============================================================
+            // REMOVE FROM UI IF RECORD NOT FOUND
+            // ============================================================
+            if (res && res.success === false && res.message && 
+                (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
+                if (row) {
+                    row.style.opacity = '0';
+                    row.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        if (row.parentNode) {
+                            row.remove();
+                        }
+                    }, 300);
+                }
+                dailyworkData = dailyworkData.filter(item => item.id !== id);
+            }
         }
+        
     } catch(e) {
+        console.error('Delete daily work error:', e);
         showToast('Network error: ' + e.message, true);
+        
+        // ============================================================
+        // REMOVE FROM UI ON NETWORK ERROR
+        // ============================================================
+        if (row) {
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        dailyworkData = dailyworkData.filter(item => item.id !== id);
+        
+    } finally {
+        // ============================================================
+        // RESTORE BUTTON
+        // ============================================================
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+        if (row) {
+            row.style.opacity = '1';
+            row.style.pointerEvents = 'auto';
+        }
     }
 }
+// ============================================================
+// VIEW PROJECT DETAILS - ALIAS FOR viewProject()
+// ============================================================
+function viewProjectDetails(id) {
+    console.log('📋 [ALIAS] viewProjectDetails called with ID:', id);
+    
+    // Check if viewProject exists
+    if (typeof viewProject === 'function') {
+        return viewProject(id);
+    }
+    
+    // Fallback - show error
+    showToast('❌ Project view function not available', true);
+    console.error('❌ viewProject function not found');
+}
+
+// Also ensure these functions call the correct function
+// Override any existing functions that might be calling viewProjectDetails
+const originalSaveDailyWork = saveDailyWork;
+saveDailyWork = async function() {
+    await originalSaveDailyWork.apply(this, arguments);
+    // After saving, refresh the project view
+    if (currentProjectId && typeof viewProject === 'function') {
+        await viewProject(currentProjectId);
+    }
+};
+
+const originalDeleteDailyWork = deleteDailyWork;
+deleteDailyWork = async function(id) {
+    await originalDeleteDailyWork.apply(this, arguments);
+    // After deleting, refresh the project view
+    if (currentProjectId && typeof viewProject === 'function') {
+        await viewProject(currentProjectId);
+    }
+};
 function openDailyWorkModal() {
     const p = projectsData.find(proj => proj.id === currentProjectId);
     if (!p) {
