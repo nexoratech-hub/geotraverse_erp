@@ -9020,6 +9020,44 @@ async function loadAllDailyWork(highlightId = null) {
         allDailyWorkData = records;
         
         // ============================================================
+        // CALCULATE SUMMARY TOTALS
+        // ============================================================
+        let totalBudgetAll = 0;
+        let totalUsedAll = 0;
+        
+        for (let w of records) {
+            let departmentId = w.department_id || w.sent_from_dept || 0;
+            let income = parseFloat(w.total_amount || w.income || 0);
+            let expenses = parseFloat(w.expenses || 0);
+            let amount = parseFloat(w.amount || 0);
+            let budget = parseFloat(w.budget || 0);
+            
+            // Budget logic based on department
+            let budgetValue = 0;
+            let usedValue = 0;
+            
+            if (departmentId == 7) {
+                // Aluminium - budget = income, used = expenses
+                budgetValue = income;
+                usedValue = expenses;
+            } else if (departmentId == 6) {
+                // Bricks & Timber - budget = income, used = expenses
+                budgetValue = income;
+                usedValue = expenses;
+            } else {
+                // Other departments
+                budgetValue = budget;
+                usedValue = amount;
+            }
+            
+            totalBudgetAll += budgetValue;
+            totalUsedAll += usedValue;
+        }
+        
+        let totalRemaining = totalBudgetAll - totalUsedAll;
+        let remainingColor = totalRemaining >= 0 ? '#10b981' : '#ef4444';
+        
+        // ============================================================
         // SPLIT RECORDS BY DEPARTMENT/TYPE
         // ============================================================
         const generalRecords = [];
@@ -9042,7 +9080,7 @@ async function loadAllDailyWork(highlightId = null) {
         console.log(`📊 Records split: General=${generalRecords.length}, Aluminium=${aluminiumRecords.length}, Bricks&Timber=${bricksTimberRecords.length}`);
         
         // ============================================================
-        // BUILD HTML - WITH BEAUTIFUL CSS
+        // BUILD HTML - KEEP EXISTING DESIGN, ADD SUMMARY CARDS
         // ============================================================
         let html = `
             <style>
@@ -9074,7 +9112,7 @@ async function loadAllDailyWork(highlightId = null) {
                 .summary-card {
                     background: white;
                     border-radius: 16px;
-                    padding: 18px 20px;
+                    padding: 14px 16px;  /* REDUCED PADDING */
                     text-align: center;
                     border: 1px solid #e5e7eb;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -9087,49 +9125,55 @@ async function loadAllDailyWork(highlightId = null) {
                     box-shadow: 0 8px 25px rgba(0,0,0,0.10);
                 }
                 .summary-card .card-icon {
-                    font-size: 22px;
-                    margin-bottom: 6px;
+                    font-size: 18px;  /* REDUCED */
+                    margin-bottom: 4px;
                     display: block;
                 }
                 .summary-card .card-label {
-                    font-size: 10px;
+                    font-size: 9px;  /* REDUCED */
                     font-weight: 600;
                     color: #6b7280;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
-                    margin-bottom: 4px;
+                    margin-bottom: 3px;
                 }
                 .summary-card .card-value {
-                    font-size: 22px;
+                    font-size: 18px;  /* REDUCED */
                     font-weight: 800;
                     font-family: 'JetBrains Mono', monospace;
                     line-height: 1.2;
                 }
                 .summary-card .card-sub {
-                    font-size: 10px;
+                    font-size: 9px;  /* REDUCED */
                     color: #94a3b8;
-                    margin-top: 4px;
+                    margin-top: 3px;
                 }
                 .summary-card.total .card-value { color: #0f74ba; }
                 .summary-card.general .card-value { color: #06b6d4; }
                 .summary-card.aluminium .card-value { color: #6b7280; }
                 .summary-card.bricks-timber .card-value { color: #d97706; }
                 .summary-card.departments .card-value { color: #8b5cf6; }
+                .summary-card.budget .card-value { color: #059669; }
+                .summary-card.used .card-value { color: #ea580c; }
+                .summary-card.remaining .card-value { color: #3b82f6; }
                 
                 .summary-card .card-accent {
                     position: absolute;
                     top: 0;
                     left: 0;
                     right: 0;
-                    height: 4px;
+                    height: 3px;  /* REDUCED */
                 }
                 .summary-card.total .card-accent { background: linear-gradient(90deg, #0f74ba, #0a5a8e); }
                 .summary-card.general .card-accent { background: linear-gradient(90deg, #06b6d4, #0891b2); }
                 .summary-card.aluminium .card-accent { background: linear-gradient(90deg, #6b7280, #4b5563); }
                 .summary-card.bricks-timber .card-accent { background: linear-gradient(90deg, #d97706, #b45309); }
                 .summary-card.departments .card-accent { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
+                .summary-card.budget .card-accent { background: linear-gradient(90deg, #059669, #047857); }
+                .summary-card.used .card-accent { background: linear-gradient(90deg, #ea580c, #c2410c); }
+                .summary-card.remaining .card-accent { background: linear-gradient(90deg, #3b82f6, #2563eb); }
                 
-                /* Table Containers */
+                /* Table Containers - KEEP EXISTING */
                 .table-container {
                     background: white;
                     border-radius: 16px;
@@ -9168,7 +9212,7 @@ async function loadAllDailyWork(highlightId = null) {
                     color: #6b7280;
                 }
                 
-                /* Table Colors - Match Sidebar */
+                /* Table Colors - KEEP EXISTING */
                 .table-general .table-header {
                     background: linear-gradient(135deg, #0f74ba, #0a5a8e);
                     border-bottom: 2px solid #0a5a8e;
@@ -9223,7 +9267,7 @@ async function loadAllDailyWork(highlightId = null) {
                     border-bottom: 2px solid #b45309;
                 }
                 
-                /* Table Body Styles */
+                /* Table Body Styles - KEEP EXISTING */
                 .table-container table {
                     width: 100%;
                     border-collapse: collapse;
@@ -9266,7 +9310,7 @@ async function loadAllDailyWork(highlightId = null) {
                     text-align: center;
                 }
                 
-                /* Status Badges */
+                /* Status Badges - KEEP EXISTING */
                 .status-badge-sm {
                     display: inline-block;
                     padding: 3px 12px;
@@ -9292,7 +9336,7 @@ async function loadAllDailyWork(highlightId = null) {
                     color: #2563eb;
                 }
                 
-                /* Category Badges */
+                /* Category Badges - KEEP EXISTING */
                 .category-badge {
                     display: inline-block;
                     padding: 2px 10px;
@@ -9309,7 +9353,7 @@ async function loadAllDailyWork(highlightId = null) {
                     color: #059669;
                 }
                 
-                /* Department Badge */
+                /* Department Badge - KEEP EXISTING */
                 .dept-badge {
                     display: inline-block;
                     padding: 2px 8px;
@@ -9324,7 +9368,7 @@ async function loadAllDailyWork(highlightId = null) {
                     color: #d97706;
                 }
                 
-                /* Row Actions - VIEW & DELETE ONLY */
+                /* Row Actions - KEEP EXISTING */
                 .row-actions {
                     display: flex;
                     gap: 4px;
@@ -9357,7 +9401,6 @@ async function loadAllDailyWork(highlightId = null) {
                     background: #dc2626;
                 }
                 
-                /* Disabled delete button (not Super Admin) */
                 .row-actions .action-btn-sm.delete-disabled {
                     background: #e5e7eb;
                     color: #9ca3af;
@@ -9398,7 +9441,7 @@ async function loadAllDailyWork(highlightId = null) {
                     font-size: 13px;
                 }
                 
-                /* Scrollbar for tables */
+                /* Scrollbar for tables - KEEP EXISTING */
                 .table-scroll {
                     overflow-x: auto;
                     -webkit-overflow-scrolling: touch;
@@ -9418,7 +9461,6 @@ async function loadAllDailyWork(highlightId = null) {
                     background: #94a3b8;
                 }
 
-                /* Super Admin badge on delete */
                 .super-admin-badge {
                     display: inline-block;
                     padding: 1px 6px;
@@ -9464,36 +9506,47 @@ async function loadAllDailyWork(highlightId = null) {
                     </div>
                 </div>
                 
-                <!-- Summary Cards -->
-                <div class="summary-grid">
-                    <div class="summary-card total">
+                <!-- ============================================================
+                     ✅ SUMMARY CARDS - ADDED HERE (SMALLER SIZE)
+                     ============================================================ -->
+                <div class="summary-grid" style="margin-bottom: 25px;">
+                    <!-- Total Budget -->
+                    <div class="summary-card budget">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">💰</span>
+                        <div class="card-label">Total Budget</div>
+                        <div class="card-value">${formatMoney(totalBudgetAll)}</div>
+                        <div class="card-sub">All departments combined</div>
+                    </div>
+                    
+                    <!-- Total Used -->
+                    <div class="summary-card used">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">💸</span>
+                        <div class="card-label">Total Used</div>
+                        <div class="card-value">${formatMoney(totalUsedAll)}</div>
+                        <div class="card-sub">Total expenses/amount spent</div>
+                    </div>
+                    
+                    <!-- Total Remaining -->
+                    <div class="summary-card remaining">
                         <div class="card-accent"></div>
                         <span class="card-icon">📊</span>
+                        <div class="card-label">Total Remaining</div>
+                        <div class="card-value" style="color: ${remainingColor};">${formatMoney(totalRemaining)}</div>
+                        <div class="card-sub">${totalRemaining >= 0 ? '✅ Surplus' : '⚠️ Over budget'}</div>
+                    </div>
+                    
+                    <!-- Total Records -->
+                    <div class="summary-card total">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">📋</span>
                         <div class="card-label">Total Records</div>
                         <div class="card-value">${records.length}</div>
                         <div class="card-sub">All departments</div>
                     </div>
-                    <div class="summary-card general">
-                        <div class="card-accent"></div>
-                        <span class="card-icon">📋</span>
-                        <div class="card-label">General</div>
-                        <div class="card-value">${generalRecords.length}</div>
-                        <div class="card-sub">Other departments</div>
-                    </div>
-                    <div class="summary-card aluminium">
-                        <div class="card-accent"></div>
-                        <span class="card-icon">🔩</span>
-                        <div class="card-label">Aluminium</div>
-                        <div class="card-value">${aluminiumRecords.length}</div>
-                        <div class="card-sub">Fabrication records</div>
-                    </div>
-                    <div class="summary-card bricks-timber">
-                        <div class="card-accent"></div>
-                        <span class="card-icon">🧱</span>
-                        <div class="card-label">Bricks & Timber</div>
-                        <div class="card-value">${bricksTimberRecords.length}</div>
-                        <div class="card-sub">Production records</div>
-                    </div>
+                    
+                    <!-- Departments -->
                     <div class="summary-card departments">
                         <div class="card-accent"></div>
                         <span class="card-icon">🏢</span>
@@ -9640,6 +9693,11 @@ async function loadAllDailyWork(highlightId = null) {
         document.getElementById('dailyworkPage').innerHTML = html;
         
         // ============================================================
+        // POPULATE TABLES - SAME AS BEFORE
+        // ============================================================
+        // ... (rest of your table population code remains exactly the same)
+        
+        // ============================================================
         // POPULATE TABLE 1: GENERAL DAILY WORK
         // ============================================================
         const generalTbody = document.getElementById('generalDailyWorkTableBody');
@@ -9672,11 +9730,9 @@ async function loadAllDailyWork(highlightId = null) {
                         <td class="text-center"><span class="status-badge-sm ${statusClass}">${statusText}</span></td>
                         <td class="text-center">
                             <div class="row-actions">
-                                <!-- VIEW BUTTON - Always visible -->
                                 <button onclick="viewDailyWorkRecord(${w.id})" class="action-btn-sm view" title="View Record">
                                     <i class="fas fa-eye"></i>
                                 </button>
-                                <!-- DELETE BUTTON - Super Admin Only (DEPARTMENT_ID === 1) -->
                                 ${DEPARTMENT_ID === 1 ? `
                                     <button onclick="deleteDailyWorkRecord(${w.id})" class="action-btn-sm delete" title="Delete Record (Super Admin)">
                                         <i class="fas fa-trash"></i>
@@ -9817,7 +9873,6 @@ async function loadAllDailyWork(highlightId = null) {
         `;
     }
 }
-
 // ============================================================
 // VIEW DAILY WORK RECORD - Super Admin
 // ============================================================
