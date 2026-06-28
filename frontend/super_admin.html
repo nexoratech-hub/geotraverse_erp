@@ -9873,6 +9873,719 @@ async function loadAllDailyWork(highlightId = null) {
         `;
     }
 }
+
+// ============================================================
+// EXPORT ALL DAILY WORK TO EXCEL - ALL TABLES IN ONE SHEET
+// ============================================================
+function exportAllDailyWorkToExcel() {
+    if (!allDailyWorkData || allDailyWorkData.length === 0) {
+        showToast('No daily work records to export', true);
+        return;
+    }
+    
+    console.log('📊 Exporting all daily work to Excel...');
+    
+    try {
+        // ============================================================
+        // SPLIT RECORDS BY TYPE
+        // ============================================================
+        const generalRecords = [];
+        const aluminiumRecords = [];
+        const bricksTimberRecords = [];
+        
+        for (let w of allDailyWorkData) {
+            let deptId = w.department_id || w.sent_from_dept || 0;
+            let workType = w.work_type || 'general';
+            
+            if (deptId == 7 || workType === 'aluminium' || workType === 'aluminum') {
+                aluminiumRecords.push(w);
+            } else if (deptId == 6 || workType === 'bricks' || workType === 'timber') {
+                bricksTimberRecords.push(w);
+            } else {
+                generalRecords.push(w);
+            }
+        }
+        
+        // ============================================================
+        // BUILD ONE BIG EXCEL SHEET WITH ALL DATA
+        // ============================================================
+        let excelData = [];
+        
+        // ============================================================
+        // HEADER ROWS
+        // ============================================================
+        excelData.push(['ALL DAILY WORK REPORT - SUPER ADMIN']);
+        excelData.push(['Generated: ' + new Date().toLocaleString()]);
+        excelData.push(['Total Records: ' + allDailyWorkData.length]);
+        excelData.push(['']);
+        
+        // ============================================================
+        // SECTION 1: GENERAL DAILY WORK
+        // ============================================================
+        if (generalRecords.length > 0) {
+            excelData.push(['===================================================']);
+            excelData.push(['📋 GENERAL DAILY WORK (' + generalRecords.length + ' records)']);
+            excelData.push(['===================================================']);
+            excelData.push(['']);
+            excelData.push(['Date/Time', 'Department', 'Description', 'Budget (TZS)', 'Amount Spent (TZS)', 'Status', 'Created By']);
+            
+            for (let w of generalRecords) {
+                let deptId = w.department_id || w.sent_from_dept || 'Unknown';
+                let deptName = departmentNames[deptId] || 'Department ' + deptId;
+                let budget = parseFloat(w.budget || 0);
+                let amount = parseFloat(w.amount || 0);
+                let status = w.status || 'pending';
+                let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+                
+                excelData.push([
+                    new Date(w.date).toLocaleString(),
+                    deptName,
+                    w.work_description || '-',
+                    budget,
+                    amount,
+                    statusText,
+                    w.created_by || 'System'
+                ]);
+            }
+            excelData.push(['']);
+            excelData.push(['']);
+        }
+        
+        // ============================================================
+        // SECTION 2: ALUMINIUM DAILY WORK
+        // ============================================================
+        if (aluminiumRecords.length > 0) {
+            excelData.push(['===================================================']);
+            excelData.push(['🔩 ALUMINIUM DAILY WORK (' + aluminiumRecords.length + ' records)']);
+            excelData.push(['===================================================']);
+            excelData.push(['']);
+            excelData.push(['Date/Time', 'Description', 'Qty Produced', 'Unit Price (TZS)', 'Total Income (TZS)', 'Expenses (TZS)', 'Profit (TZS)', 'Status', 'Created By']);
+            
+            for (let w of aluminiumRecords) {
+                let income = parseFloat(w.total_amount || w.income || 0);
+                let expenses = parseFloat(w.expenses || 0);
+                let profit = income - expenses;
+                let quantityProduced = parseInt(w.quantity_produced) || 0;
+                let pricePerUnit = parseFloat(w.price_per_unit || 0);
+                if (pricePerUnit === 0 && income > 0 && quantityProduced > 0) {
+                    pricePerUnit = income / quantityProduced;
+                }
+                let status = w.status || 'pending';
+                let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+                
+                excelData.push([
+                    new Date(w.date).toLocaleString(),
+                    w.work_description || '-',
+                    quantityProduced,
+                    pricePerUnit,
+                    income,
+                    expenses,
+                    profit,
+                    statusText,
+                    w.created_by || 'System'
+                ]);
+            }
+            excelData.push(['']);
+            excelData.push(['']);
+        }
+        
+        // ============================================================
+        // SECTION 3: BRICKS & TIMBER DAILY WORK
+        // ============================================================
+        if (bricksTimberRecords.length > 0) {
+            excelData.push(['===================================================']);
+            excelData.push(['🧱 BRICKS & TIMBER DAILY WORK (' + bricksTimberRecords.length + ' records)']);
+            excelData.push(['===================================================']);
+            excelData.push(['']);
+            excelData.push(['Date/Time', 'Category', 'Description', 'Total Amount (TZS)', 'Expenses (TZS)', 'Profit (TZS)', 'Payment Status', 'Created By']);
+            
+            for (let w of bricksTimberRecords) {
+                let totalAmount = parseFloat(w.total_amount || w.income || 0);
+                let expenses = parseFloat(w.expenses || 0);
+                let profit = totalAmount - expenses;
+                let category = w.work_type === 'bricks' ? 'Bricks' : w.work_type === 'timber' ? 'Timber' : 'General';
+                let paymentStatus = w.payment_status || w.status || 'pending';
+                let statusText = paymentStatus === 'completed' ? 'Completed' : paymentStatus === 'partial' ? 'Partial' : 'Pending';
+                
+                excelData.push([
+                    new Date(w.date).toLocaleString(),
+                    category,
+                    w.work_description || '-',
+                    totalAmount,
+                    expenses,
+                    profit,
+                    statusText,
+                    w.created_by || 'System'
+                ]);
+            }
+            excelData.push(['']);
+            excelData.push(['']);
+        }
+        
+        // ============================================================
+        // FOOTER - SUMMARY
+        // ============================================================
+        // Calculate totals
+        let totalBudgetAll = 0, totalUsedAll = 0, totalIncomeAll = 0, totalExpensesAll = 0, totalProfitAll = 0;
+        let totalProduced = 0, totalSold = 0;
+        let completedCount = 0, partialCount = 0, pendingCount = 0;
+        
+        for (let w of allDailyWorkData) {
+            let deptId = w.department_id || w.sent_from_dept || 0;
+            let income = parseFloat(w.total_amount || w.income || 0);
+            let expenses = parseFloat(w.expenses || 0);
+            let amount = parseFloat(w.amount || 0);
+            let budget = parseFloat(w.budget || 0);
+            
+            totalIncomeAll += income;
+            totalExpensesAll += expenses;
+            totalProfitAll += (income - expenses);
+            totalProduced += parseInt(w.quantity_produced) || 0;
+            totalSold += parseInt(w.quantity_sold) || 0;
+            
+            let budgetValue = 0, usedValue = 0;
+            if (deptId == 7 || deptId == 6) {
+                budgetValue = income;
+                usedValue = expenses;
+            } else {
+                budgetValue = budget;
+                usedValue = amount;
+            }
+            totalBudgetAll += budgetValue;
+            totalUsedAll += usedValue;
+            
+            let status = w.status || w.payment_status || 'pending';
+            if (status === 'completed' || status === 'Completed' || status === 'paid') completedCount++;
+            else if (status === 'partial' || status === 'Partial') partialCount++;
+            else pendingCount++;
+        }
+        
+        excelData.push(['']);
+        excelData.push(['===================================================']);
+        excelData.push(['📊 SUMMARY']);
+        excelData.push(['===================================================']);
+        excelData.push(['']);
+        excelData.push(['Metric', 'Value']);
+        excelData.push(['Total Records', allDailyWorkData.length]);
+        excelData.push(['Total Budget', totalBudgetAll]);
+        excelData.push(['Total Used', totalUsedAll]);
+        excelData.push(['Total Remaining', totalBudgetAll - totalUsedAll]);
+        excelData.push(['Total Income', totalIncomeAll]);
+        excelData.push(['Total Expenses', totalExpensesAll]);
+        excelData.push(['Total Profit', totalProfitAll]);
+        excelData.push(['Total Produced', totalProduced]);
+        excelData.push(['Total Sold', totalSold]);
+        excelData.push(['Completed', completedCount]);
+        excelData.push(['Partial', partialCount]);
+        excelData.push(['Pending', pendingCount]);
+        excelData.push(['General Records', generalRecords.length]);
+        excelData.push(['Aluminium Records', aluminiumRecords.length]);
+        excelData.push(['Bricks & Timber Records', bricksTimberRecords.length]);
+        
+        // ============================================================
+        // CREATE EXCEL WORKBOOK
+        // ============================================================
+        let wb = XLSX.utils.book_new();
+        let ws = XLSX.utils.aoa_to_sheet(excelData);
+        
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 20 }, // Date/Time
+            { wch: 18 }, // Department/Category
+            { wch: 30 }, // Description
+            { wch: 15 }, // Budget/Amount
+            { wch: 15 }, // Amount/Expenses
+            { wch: 15 }, // Status/Profit
+            { wch: 15 }, // Created By/Status
+            { wch: 15 }, // Extra
+            { wch: 15 }  // Extra
+        ];
+        
+        XLSX.utils.book_append_sheet(wb, ws, 'AllDailyWork');
+        
+        // ============================================================
+        // DOWNLOAD
+        // ============================================================
+        let fileName = `all_dailywork_${new Date().toISOString().slice(0,10)}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        showToast(`✅ ${allDailyWorkData.length} records exported to Excel`, false);
+        addLog(`All daily work exported to Excel (${allDailyWorkData.length} records)`);
+        
+    } catch(e) {
+        console.error('Export Excel error:', e);
+        showToast('Failed to export to Excel: ' + e.message, true);
+    }
+}
+
+
+// ============================================================
+// EXPORT ALL DAILY WORK TO PDF - ALL TABLES
+// ============================================================
+function exportAllDailyWorkToPDF() {
+    if (!allDailyWorkData || allDailyWorkData.length === 0) {
+        showToast('No daily work records to export', true);
+        return;
+    }
+    
+    console.log('📊 Exporting all daily work to PDF...');
+    
+    try {
+        // ============================================================
+        // SPLIT RECORDS BY TYPE
+        // ============================================================
+        const generalRecords = [];
+        const aluminiumRecords = [];
+        const bricksTimberRecords = [];
+        
+        for (let w of allDailyWorkData) {
+            let deptId = w.department_id || w.sent_from_dept || 0;
+            let workType = w.work_type || 'general';
+            
+            if (deptId == 7 || workType === 'aluminium' || workType === 'aluminum') {
+                aluminiumRecords.push(w);
+            } else if (deptId == 6 || workType === 'bricks' || workType === 'timber') {
+                bricksTimberRecords.push(w);
+            } else {
+                generalRecords.push(w);
+            }
+        }
+        
+        // ============================================================
+        // CALCULATE TOTALS
+        // ============================================================
+        let totalBudgetAll = 0, totalUsedAll = 0, totalIncomeAll = 0, totalExpensesAll = 0, totalProfitAll = 0;
+        let totalProduced = 0, totalSold = 0;
+        let completedCount = 0, partialCount = 0, pendingCount = 0, inProgressCount = 0, paidCount = 0;
+        let deptTotals = {};
+        
+        for (let w of allDailyWorkData) {
+            let deptId = w.department_id || w.sent_from_dept || 0;
+            let income = parseFloat(w.total_amount || w.income || 0);
+            let expenses = parseFloat(w.expenses || 0);
+            let amount = parseFloat(w.amount || 0);
+            let budget = parseFloat(w.budget || 0);
+            
+            totalIncomeAll += income;
+            totalExpensesAll += expenses;
+            totalProfitAll += (income - expenses);
+            totalProduced += parseInt(w.quantity_produced) || 0;
+            totalSold += parseInt(w.quantity_sold) || 0;
+            
+            let budgetValue = 0, usedValue = 0;
+            if (deptId == 7 || deptId == 6) {
+                budgetValue = income;
+                usedValue = expenses;
+            } else {
+                budgetValue = budget;
+                usedValue = amount;
+            }
+            totalBudgetAll += budgetValue;
+            totalUsedAll += usedValue;
+            
+            let status = w.status || w.payment_status || 'pending';
+            if (status === 'completed' || status === 'Completed' || status === 'paid') {
+                if (status === 'paid') paidCount++;
+                else completedCount++;
+            } else if (status === 'partial' || status === 'Partial') {
+                partialCount++;
+            } else if (status === 'in_progress' || status === 'In Progress') {
+                inProgressCount++;
+            } else {
+                pendingCount++;
+            }
+            
+            let deptName = departmentNames[deptId] || 'Department ' + deptId;
+            if (!deptTotals[deptName]) {
+                deptTotals[deptName] = { count: 0, budget: 0, used: 0 };
+            }
+            deptTotals[deptName].count++;
+            deptTotals[deptName].budget += budgetValue;
+            deptTotals[deptName].used += usedValue;
+        }
+        
+        let totalRemaining = totalBudgetAll - totalUsedAll;
+        let remainingColor = totalRemaining >= 0 ? '#059669' : '#dc2626';
+        let profitColor = totalProfitAll >= 0 ? '#059669' : '#dc2626';
+        
+        // ============================================================
+        // BUILD DEPARTMENT SUMMARY ROWS
+        // ============================================================
+        let deptRows = '';
+        let sortedDepts = Object.keys(deptTotals).sort();
+        for (let dept of sortedDepts) {
+            let remaining = deptTotals[dept].budget - deptTotals[dept].used;
+            let remColor = remaining >= 0 ? '#059669' : '#dc2626';
+            deptRows += `
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 8px 12px;">${escapeHtml(dept)}</td>
+                    <td style="padding: 8px 12px; text-align: center; font-weight: 600;">${deptTotals[dept].count}</td>
+                    <td style="padding: 8px 12px; text-align: right; font-family: monospace;">${formatMoney(deptTotals[dept].budget)}</td>
+                    <td style="padding: 8px 12px; text-align: right; font-family: monospace;">${formatMoney(deptTotals[dept].used)}</td>
+                    <td style="padding: 8px 12px; text-align: right; font-family: monospace; font-weight: 700; color: ${remColor};">${formatMoney(remaining)}</td>
+                </tr>
+            `;
+        }
+        
+        // ============================================================
+        // BUILD STATUS SUMMARY
+        // ============================================================
+        let statusRows = `
+            <tr><td style="padding: 8px 12px;">✅ Completed</td><td style="padding: 8px 12px; text-align: center; font-weight: 600;">${completedCount}</td></tr>
+            <tr><td style="padding: 8px 12px;">💰 Paid</td><td style="padding: 8px 12px; text-align: center; font-weight: 600;">${paidCount}</td></tr>
+            <tr><td style="padding: 8px 12px;">⏳ Partial</td><td style="padding: 8px 12px; text-align: center; font-weight: 600;">${partialCount}</td></tr>
+            <tr><td style="padding: 8px 12px;">🔄 In Progress</td><td style="padding: 8px 12px; text-align: center; font-weight: 600;">${inProgressCount}</td></tr>
+            <tr><td style="padding: 8px 12px;">🕐 Pending</td><td style="padding: 8px 12px; text-align: center; font-weight: 600;">${pendingCount}</td></tr>
+        `;
+        
+        // ============================================================
+        // BUILD GENERAL TABLE ROWS
+        // ============================================================
+        let generalRows = '';
+        for (let w of generalRecords) {
+            let deptId = w.department_id || w.sent_from_dept || 'Unknown';
+            let deptName = departmentNames[deptId] || 'Department ' + deptId;
+            let budget = parseFloat(w.budget || 0);
+            let amount = parseFloat(w.amount || 0);
+            let status = w.status || 'pending';
+            let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+            let statusBg = status === 'completed' ? '#d1fae5' : status === 'partial' ? '#fef3c7' : '#fee2e2';
+            let statusColor = status === 'completed' ? '#059669' : status === 'partial' ? '#d97706' : '#dc2626';
+            
+            generalRows += `
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; white-space: nowrap; font-size: 9px;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; font-size: 9px;">${escapeHtml(deptName)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; font-size: 9px; max-width: 150px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">${formatMoney(budget)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">${formatMoney(amount)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;"><span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 8px; background: ${statusBg}; color: ${statusColor};">${statusText}</span></td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;">${escapeHtml(w.created_by || 'System')}</td>
+                </tr>
+            `;
+        }
+        
+        // ============================================================
+        // BUILD ALUMINIUM TABLE ROWS
+        // ============================================================
+        let aluminiumRows = '';
+        for (let w of aluminiumRecords) {
+            let income = parseFloat(w.total_amount || w.income || 0);
+            let expenses = parseFloat(w.expenses || 0);
+            let profit = income - expenses;
+            let profitColorRow = profit >= 0 ? '#059669' : '#dc2626';
+            let quantityProduced = parseInt(w.quantity_produced) || 0;
+            let pricePerUnit = parseFloat(w.price_per_unit || 0);
+            if (pricePerUnit === 0 && income > 0 && quantityProduced > 0) {
+                pricePerUnit = income / quantityProduced;
+            }
+            let status = w.status || 'pending';
+            let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+            let statusBg = status === 'completed' ? '#d1fae5' : status === 'partial' ? '#fef3c7' : '#fee2e2';
+            let statusColor = status === 'completed' ? '#059669' : status === 'partial' ? '#d97706' : '#dc2626';
+            
+            aluminiumRows += `
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; white-space: nowrap; font-size: 9px;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; font-size: 9px; max-width: 150px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px; font-family: monospace;">${quantityProduced > 0 ? quantityProduced.toLocaleString() : '-'}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px;">${pricePerUnit > 0 ? formatMoney(pricePerUnit) : '-'}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 600; color: #059669;">${formatMoney(income)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 600; color: #dc2626;">${formatMoney(expenses)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 700; color: ${profitColorRow};">${formatMoney(profit)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;"><span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 8px; background: ${statusBg}; color: ${statusColor};">${statusText}</span></td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;">${escapeHtml(w.created_by || 'System')}</td>
+                </tr>
+            `;
+        }
+        
+        // ============================================================
+        // BUILD BRICKS & TIMBER TABLE ROWS
+        // ============================================================
+        let bricksTimberRows = '';
+        for (let w of bricksTimberRecords) {
+            let totalAmount = parseFloat(w.total_amount || w.income || 0);
+            let expenses = parseFloat(w.expenses || 0);
+            let profit = totalAmount - expenses;
+            let profitColorRow = profit >= 0 ? '#059669' : '#dc2626';
+            let category = w.work_type === 'bricks' ? 'Bricks' : w.work_type === 'timber' ? 'Timber' : 'General';
+            let paymentStatus = w.payment_status || w.status || 'pending';
+            let statusText = paymentStatus === 'completed' ? 'Completed' : paymentStatus === 'partial' ? 'Partial' : 'Pending';
+            let statusBg = paymentStatus === 'completed' ? '#d1fae5' : paymentStatus === 'partial' ? '#fef3c7' : '#fee2e2';
+            let statusColor = paymentStatus === 'completed' ? '#059669' : paymentStatus === 'partial' ? '#d97706' : '#dc2626';
+            
+            bricksTimberRows += `
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; white-space: nowrap; font-size: 9px;">${new Date(w.date).toLocaleString()}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;"><span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 8px; background: ${w.work_type === 'bricks' ? '#fef3c7' : '#d1fae5'}; color: ${w.work_type === 'bricks' ? '#d97706' : '#059669'};">${category}</span></td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; font-size: 9px; max-width: 150px; word-break: break-word;">${escapeHtml(w.work_description || '-')}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 600; color: #059669;">${formatMoney(totalAmount)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 600; color: #dc2626;">${formatMoney(expenses)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: right; font-family: monospace; font-size: 9px; font-weight: 700; color: ${profitColorRow};">${formatMoney(profit)}</td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;"><span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 8px; background: ${statusBg}; color: ${statusColor};">${statusText}</span></td>
+                    <td style="padding: 6px 6px; border: 1px solid #cbd5e1; text-align: center; font-size: 9px;">${escapeHtml(w.created_by || 'System')}</td>
+                </tr>
+            `;
+        }
+        
+        // ============================================================
+        // BUILD COMPLETE PDF HTML
+        // ============================================================
+        let printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            showToast("Please allow popups to generate PDF", true);
+            return;
+        }
+        
+        let htmlContent = `<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>All Daily Work Report - Super Admin</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 30px; }
+                .container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0f74ba; }
+                .header { background: linear-gradient(135deg, #0f74ba, #0a5a8e); color: white; padding: 25px; text-align: center; }
+                .header h1 { font-size: 24px; margin: 0; }
+                .header p { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+                .info-bar { background: #f8fafc; padding: 12px 25px; display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+                .summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; padding: 20px 25px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+                .summary-card { background: white; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #e5e7eb; }
+                .summary-card .label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; }
+                .summary-card .value { font-size: 16px; font-weight: 800; margin-top: 5px; font-family: monospace; }
+                .summary-card.budget .value { color: #059669; }
+                .summary-card.used .value { color: #ea580c; }
+                .summary-card.remaining .value { color: #3b82f6; }
+                .summary-card.total .value { color: #0f74ba; }
+                .summary-card.profit .value { color: #8b5cf6; }
+                .summary-card.depts .value { color: #d97706; }
+                .section-title { background: #0f74ba; color: white; padding: 10px 20px; font-size: 14px; font-weight: 700; margin: 20px 0 0 0; }
+                .section-title.general { background: #0a5a8e; }
+                .section-title.aluminium { background: #4b5563; }
+                .section-title.bricks-timber { background: #b45309; }
+                .summary-table-wrap { padding: 15px 25px; overflow-x: auto; }
+                .summary-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                .summary-table th { background: #f1f5f9; padding: 8px 12px; text-align: left; font-weight: 700; border-bottom: 2px solid #0f74ba; }
+                .summary-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+                .summary-table .text-right { text-align: right; }
+                .summary-table .text-center { text-align: center; }
+                .records-table-wrap { padding: 15px 25px; overflow-x: auto; }
+                .records-table { width: 100%; border-collapse: collapse; font-size: 9px; min-width: 900px; }
+                .records-table th { background: #0f74ba; color: white; padding: 8px 6px; font-weight: 700; text-align: left; border: 1px solid #0a5a8e; font-size: 9px; }
+                .records-table td { padding: 6px 6px; border: 1px solid #cbd5e1; vertical-align: middle; font-size: 9px; }
+                .records-table .text-right { text-align: right; }
+                .records-table .text-center { text-align: center; }
+                .records-table td:last-child { text-align: center; }
+                .table-note { font-size: 10px; color: #6b7280; padding: 5px 25px 10px 25px; font-style: italic; }
+                .footer { text-align: center; font-size: 10px; color: #6b7280; padding: 15px; border-top: 1px solid #e5e7eb; background: #f9fafb; }
+                .print-btn { text-align: center; padding: 15px; background: #f9fafb; border-top: 1px solid #e5e7eb; }
+                .print-btn button { background: #0f74ba; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+                .print-btn button.close-btn { background: #6b7280; margin-left: 10px; }
+                @media print { .print-btn { display: none; } body { background: white; padding: 0; } .header { background: #0f74ba !important; -webkit-print-color-adjust: exact; } .records-table th { background: #0f74ba !important; -webkit-print-color-adjust: exact; } }
+                .no-data { text-align: center; padding: 20px; color: #9ca3af; font-style: italic; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 All Daily Work Report</h1>
+                    <p>Super Admin - Complete Daily Work Records Overview</p>
+                </div>
+                <div class="info-bar">
+                    <span><strong>Department:</strong> Super Admin</span>
+                    <span><strong>Total Records:</strong> ${allDailyWorkData.length}</span>
+                    <span><strong>General:</strong> ${generalRecords.length}</span>
+                    <span><strong>Aluminium:</strong> ${aluminiumRecords.length}</span>
+                    <span><strong>Bricks & Timber:</strong> ${bricksTimberRecords.length}</span>
+                    <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+                </div>
+                
+                <div class="summary-cards">
+                    <div class="summary-card budget"><div class="label">💰 Total Budget</div><div class="value">${formatMoney(totalBudgetAll)}</div></div>
+                    <div class="summary-card used"><div class="label">💸 Total Used</div><div class="value">${formatMoney(totalUsedAll)}</div></div>
+                    <div class="summary-card remaining"><div class="label">📊 Remaining</div><div class="value">${formatMoney(totalRemaining)}</div></div>
+                    <div class="summary-card total"><div class="label">📋 Records</div><div class="value">${allDailyWorkData.length}</div></div>
+                    <div class="summary-card profit"><div class="label">📈 Profit</div><div class="value" style="color: ${profitColor};">${formatMoney(totalProfitAll)}</div></div>
+                    <div class="summary-card depts"><div class="label">🏢 Departments</div><div class="value">${Object.keys(deptTotals).length}</div></div>
+                </div>
+                
+                <div class="section-title"><i class="fas fa-building"></i> Department Summary</div>
+                <div class="summary-table-wrap">
+                    <table class="summary-table">
+                        <thead><tr><th>Department</th><th class="text-center">Records</th><th class="text-right">Budget (TZS)</th><th class="text-right">Used (TZS)</th><th class="text-right">Remaining (TZS)</th></tr></thead>
+                        <tbody>${deptRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td><strong>TOTAL</strong></td>
+                                <td class="text-center"><strong>${allDailyWorkData.length}</strong></td>
+                                <td class="text-right"><strong>${formatMoney(totalBudgetAll)}</strong></td>
+                                <td class="text-right"><strong>${formatMoney(totalUsedAll)}</strong></td>
+                                <td class="text-right"><strong style="color: ${remainingColor};">${formatMoney(totalRemaining)}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                
+                <div class="section-title"><i class="fas fa-chart-pie"></i> Status Summary</div>
+                <div class="summary-table-wrap">
+                    <table class="summary-table" style="max-width: 400px;">
+                        <thead><tr><th>Status</th><th class="text-center">Count</th></tr></thead>
+                        <tbody>${statusRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td><strong>TOTAL</strong></td>
+                                <td class="text-center"><strong>${allDailyWorkData.length}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                
+                <!-- ============================================================
+                     SECTION 1: GENERAL DAILY WORK
+                     ============================================================ -->
+                <div class="section-title general"><i class="fas fa-building"></i> General Daily Work (${generalRecords.length} records)</div>
+                ${generalRecords.length > 0 ? `
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">Date/Time</th>
+                                <th style="width: 14%;">Department</th>
+                                <th style="width: 25%;">Description</th>
+                                <th style="width: 12%;" class="text-right">Budget (TZS)</th>
+                                <th style="width: 12%;" class="text-right">Amount Spent (TZS)</th>
+                                <th style="width: 10%;" class="text-center">Status</th>
+                                <th style="width: 12%;" class="text-center">Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>${generalRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td colspan="3" style="text-align: right;"><strong>GENERAL TOTAL</strong></td>
+                                <td class="text-right"><strong>${formatMoney(generalRecords.reduce((sum, w) => sum + parseFloat(w.budget || 0), 0))}</strong></td>
+                                <td class="text-right"><strong>${formatMoney(generalRecords.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0))}</strong></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                ` : `<div class="no-data">No general daily work records found</div>`}
+                
+                <!-- ============================================================
+                     SECTION 2: ALUMINIUM DAILY WORK
+                     ============================================================ -->
+                <div class="section-title aluminium"><i class="fas fa-industry"></i> 🔩 Aluminium Daily Work (${aluminiumRecords.length} records)</div>
+                ${aluminiumRecords.length > 0 ? `
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 13%;">Date/Time</th>
+                                <th style="width: 20%;">Description</th>
+                                <th style="width: 8%;" class="text-center">Qty Produced</th>
+                                <th style="width: 10%;" class="text-right">Unit Price</th>
+                                <th style="width: 12%;" class="text-right">Total Income</th>
+                                <th style="width: 12%;" class="text-right">Expenses</th>
+                                <th style="width: 10%;" class="text-right">Profit</th>
+                                <th style="width: 8%;" class="text-center">Status</th>
+                                <th style="width: 10%;" class="text-center">Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>${aluminiumRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td colspan="4" style="text-align: right;"><strong>ALUMINIUM TOTAL</strong></td>
+                                <td class="text-right"><strong>${formatMoney(aluminiumRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0), 0))}</strong></td>
+                                <td class="text-right"><strong>${formatMoney(aluminiumRecords.reduce((sum, w) => sum + parseFloat(w.expenses || 0), 0))}</strong></td>
+                                <td class="text-right"><strong style="color: ${aluminiumRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0) - parseFloat(w.expenses || 0), 0) >= 0 ? '#059669' : '#dc2626'};">${formatMoney(aluminiumRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0) - parseFloat(w.expenses || 0), 0))}</strong></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                ` : `<div class="no-data">No aluminium daily work records found</div>`}
+                
+                <!-- ============================================================
+                     SECTION 3: BRICKS & TIMBER DAILY WORK
+                     ============================================================ -->
+                <div class="section-title bricks-timber"><i class="fas fa-cubes"></i> 🧱 Bricks & Timber Daily Work (${bricksTimberRecords.length} records)</div>
+                ${bricksTimberRecords.length > 0 ? `
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 13%;">Date/Time</th>
+                                <th style="width: 8%;" class="text-center">Category</th>
+                                <th style="width: 20%;">Description</th>
+                                <th style="width: 12%;" class="text-right">Total Amount</th>
+                                <th style="width: 12%;" class="text-right">Expenses</th>
+                                <th style="width: 10%;" class="text-right">Profit</th>
+                                <th style="width: 12%;" class="text-center">Payment Status</th>
+                                <th style="width: 10%;" class="text-center">Created By</th>
+                            </tr>
+                        </thead>
+                        <tbody>${bricksTimberRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #fef3c7; font-weight: bold;">
+                                <td colspan="3" style="text-align: right;"><strong>BRICKS & TIMBER TOTAL</strong></td>
+                                <td class="text-right"><strong>${formatMoney(bricksTimberRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0), 0))}</strong></td>
+                                <td class="text-right"><strong>${formatMoney(bricksTimberRecords.reduce((sum, w) => sum + parseFloat(w.expenses || 0), 0))}</strong></td>
+                                <td class="text-right"><strong style="color: ${bricksTimberRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0) - parseFloat(w.expenses || 0), 0) >= 0 ? '#059669' : '#dc2626'};">${formatMoney(bricksTimberRecords.reduce((sum, w) => sum + parseFloat(w.total_amount || w.income || 0) - parseFloat(w.expenses || 0), 0))}</strong></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                ` : `<div class="no-data">No bricks & timber daily work records found</div>`}
+                
+                <!-- ============================================================
+                     GRAND TOTAL
+                     ============================================================ -->
+                <div style="background: #fef3c7; padding: 12px 25px; margin: 15px 25px 0 25px; border-radius: 8px; border: 1px solid #f59e0b;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; font-weight: bold;">
+                        <tr>
+                            <td style="padding: 8px 12px; text-align: right; width: 60%;">📊 GRAND TOTAL (All Departments):</td>
+                            <td style="padding: 8px 12px; text-align: right; font-family: monospace; color: #059669;">${formatMoney(totalBudgetAll)}</td>
+                            <td style="padding: 8px 12px; text-align: right; font-family: monospace; color: #dc2626;">${formatMoney(totalUsedAll)}</td>
+                            <td style="padding: 8px 12px; text-align: right; font-family: monospace; font-weight: 800; color: ${remainingColor};">${formatMoney(totalRemaining)}</td>
+                            <td style="padding: 8px 12px; text-align: center; width: 10%;">${allDailyWorkData.length} records</td>
+                        </tr>
+                        <tr style="font-size: 10px; font-weight: normal; color: #6b7280;">
+                            <td style="padding: 0 12px 8px 12px; text-align: right;"></td>
+                            <td style="padding: 0 12px 8px 12px; text-align: center;">Budget</td>
+                            <td style="padding: 0 12px 8px 12px; text-align: center;">Used</td>
+                            <td style="padding: 0 12px 8px 12px; text-align: center;">Remaining</td>
+                            <td></td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div class="footer">
+                    GeoTraverse ERP System - Super Admin | All Daily Work Report<br>
+                    This report includes all daily work records from all departments
+                </div>
+                <div class="print-btn">
+                    <button onclick="window.print(); setTimeout(function(){ window.close(); }, 1500);">
+                        🖨️ Save as PDF / Print
+                    </button>
+                    <button class="close-btn" onclick="window.close();">
+                        ❌ Close
+                    </button>
+                </div>
+            </div>
+        </body>
+        </html>`;
+        
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        showToast("📄 PDF preview opened - Click 'Save as PDF' to download", false);
+        
+    } catch(e) {
+        console.error('Export PDF error:', e);
+        showToast('Failed to export to PDF: ' + e.message, true);
+    }
+}
+
 // ============================================================
 // VIEW DAILY WORK RECORD - Super Admin
 // ============================================================
