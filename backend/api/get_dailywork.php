@@ -1,12 +1,20 @@
 <?php
 // backend/api/get_dailywork.php
 // ============================================================
-// FIXED: Inarudisha daily work kwa SUPER ADMIN na Departments
+// FIXED: Super Admin with all=1 sees ALL daily work from ALL departments
+// But individual departments only see their own
 // ============================================================
 
-error_reporting(0);
+// ============================================================
+// ERROR REPORTING
+// ============================================================
+error_reporting(E_ALL);
 ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
+// ============================================================
+// HEADERS
+// ============================================================
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -30,17 +38,18 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    if (ob_get_length()) ob_clean();
     echo json_encode([
         'success' => false,
-        'message' => 'Database error: ' . $e->getMessage(),
+        'message' => 'Database connection failed: ' . $e->getMessage(),
         'data' => []
     ]);
     exit;
 }
 
+// ============================================================
+// FUNCTION TO SEND JSON
+// ============================================================
 function sendJson($data) {
-    if (ob_get_length()) ob_clean();
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -51,43 +60,41 @@ function sendJson($data) {
 $department_id = isset($_GET['department_id']) ? intval($_GET['department_id']) : 0;
 $project_id = isset($_GET['project_id']) ? intval($_GET['project_id']) : 0;
 $project_name = isset($_GET['project_name']) ? trim($_GET['project_name']) : '';
+$work_type = isset($_GET['work_type']) ? trim($_GET['work_type']) : '';
 $all = isset($_GET['all']) ? intval($_GET['all']) : 0;
 
-// ============================================================
-// KWA SUPER ADMIN (department_id = 1) - ONESHA ZOTE
-// ============================================================
-// Ikiwa department_id ni 1 (Super Admin) au all=1, onesha daily work zote
-$isSuperAdmin = ($department_id == 1 || $all == 1);
-
-if ($department_id <= 0 && !$isSuperAdmin) {
-    sendJson([
+if ($department_id <= 0 && $all == 0) {
+    echo json_encode([
         'success' => false,
         'message' => 'Department ID required',
         'data' => []
     ]);
+    exit;
 }
 
+// ============================================================
+// GET DAILY WORK
+// ============================================================
 try {
     $dailyWork = [];
     $seenIds = [];
 
     // ============================================================
-    // 1. ORIGINAL DAILY WORK - ORIGINAL RECORDS
+    // 1. ORIGINAL DAILY WORK (is_original = 1)
     // ============================================================
     $query = "SELECT 
                 d.*,
                 'original' as source_type,
-                0 as is_sent_copy,
                 0 as is_received,
                 NULL as sent_from_name,
-                NULL as sent_to_name,
-                d.department_id as owner_department_id
+                NULL as sent_to_name
               FROM dailywork d
-              WHERE (d.is_deleted = 0 OR d.is_deleted IS NULL)";
+              WHERE d.is_original = 1
+                AND d.is_deleted = 0";
     
-    // Kama siyo Super Admin, filter kwa department
-    if (!$isSuperAdmin) {
-        $query .= " AND d.department_id = " . intval($department_id);
+    // If not all=1, filter by department
+    if ($all != 1) {
+        $query .= " AND d.department_id = ?";
     }
     
     if ($project_id > 0) {
@@ -96,224 +103,137 @@ try {
     if (!empty($project_name)) {
         $query .= " AND d.project_name = '" . addslashes($project_name) . "'";
     }
-    $query .= " ORDER BY d.date DESC, d.id DESC";
+    if (!empty($work_type)) {
+        $query .= " AND d.work_type = '" . addslashes($work_type) . "'";
+    }
+    $query .= " ORDER BY d.date DESC";
     
     $stmt = $pdo->prepare($query);
-    $stmt->execute();
+    if ($all != 1) {
+        $stmt->execute([$department_id]);
+    } else {
+        $stmt->execute();
+    }
+    
     while ($row = $stmt->fetch()) {
-        $row['is_sent'] = 0;
-        $row['is_original'] = 1;
-        $row['source_type'] = 'original';
+        // Skip if already seen
+        if (isset($seenIds[$row['id']])) {
+            continue;
+        }
+        $row['is_sent'] = ($row['sent_count'] > 0) ? 1 : 0;
         $dailyWork[] = $row;
         $seenIds[$row['id']] = true;
     }
 
     // ============================================================
-    // 2. SENT DAILY WORK - RECEIVER ANAONA ZILIZOTUMWA KWAKE
+    // 2. SENT DAILY WORK (is_sent_copy = 1)
     // ============================================================
     $query = "SELECT 
-                sd.id as sent_id,
-                sd.original_dailywork_id,
-                sd.dailywork_data,
-                sd.from_department_id,
-                sd.to_department_id,
-                sd.sent_by,
-                sd.sent_at,
-                sd.is_viewed,
-                sd.sent_count,
-                sd.from_department_name,
-                sd.to_department_name,
-                sd.dailywork_project_name,
-                sd.dailywork_date,
-                sd.dailywork_amount,
-                sd.dailywork_budget,
-                sd.dailywork_status,
+                d.*,
                 'sent' as source_type,
-                1 as is_sent_copy,
                 1 as is_received,
-                0 as is_original,
-                sd.from_department_name as sent_from_name,
-                sd.to_department_name as sent_to_name,
-                CASE WHEN (sd.is_viewed = 0 OR sd.is_viewed IS NULL) THEN 1 ELSE 0 END as _is_unviewed,
-                sd.from_department_id as owner_department_id
-              FROM sent_dailywork sd
-              WHERE (sd.is_deleted = 0 OR sd.is_deleted IS NULL)";
+                d.sent_from_dept as sent_from_name,
+                NULL as sent_to_name
+              FROM dailywork d
+              WHERE d.is_sent_copy = 1
+                AND d.is_deleted = 0";
     
-    // Kama siyo Super Admin, filter kwa department (receiver)
-    if (!$isSuperAdmin) {
-        $query .= " AND sd.to_department_id = " . intval($department_id);
+    // If not all=1, filter by department
+    if ($all != 1) {
+        $query .= " AND d.department_id = ?";
     }
-    // Kama ni Super Admin, ona zote (no filter)
     
     if ($project_id > 0) {
-        $query .= " AND sd.original_dailywork_id IN (SELECT id FROM dailywork WHERE project_id = " . intval($project_id) . ")";
+        $query .= " AND d.project_id = " . intval($project_id);
     }
     if (!empty($project_name)) {
-        $query .= " AND sd.dailywork_project_name = '" . addslashes($project_name) . "'";
+        $query .= " AND d.project_name = '" . addslashes($project_name) . "'";
     }
-    $query .= " ORDER BY sd.sent_at DESC";
+    if (!empty($work_type)) {
+        $query .= " AND d.work_type = '" . addslashes($work_type) . "'";
+    }
+    $query .= " ORDER BY d.date DESC";
     
     $stmt = $pdo->prepare($query);
-    $stmt->execute();
+    if ($all != 1) {
+        $stmt->execute([$department_id]);
+    } else {
+        $stmt->execute();
+    }
+    
     while ($row = $stmt->fetch()) {
-        $row['is_sent'] = 1;
-        
-        // Extract data from dailywork_data
-        if ($row['dailywork_data']) {
-            $dwData = json_decode($row['dailywork_data'], true);
-            if ($dwData && is_array($dwData)) {
-                foreach ($dwData as $key => $value) {
-                    if (!isset($row[$key]) || $row[$key] === null || $row[$key] === '') {
-                        $row[$key] = $value;
-                    }
-                }
-            }
-        }
-        unset($row['dailywork_data']);
-        
-        // Skip if already seen as original (only for non-superadmin)
-        if (!$isSuperAdmin && isset($seenIds[$row['original_dailywork_id']])) {
+        // Skip duplicates
+        if (isset($seenIds[$row['id']])) {
             continue;
         }
         
-        $dailyWork[] = $row;
-        $seenIds['sent_' . $row['sent_id']] = true;
-    }
-
-    // ============================================================
-    // 3. SENT DAILY WORK - SENDER ANAONA ZILE ALIZOTUMA
-    // ============================================================
-    $query = "SELECT 
-                sd.id as sent_id,
-                sd.original_dailywork_id,
-                sd.dailywork_data,
-                sd.from_department_id,
-                sd.to_department_id,
-                sd.sent_by,
-                sd.sent_at,
-                sd.is_viewed,
-                sd.sent_count,
-                sd.from_department_name,
-                sd.to_department_name,
-                sd.dailywork_project_name,
-                sd.dailywork_date,
-                sd.dailywork_amount,
-                sd.dailywork_budget,
-                sd.dailywork_status,
-                'sent_from' as source_type,
-                1 as is_sent_copy,
-                0 as is_received,
-                0 as is_original,
-                sd.from_department_name as sent_from_name,
-                sd.to_department_name as sent_to_name,
-                0 as _is_unviewed,
-                sd.from_department_id as owner_department_id
-              FROM sent_dailywork sd
-              WHERE (sd.is_deleted = 0 OR sd.is_deleted IS NULL)";
-    
-    // Kama siyo Super Admin, filter kwa department (sender)
-    if (!$isSuperAdmin) {
-        $query .= " AND sd.from_department_id = " . intval($department_id);
-    }
-    // Kama ni Super Admin, ona zote (no filter)
-    
-    if ($project_id > 0) {
-        $query .= " AND sd.original_dailywork_id IN (SELECT id FROM dailywork WHERE project_id = " . intval($project_id) . ")";
-    }
-    if (!empty($project_name)) {
-        $query .= " AND sd.dailywork_project_name = '" . addslashes($project_name) . "'";
-    }
-    $query .= " ORDER BY sd.sent_at DESC";
-    
-    $stmt = $pdo->prepare($query);
-    $stmt->execute();
-    while ($row = $stmt->fetch()) {
-        $row['is_sent'] = 1;
-        
-        if ($row['dailywork_data']) {
-            $dwData = json_decode($row['dailywork_data'], true);
-            if ($dwData && is_array($dwData)) {
-                foreach ($dwData as $key => $value) {
-                    if (!isset($row[$key]) || $row[$key] === null || $row[$key] === '') {
-                        $row[$key] = $value;
-                    }
+        // Get sender department name
+        if ($row['sent_from_dept']) {
+            try {
+                $deptStmt = $pdo->prepare("SELECT name FROM departments WHERE id = ?");
+                $deptStmt->execute([$row['sent_from_dept']]);
+                $deptName = $deptStmt->fetchColumn();
+                if ($deptName) {
+                    $row['sent_from_name'] = $deptName;
                 }
-            }
-        }
-        unset($row['dailywork_data']);
-        
-        // Skip if already seen (only for non-superadmin)
-        if (!$isSuperAdmin) {
-            if (isset($seenIds[$row['original_dailywork_id']]) || isset($seenIds['sent_' . $row['sent_id']])) {
-                continue;
+            } catch(PDOException $e) {
+                // Ignore
             }
         }
         
+        $row['is_sent'] = 1;
         $dailyWork[] = $row;
-        $seenIds['sent_from_' . $row['sent_id']] = true;
+        $seenIds[$row['id']] = true;
     }
 
     // ============================================================
-    // 4. REMOVE DUPLICATES (KWA SUPER ADMIN)
+    // 3. SENT DAILY WORK TRACKING - For additional metadata
     // ============================================================
-    if ($isSuperAdmin) {
-        $uniqueWork = [];
-        $uniqueIds = [];
-        foreach ($dailyWork as $dw) {
-            $id = $dw['original_dailywork_id'] ?? $dw['id'] ?? $dw['sent_id'] ?? 0;
-            $key = $dw['source_type'] . '_' . $id;
-            if (!in_array($key, $uniqueIds)) {
-                $uniqueIds[] = $key;
-                $uniqueWork[] = $dw;
+    $sentQuery = "SELECT 
+                    sd.*,
+                    d1.name as from_dept_name,
+                    d2.name as to_dept_name
+                  FROM sent_dailywork sd
+                  LEFT JOIN departments d1 ON d1.id = sd.from_department_id
+                  LEFT JOIN departments d2 ON d2.id = sd.to_department_id
+                  WHERE sd.is_deleted = 0
+                  ORDER BY sd.sent_at DESC";
+    
+    $sentStmt = $pdo->prepare($sentQuery);
+    $sentStmt->execute();
+    $sentDailyWork = $sentStmt->fetchAll();
+    
+    // Merge sent dailywork info with existing records
+    foreach ($dailyWork as &$dw) {
+        foreach ($sentDailyWork as $sent) {
+            if ($sent['original_dailywork_id'] == $dw['id'] || $sent['copy_dailywork_id'] == $dw['id']) {
+                $dw['sent_from_name'] = $sent['from_dept_name'] ?? $dw['sent_from_name'] ?? null;
+                $dw['sent_to_name'] = $sent['to_dept_name'] ?? $dw['sent_to_name'] ?? null;
+                $dw['sent_count'] = $sent['sent_count'] ?? $dw['sent_count'] ?? 0;
+                $dw['sent_at'] = $sent['sent_at'] ?? $dw['sent_at'] ?? null;
+                $dw['is_viewed'] = $sent['is_viewed'] ?? 0;
+                break;
             }
         }
-        $dailyWork = $uniqueWork;
     }
 
     // ============================================================
-    // 5. SORT BY DATE (newest first)
+    // 4. SORT BY DATE (newest first)
     // ============================================================
     usort($dailyWork, function($a, $b) {
-        $dateA = strtotime($a['date'] ?? $a['dailywork_date'] ?? $a['sent_at'] ?? '1970-01-01');
-        $dateB = strtotime($b['date'] ?? $b['dailywork_date'] ?? $b['sent_at'] ?? '1970-01-01');
+        $dateA = strtotime($a['date'] ?? '1970-01-01');
+        $dateB = strtotime($b['date'] ?? '1970-01-01');
         return $dateB - $dateA;
     });
 
     // ============================================================
-    // 6. GET DEPARTMENT NAMES FOR DISPLAY
-    // ============================================================
-    $deptNames = [];
-    try {
-        $deptStmt = $pdo->query("SELECT id, name FROM departments");
-        while ($dept = $deptStmt->fetch()) {
-            $deptNames[$dept['id']] = $dept['name'];
-        }
-    } catch(PDOException $e) {
-        // Ignore
-    }
-
-    // Add department names to each record
-    foreach ($dailyWork as &$dw) {
-        $deptId = $dw['department_id'] ?? $dw['owner_department_id'] ?? 0;
-        $dw['department_name'] = $deptNames[$deptId] ?? 'Unknown Department';
-        
-        // Add sent from/to names if missing
-        if (empty($dw['sent_from_name']) && isset($dw['from_department_id'])) {
-            $dw['sent_from_name'] = $deptNames[$dw['from_department_id']] ?? 'Unknown';
-        }
-        if (empty($dw['sent_to_name']) && isset($dw['to_department_id'])) {
-            $dw['sent_to_name'] = $deptNames[$dw['to_department_id']] ?? 'Unknown';
-        }
-    }
-
-    // ============================================================
-    // 7. SEND RESPONSE
+    // 5. ADD DEBUG INFO
     // ============================================================
     $originalCount = count(array_filter($dailyWork, function($w) { 
         return $w['source_type'] === 'original'; 
     }));
     $sentCount = count(array_filter($dailyWork, function($w) { 
-        return $w['source_type'] === 'sent' || $w['source_type'] === 'sent_from'; 
+        return $w['source_type'] === 'sent'; 
     }));
 
     sendJson([
@@ -321,13 +241,14 @@ try {
         'data' => $dailyWork,
         'count' => count($dailyWork),
         'department_id' => $department_id,
-        'is_super_admin' => $isSuperAdmin,
         'project_id' => $project_id,
         'project_name' => $project_name,
+        'work_type' => $work_type,
+        'all' => $all,
         'debug' => [
             'original_count' => $originalCount,
             'sent_count' => $sentCount,
-            'note' => $isSuperAdmin ? 'Super Admin sees ALL daily work records' : 'Department sees own records only'
+            'note' => $all == 1 ? 'All departments included' : 'Filtered by department: ' . $department_id
         ],
         'message' => 'Daily work retrieved successfully'
     ]);
