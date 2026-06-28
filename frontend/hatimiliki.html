@@ -2240,52 +2240,76 @@ function viewTitleDeed(id) {
     openModal('viewProjectModal');
 }
 
+// ============================================================
+// LOAD DAILY WORK FOR PROJECT - FORCE REFRESH
+// ============================================================
 function loadDailyWorkForProject(projectId) {
-    var project = projects.find(function(p) { return p.id === projectId; });
-    if (!project) return;
-    var projectDailyWork = dailyworkData.filter(function(w) {
-        if (w.project_id && parseInt(w.project_id) === parseInt(projectId)) return true;
-        if (w.project_name && w.project_name === project.name) return true;
-        return false;
+    var project = projects.find(function(p) { 
+        return parseInt(p.id) === parseInt(projectId); 
     });
-    var totalBudget = 0, totalExpenses = 0;
-    for (var i = 0; i < projectDailyWork.length; i++) {
-        var w = projectDailyWork[i];
-        totalBudget += parseFloat(w.budget) || 0;
-        totalExpenses += parseFloat(w.amount) || 0;
+    if (!project) {
+        console.log('⚠️ Project not found:', projectId);
+        return Promise.resolve();
     }
-    var tbody = document.getElementById('dailyWorkTableBody');
-    if (!tbody) return;
-    if (projectDailyWork.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No daily work records for this project</td></tr>';
-        updateDailyWorkSummary();
-        return;
-    }
-    var html = '';
-    for (var j = 0; j < projectDailyWork.length; j++) {
-        var w = projectDailyWork[j];
-        var budget = parseFloat(w.budget) || 0;
-        var amountSpent = parseFloat(w.amount) || 0;
-        var statusValue = w.status || 'pending';
-        var statusText = '', statusBg = '', statusColor = '';
-        if (statusValue === 'completed' || statusValue === 'Completed') { statusText = 'Completed'; statusBg = '#d1fae5'; statusColor = '#059669'; }
-        else if (statusValue === 'partial' || statusValue === 'Partial') { statusText = 'Partial'; statusBg = '#fef3c7'; statusColor = '#d97706'; }
-        else { statusText = 'Pending'; statusBg = '#fee2e2'; statusColor = '#dc2626'; }
-        var dateTime = w.date ? new Date(w.date).toLocaleString() : 'N/A';
-        var description = w.work_description || '-';
-        html += '<tr id="daily-row-' + w.id + '" style="border-bottom: 1px solid #e5e7eb;">' +
-            '<td style="padding: 10px 8px; white-space: nowrap;">' + dateTime + '</td>' +
-            '<td style="padding: 10px 8px; word-break: break-word;">' + escapeHtml(description) + '</td>' +
-            '<td style="padding: 10px 8px; text-align: right; font-family: monospace; font-weight: 600;">' + formatCurrency(budget) + '</td>' +
-            '<td style="padding: 10px 8px; text-align: right; font-family: monospace; font-weight: 600;">' + formatCurrency(amountSpent) + '</td>' +
-            '<td style="padding: 10px 8px; text-align: center;"><span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 10px; font-weight: 500; background: ' + statusBg + '; color: ' + statusColor + ';">' + statusText + '</span></td>' +
-            '<td style="padding: 10px 8px; text-align: center;"><div class="flex gap-2 justify-center"><button onclick="viewDailyWork(' + w.id + ')" class="action-btn view" title="View"><i class="fas fa-eye"></i></button><button onclick="editDailyWork(' + w.id + ')" class="action-btn edit" title="Edit"><i class="fas fa-edit"></i></button><button onclick="deleteDailyWork(' + w.id + ')" class="action-btn delete" title="Delete"><i class="fas fa-trash"></i></button></div></td>' +
-        '</tr>';
-    }
-    tbody.innerHTML = html;
-    updateDailyWorkSummary();
+    
+    console.log('📊 Loading daily work for project:', project.name);
+    
+    return new Promise(function(resolve) {
+        // ============================================================
+        // ✅ FORCE FRESH FETCH FROM API
+        // ============================================================
+        var timestamp = new Date().getTime();
+        apiCall('get_dailywork.php?department_id=' + DEPARTMENT_ID + '&project_id=' + projectId + '&_=' + timestamp, 'GET')
+            .then(function(res) {
+                console.log('📥 Daily work API response:', res);
+                
+                var projectDailyWork = [];
+                if (res.success && res.data) {
+                    projectDailyWork = res.data.filter(function(w) {
+                        return (!w.is_deleted || w.is_deleted != 1);
+                    });
+                    console.log('✅ Found ' + projectDailyWork.length + ' daily work records');
+                }
+                
+                // ============================================================
+                // ✅ UPDATE GLOBAL DAILYWORK DATA
+                // ============================================================
+                // Merge with existing dailyworkData
+                for (var i = 0; i < projectDailyWork.length; i++) {
+                    var w = projectDailyWork[i];
+                    var exists = false;
+                    for (var j = 0; j < dailyworkData.length; j++) {
+                        if (dailyworkData[j].id === w.id) {
+                            dailyworkData[j] = w;
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists) {
+                        dailyworkData.push(w);
+                    }
+                }
+                
+                // ============================================================
+                // ✅ STORE IN PROJECT
+                // ============================================================
+                project.daily_work = projectDailyWork;
+                project.daily_work_count = projectDailyWork.length;
+                
+                // ============================================================
+                // ✅ RENDER TABLE
+                // ============================================================
+                renderDailyWorkTable(projectId);
+                updateDailyWorkSummary();
+                
+                resolve(projectDailyWork);
+            })
+            .catch(function(e) {
+                console.error('❌ Error loading daily work:', e);
+                resolve([]);
+            });
+    });
 }
-
 function updateDailyWorkSummary() {
     var project = projects.find(function(p) { return p.id === currentProjectId; });
     if (!project) return;
@@ -2312,6 +2336,9 @@ function updateDailyWorkSummary() {
     }
 }
 
+// ============================================================
+// TOGGLE DAILY WORK TABLE - WITH FRESH DATA
+// ============================================================
 function toggleDailyWorkTable() {
     var container = document.getElementById('dailyWorkListContainer');
     var summary = document.getElementById('dailyWorkSummary');
@@ -2319,7 +2346,9 @@ function toggleDailyWorkTable() {
     var excelBtn = document.getElementById('exportDailyWorkExcelBtn');
     var pdfBtn = document.getElementById('exportDailyWorkPDFBtn');
     var toggleBtn = document.getElementById('toggleDailyWorkBtn');
+    
     if (!container) return;
+    
     if (container.style.display === 'none' || container.style.display === '') {
         container.style.display = 'block';
         if (summary) summary.style.display = 'grid';
@@ -2327,6 +2356,13 @@ function toggleDailyWorkTable() {
         if (excelBtn) excelBtn.style.display = 'inline-flex';
         if (pdfBtn) pdfBtn.style.display = 'inline-flex';
         if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Hide Daily Work';
+        
+        // ============================================================
+        // ✅ REFRESH DATA WHEN SHOWING
+        // ============================================================
+        if (currentProjectId) {
+            loadDailyWorkForProject(currentProjectId);
+        }
     } else {
         container.style.display = 'none';
         if (summary) summary.style.display = 'none';
@@ -2336,7 +2372,6 @@ function toggleDailyWorkTable() {
         if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-table mr-1"></i> Show Daily Work';
     }
 }
-
 function openDailyWorkModal() {
     var p = projects.find(function(proj) { return proj.id === currentProjectId; });
     if (p) {
@@ -2352,6 +2387,9 @@ function openDailyWorkModal() {
     }
 }
 
+// ============================================================
+// SAVE DAILY WORK - FIXED (Auto Refresh After Add)
+// ============================================================
 function saveDailyWork() {
     var id = document.getElementById('dailyworkId').value;
     var datetime = document.getElementById('dailyworkDateTime').value;
@@ -2361,26 +2399,88 @@ function saveDailyWork() {
     var amountSpent = parseAmount(document.getElementById('dailyworkAmount').value);
     var description = document.getElementById('dailyworkDesc').value;
     var status = document.getElementById('dailyworkStatus').value;
-    if (!datetime) { showToast('Date & Time required', true); return; }
-    if (!projectId) { showToast('Project ID missing', true); return; }
-    var data = { date: datetime, project_id: projectId, project_name: projectName, work_description: description, budget: budget, amount: amountSpent, status: status, department_id: DEPARTMENT_ID, created_by: CURRENT_USER, updated_by: id ? CURRENT_USER : null };
+    
+    if (!datetime) { 
+        showToast('Date & Time required', true); 
+        return; 
+    }
+    if (!projectId) { 
+        showToast('Project ID missing', true); 
+        return; 
+    }
+    
+    var data = { 
+        date: datetime, 
+        project_id: projectId, 
+        project_name: projectName, 
+        work_description: description, 
+        budget: budget, 
+        amount: amountSpent, 
+        status: status, 
+        department_id: DEPARTMENT_ID, 
+        created_by: CURRENT_USER,
+        updated_by: id ? CURRENT_USER : null
+    };
+    
     var endpoint = id ? 'update_dailywork.php' : 'add_dailywork.php';
     var payload = id ? { ...data, id: parseInt(id) } : data;
+    
     var btn = document.querySelector('#dailyworkModal .btn-primary');
     var originalText = btn.innerHTML;
     btn.innerHTML = '<span class="loading-spinner"></span> Saving...';
     btn.disabled = true;
-    apiCall(endpoint, 'POST', payload).then(function(res) {
-        if (res.success) {
-            showToast(id ? 'Daily work updated' : 'Daily work added');
-            addLog(id ? 'Daily work updated for ' + projectName : 'Daily work added for ' + projectName);
-            closeModal('dailyworkModal');
-            if (currentProjectId) { fetchDailyWork(); loadDailyWorkForProject(currentProjectId); }
+    
+    apiCall(endpoint, 'POST', payload)
+        .then(function(res) {
+            if (res && res.success) {
+                showToast(id ? '✅ Daily work updated' : '✅ Daily work added', false);
+                addLog(id ? 'Daily work updated for ' + projectName : 'Daily work added for ' + projectName);
+                closeModal('dailyworkModal');
+                
+                // ============================================================
+                // ✅ STEP 1: FETCH FRESH DAILY WORK DATA
+                // ============================================================
+                return fetchDailyWork();
+            } else {
+                showToast(res?.message || 'Failed to save daily work', true);
+                throw new Error('Save failed');
+            }
+        })
+        .then(function() {
+            // ============================================================
+            // ✅ STEP 2: RELOAD DAILY WORK FOR PROJECT
+            // ============================================================
+            if (currentProjectId) {
+                return loadDailyWorkForProject(currentProjectId);
+            }
+            return Promise.resolve();
+        })
+        .then(function() {
+            // ============================================================
+            // ✅ STEP 3: UPDATE SUMMARY AND DASHBOARD
+            // ============================================================
+            updateDailyWorkSummary();
             loadDashboard();
-        } else { showToast(res.message || 'Failed to save daily work', true); }
-    }).catch(function(e) { console.error('Save daily work error:', e); showToast('Network error: ' + e.message, true); }).finally(function() { btn.innerHTML = originalText; btn.disabled = false; });
+            console.log('✅ Daily work refreshed successfully');
+        })
+        .catch(function(e) {
+            console.error('Save daily work error:', e);
+            // If API failed but we got a success response, still try to refresh
+            if (e.message !== 'Save failed') {
+                fetchDailyWork().then(function() {
+                    if (currentProjectId) {
+                        loadDailyWorkForProject(currentProjectId);
+                        updateDailyWorkSummary();
+                    }
+                    loadDashboard();
+                });
+            }
+        })
+        .finally(function() {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        });
 }
-
 function viewDailyWork(id) {
     var w = dailyworkData.find(function(work) { return work.id === id; });
     if (w) {

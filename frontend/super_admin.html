@@ -794,6 +794,11 @@ body.dark-mode .request-table .status-request-rejected {
         <span>Budget Requests</span>
         <span id="requestBadge" class="badge hidden">0</span>
     </div>
+        <div class="nav-item" data-page="dailywork">
+        <i class="fas fa-calendar-day w-5"></i>
+        <span>All Daily Work</span>
+        <span id="dailyworkBadge" class="badge hidden">0</span>
+    </div>
     <div class="nav-item" data-page="reports">
         <i class="fas fa-chart-line w-5"></i>
         <span>Reports</span>
@@ -835,6 +840,8 @@ body.dark-mode .request-table .status-request-rejected {
         <div id="projectsPage" class="section p-4 hidden"></div>
         <div id="requestsPage" class="section p-4 hidden"></div>
         <div id="reportsPage" class="section p-4 hidden"></div>
+        <!-- ✅ ADD DAILYWORK PAGE HERE - AFTER REPORTS PAGE -->
+<div id="dailyworkPage" class="section p-4 hidden"></div>
         <div id="settingsPage" class="section p-4 hidden"></div>
     </main>
 </div>
@@ -1151,7 +1158,7 @@ function initDarkMode() {
 const API_BASE = '../backend/api/';
 const DEPARTMENT_ID = 1;
 var CURRENT_USER = "Super Admin";  // ✅ ADD THIS
-let employeesData = [], projectsData = [], dailyworkData = [], reportsData = [], departmentsList = [], uploadedReportsData = [], projectDocuments = [];
+let employeesData = [], projectsData = [], dailyworkData = [], allDailyWorkData = [], reportsData = [], departmentsList = [], uploadedReportsData = [], projectDocuments = [];
 let budgetRequests = [], transactionsData = [];
 let recycleBinData = [];
 let unviewedProjectsCount = 0, unviewedReportsCount = 0, unviewedRequestsCount = 0;
@@ -8971,6 +8978,1261 @@ async function sendUploadedReportToDept(reportId, deptId) {
         }
     }
 }
+
+// ============================================================
+// LOAD ALL DAILY WORK - VIEW & DELETE ONLY (Super Admin)
+// ============================================================
+async function loadAllDailyWork(highlightId = null) {
+    console.log('📊 [loadAllDailyWork] Loading all daily work from all departments...');
+    
+    const container = document.getElementById('dailyworkPage');
+    if (container) {
+        container.innerHTML = `
+            <div class="flex justify-center items-center h-64">
+                <div class="loading-spinner"></div>
+                <span class="ml-3 text-gray-500">Loading daily work records...</span>
+            </div>
+        `;
+    }
+    
+    try {
+        // ============================================================
+        // FETCH ALL DAILY WORK
+        // ============================================================
+        const timestamp = new Date().getTime();
+        const res = await apiCall(`get_dailywork.php?all=1&_=${timestamp}`, 'GET');
+        
+        console.log('📥 Daily work response:', res);
+        
+        let records = [];
+        
+        if (res && res.success && res.data) {
+            records = res.data.filter(w => 
+                (!w.is_deleted || w.is_deleted != 1) &&
+                (!w.deleted_at || w.deleted_at === null)
+            );
+            console.log(`✅ Loaded ${records.length} daily work records`);
+        } else {
+            console.warn('⚠️ No daily work records found');
+            records = [];
+        }
+        
+        allDailyWorkData = records;
+        
+        // ============================================================
+        // SPLIT RECORDS BY DEPARTMENT/TYPE
+        // ============================================================
+        const generalRecords = [];
+        const aluminiumRecords = [];
+        const bricksTimberRecords = [];
+        
+        for (let w of records) {
+            let deptId = w.department_id || w.sent_from_dept || 0;
+            let workType = w.work_type || 'general';
+            
+            if (deptId == 7 || workType === 'aluminium' || workType === 'aluminum') {
+                aluminiumRecords.push(w);
+            } else if (deptId == 6 || workType === 'bricks' || workType === 'timber') {
+                bricksTimberRecords.push(w);
+            } else {
+                generalRecords.push(w);
+            }
+        }
+        
+        console.log(`📊 Records split: General=${generalRecords.length}, Aluminium=${aluminiumRecords.length}, Bricks&Timber=${bricksTimberRecords.length}`);
+        
+        // ============================================================
+        // BUILD HTML - WITH BEAUTIFUL CSS
+        // ============================================================
+        let html = `
+            <style>
+                /* ============================================================
+                   DAILY WORK PAGE STYLES
+                   ============================================================ */
+                .dailywork-page {
+                    padding: 20px;
+                }
+                
+                /* Summary Cards */
+                .summary-grid {
+                    display: grid;
+                    grid-template-columns: repeat(5, 1fr);
+                    gap: 15px;
+                    margin-bottom: 25px;
+                }
+                @media (max-width: 768px) {
+                    .summary-grid {
+                        grid-template-columns: repeat(2, 1fr);
+                    }
+                }
+                @media (max-width: 480px) {
+                    .summary-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+                
+                .summary-card {
+                    background: white;
+                    border-radius: 16px;
+                    padding: 18px 20px;
+                    text-align: center;
+                    border: 1px solid #e5e7eb;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                    transition: all 0.3s ease;
+                    position: relative;
+                    overflow: hidden;
+                }
+                .summary-card:hover {
+                    transform: translateY(-4px);
+                    box-shadow: 0 8px 25px rgba(0,0,0,0.10);
+                }
+                .summary-card .card-icon {
+                    font-size: 22px;
+                    margin-bottom: 6px;
+                    display: block;
+                }
+                .summary-card .card-label {
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: #6b7280;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 4px;
+                }
+                .summary-card .card-value {
+                    font-size: 22px;
+                    font-weight: 800;
+                    font-family: 'JetBrains Mono', monospace;
+                    line-height: 1.2;
+                }
+                .summary-card .card-sub {
+                    font-size: 10px;
+                    color: #94a3b8;
+                    margin-top: 4px;
+                }
+                .summary-card.total .card-value { color: #0f74ba; }
+                .summary-card.general .card-value { color: #06b6d4; }
+                .summary-card.aluminium .card-value { color: #6b7280; }
+                .summary-card.bricks-timber .card-value { color: #d97706; }
+                .summary-card.departments .card-value { color: #8b5cf6; }
+                
+                .summary-card .card-accent {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 4px;
+                }
+                .summary-card.total .card-accent { background: linear-gradient(90deg, #0f74ba, #0a5a8e); }
+                .summary-card.general .card-accent { background: linear-gradient(90deg, #06b6d4, #0891b2); }
+                .summary-card.aluminium .card-accent { background: linear-gradient(90deg, #6b7280, #4b5563); }
+                .summary-card.bricks-timber .card-accent { background: linear-gradient(90deg, #d97706, #b45309); }
+                .summary-card.departments .card-accent { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
+                
+                /* Table Containers */
+                .table-container {
+                    background: white;
+                    border-radius: 16px;
+                    border: 1px solid #e5e7eb;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                    margin-bottom: 25px;
+                    overflow: hidden;
+                }
+                .table-container:last-child {
+                    margin-bottom: 0;
+                }
+                
+                .table-header {
+                    padding: 14px 20px;
+                    border-bottom: 2px solid #e5e7eb;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                }
+                .table-header h3 {
+                    font-weight: 700;
+                    font-size: 15px;
+                    margin: 0;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .table-header .badge-count {
+                    background: #f3f4f6;
+                    padding: 2px 12px;
+                    border-radius: 20px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #6b7280;
+                }
+                
+                /* Table Colors - Match Sidebar */
+                .table-general .table-header {
+                    background: linear-gradient(135deg, #0f74ba, #0a5a8e);
+                    border-bottom: 2px solid #0a5a8e;
+                }
+                .table-general .table-header h3 { color: white; }
+                .table-general .table-header .badge-count { 
+                    background: rgba(255,255,255,0.2); 
+                    color: white;
+                }
+                .table-general thead {
+                    background: #e8f4fd;
+                }
+                .table-general thead th {
+                    color: #0a5a8e;
+                    font-weight: 700;
+                    border-bottom: 2px solid #0f74ba;
+                }
+                
+                .table-aluminium .table-header {
+                    background: linear-gradient(135deg, #4b5563, #374151);
+                    border-bottom: 2px solid #374151;
+                }
+                .table-aluminium .table-header h3 { color: white; }
+                .table-aluminium .table-header .badge-count { 
+                    background: rgba(255,255,255,0.2); 
+                    color: white;
+                }
+                .table-aluminium thead {
+                    background: #f3f4f6;
+                }
+                .table-aluminium thead th {
+                    color: #374151;
+                    font-weight: 700;
+                    border-bottom: 2px solid #6b7280;
+                }
+                
+                .table-bricks-timber .table-header {
+                    background: linear-gradient(135deg, #b45309, #92400e);
+                    border-bottom: 2px solid #92400e;
+                }
+                .table-bricks-timber .table-header h3 { color: white; }
+                .table-bricks-timber .table-header .badge-count { 
+                    background: rgba(255,255,255,0.2); 
+                    color: white;
+                }
+                .table-bricks-timber thead {
+                    background: #fffbeb;
+                }
+                .table-bricks-timber thead th {
+                    color: #92400e;
+                    font-weight: 700;
+                    border-bottom: 2px solid #b45309;
+                }
+                
+                /* Table Body Styles */
+                .table-container table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 13px;
+                }
+                .table-container table thead th {
+                    padding: 12px 16px;
+                    text-align: left;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    font-weight: 700;
+                    border-bottom: 2px solid #e5e7eb;
+                }
+                .table-container table thead th.text-right {
+                    text-align: right;
+                }
+                .table-container table thead th.text-center {
+                    text-align: center;
+                }
+                .table-container table tbody tr {
+                    border-bottom: 1px solid #f3f4f6;
+                    transition: background 0.2s ease;
+                }
+                .table-container table tbody tr:hover {
+                    background: #f8fafc;
+                }
+                .table-container table tbody tr:last-child {
+                    border-bottom: none;
+                }
+                .table-container table tbody td {
+                    padding: 12px 16px;
+                    vertical-align: middle;
+                    color: #1e293b;
+                }
+                .table-container table tbody td.text-right {
+                    text-align: right;
+                }
+                .table-container table tbody td.text-center {
+                    text-align: center;
+                }
+                
+                /* Status Badges */
+                .status-badge-sm {
+                    display: inline-block;
+                    padding: 3px 12px;
+                    border-radius: 20px;
+                    font-size: 10px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                }
+                .status-badge-sm.completed {
+                    background: #d1fae5;
+                    color: #059669;
+                }
+                .status-badge-sm.partial {
+                    background: #fef3c7;
+                    color: #d97706;
+                }
+                .status-badge-sm.pending {
+                    background: #fee2e2;
+                    color: #dc2626;
+                }
+                .status-badge-sm.in-progress {
+                    background: #dbeafe;
+                    color: #2563eb;
+                }
+                
+                /* Category Badges */
+                .category-badge {
+                    display: inline-block;
+                    padding: 2px 10px;
+                    border-radius: 12px;
+                    font-size: 10px;
+                    font-weight: 600;
+                }
+                .category-badge.bricks {
+                    background: #fef3c7;
+                    color: #d97706;
+                }
+                .category-badge.timber {
+                    background: #d1fae5;
+                    color: #059669;
+                }
+                
+                /* Department Badge */
+                .dept-badge {
+                    display: inline-block;
+                    padding: 2px 8px;
+                    border-radius: 10px;
+                    font-size: 9px;
+                    font-weight: 600;
+                    background: #e0f2fe;
+                    color: #0369a1;
+                }
+                .dept-badge.sent {
+                    background: #fef3c7;
+                    color: #d97706;
+                }
+                
+                /* Row Actions - VIEW & DELETE ONLY */
+                .row-actions {
+                    display: flex;
+                    gap: 4px;
+                    justify-content: center;
+                    align-items: center;
+                }
+                .row-actions .action-btn-sm {
+                    padding: 4px 8px;
+                    font-size: 10px;
+                    border-radius: 4px;
+                    border: none;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 2px;
+                }
+                .row-actions .action-btn-sm:hover {
+                    transform: scale(1.05);
+                }
+                .row-actions .action-btn-sm.view {
+                    background: #3b82f6;
+                    color: white;
+                }
+                .row-actions .action-btn-sm.delete {
+                    background: #ef4444;
+                    color: white;
+                }
+                .row-actions .action-btn-sm.delete:hover {
+                    background: #dc2626;
+                }
+                
+                /* Disabled delete button (not Super Admin) */
+                .row-actions .action-btn-sm.delete-disabled {
+                    background: #e5e7eb;
+                    color: #9ca3af;
+                    cursor: not-allowed;
+                }
+                .row-actions .action-btn-sm.delete-disabled:hover {
+                    transform: none;
+                }
+                
+                .row-actions .action-btn-sm .fa-eye,
+                .row-actions .action-btn-sm .fa-trash {
+                    font-size: 11px;
+                }
+                
+                .sent-badge {
+                    display: inline-block;
+                    padding: 1px 6px;
+                    border-radius: 8px;
+                    font-size: 7px;
+                    font-weight: 700;
+                    background: #fef3c7;
+                    color: #d97706;
+                    margin-left: 4px;
+                }
+                
+                .empty-state {
+                    text-align: center;
+                    padding: 40px 20px;
+                    color: #9ca3af;
+                }
+                .empty-state i {
+                    font-size: 32px;
+                    display: block;
+                    margin-bottom: 10px;
+                    opacity: 0.5;
+                }
+                .empty-state p {
+                    font-size: 13px;
+                }
+                
+                /* Scrollbar for tables */
+                .table-scroll {
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+                .table-scroll::-webkit-scrollbar {
+                    height: 6px;
+                }
+                .table-scroll::-webkit-scrollbar-track {
+                    background: #f1f1f1;
+                    border-radius: 10px;
+                }
+                .table-scroll::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 10px;
+                }
+                .table-scroll::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
+                }
+
+                /* Super Admin badge on delete */
+                .super-admin-badge {
+                    display: inline-block;
+                    padding: 1px 6px;
+                    border-radius: 8px;
+                    font-size: 7px;
+                    font-weight: 700;
+                    background: #dbeafe;
+                    color: #2563eb;
+                    margin-left: 2px;
+                }
+            </style>
+            
+            <div class="dailywork-page">
+                <!-- Header -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
+                    <div class="flex justify-between items-center flex-wrap gap-3">
+                        <div>
+                            <h2 class="text-xl font-bold text-gray-800">
+                                <i class="fas fa-calendar-day text-blue-600 mr-2"></i>
+                                All Daily Work Records
+                            </h2>
+                            <p class="text-xs text-gray-500 mt-1">
+                                ${records.length} total records | 
+                                General: ${generalRecords.length} | 
+                                Aluminium: ${aluminiumRecords.length} | 
+                                Bricks & Timber: ${bricksTimberRecords.length}
+                                <span class="ml-2 text-blue-600 font-semibold text-[10px]">
+                                    <i class="fas fa-crown mr-1"></i> Super Admin - Can Delete Any Record
+                                </span>
+                            </p>
+                        </div>
+                        <div class="flex gap-2 flex-wrap">
+                            <button onclick="exportAllDailyWorkToExcel()" class="btn-success text-sm" style="background: #10b981; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; transition: all 0.2s;">
+                                <i class="fas fa-file-excel mr-1"></i> Excel All
+                            </button>
+                            <button onclick="exportAllDailyWorkToPDF()" class="btn-danger text-sm" style="background: #ef4444; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; transition: all 0.2s;">
+                                <i class="fas fa-file-pdf mr-1"></i> PDF All
+                            </button>
+                            <button onclick="loadAllDailyWork()" class="btn-primary text-sm" style="background: #6b7280; color: white; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; transition: all 0.2s;">
+                                <i class="fas fa-sync mr-1"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Summary Cards -->
+                <div class="summary-grid">
+                    <div class="summary-card total">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">📊</span>
+                        <div class="card-label">Total Records</div>
+                        <div class="card-value">${records.length}</div>
+                        <div class="card-sub">All departments</div>
+                    </div>
+                    <div class="summary-card general">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">📋</span>
+                        <div class="card-label">General</div>
+                        <div class="card-value">${generalRecords.length}</div>
+                        <div class="card-sub">Other departments</div>
+                    </div>
+                    <div class="summary-card aluminium">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">🔩</span>
+                        <div class="card-label">Aluminium</div>
+                        <div class="card-value">${aluminiumRecords.length}</div>
+                        <div class="card-sub">Fabrication records</div>
+                    </div>
+                    <div class="summary-card bricks-timber">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">🧱</span>
+                        <div class="card-label">Bricks & Timber</div>
+                        <div class="card-value">${bricksTimberRecords.length}</div>
+                        <div class="card-sub">Production records</div>
+                    </div>
+                    <div class="summary-card departments">
+                        <div class="card-accent"></div>
+                        <span class="card-icon">🏢</span>
+                        <div class="card-label">Departments</div>
+                        <div class="card-value">${new Set(records.map(w => w.department_id || w.sent_from_dept)).size}</div>
+                        <div class="card-sub">Active departments</div>
+                    </div>
+                </div>
+                
+                <!-- ============================================================
+                     TABLE 1: GENERAL DAILY WORK
+                     ============================================================ -->
+                <div class="table-container table-general">
+                    <div class="table-header">
+                        <h3>
+                            <i class="fas fa-building"></i>
+                            General Daily Work
+                            <span class="badge-count">${generalRecords.length} records</span>
+                        </h3>
+                        <span style="font-size: 11px; color: rgba(255,255,255,0.8);">
+                            <i class="fas fa-info-circle mr-1"></i> All other departments
+                        </span>
+                    </div>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="min-width: 160px;">Date/Time</th>
+                                    <th style="min-width: 120px;">Department</th>
+                                    <th style="min-width: 180px;">Description</th>
+                                    <th class="text-right" style="min-width: 120px;">Budget (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Amount Spent (TZS)</th>
+                                    <th class="text-center" style="min-width: 100px;">Status</th>
+                                    <th class="text-center" style="min-width: 100px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="generalDailyWorkTableBody">
+                                ${generalRecords.length === 0 ? `
+                                    <tr>
+                                        <td colspan="7">
+                                            <div class="empty-state">
+                                                <i class="fas fa-inbox"></i>
+                                                <p>No general daily work records found</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ` : ''}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- ============================================================
+                     TABLE 2: ALUMINIUM DAILY WORK
+                     ============================================================ -->
+                <div class="table-container table-aluminium">
+                    <div class="table-header">
+                        <h3>
+                            <i class="fas fa-industry"></i>
+                            Aluminium Daily Work
+                            <span class="badge-count">${aluminiumRecords.length} records</span>
+                        </h3>
+                        <span style="font-size: 11px; color: rgba(255,255,255,0.8);">
+                            <i class="fas fa-info-circle mr-1"></i> 🔩 Aluminium Department
+                        </span>
+                    </div>
+                    <div class="table-scroll">
+                        <table style="min-width: 1100px;">
+                            <thead>
+                                <tr>
+                                    <th style="min-width: 160px;">Date/Time</th>
+                                    <th style="min-width: 180px;">Description</th>
+                                    <th class="text-center" style="min-width: 100px;">Qty Produced</th>
+                                    <th class="text-right" style="min-width: 120px;">Unit Price (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Total Income (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Expenses (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Profit (TZS)</th>
+                                    <th class="text-center" style="min-width: 100px;">Status</th>
+                                    <th class="text-center" style="min-width: 100px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="aluminiumDailyWorkTableBody">
+                                ${aluminiumRecords.length === 0 ? `
+                                    <tr>
+                                        <td colspan="9">
+                                            <div class="empty-state">
+                                                <i class="fas fa-inbox"></i>
+                                                <p>No aluminium daily work records found</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ` : ''}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- ============================================================
+                     TABLE 3: BRICKS & TIMBER DAILY WORK
+                     ============================================================ -->
+                <div class="table-container table-bricks-timber">
+                    <div class="table-header">
+                        <h3>
+                            <i class="fas fa-cubes"></i>
+                            Bricks & Timber Daily Work
+                            <span class="badge-count">${bricksTimberRecords.length} records</span>
+                        </h3>
+                        <span style="font-size: 11px; color: rgba(255,255,255,0.8);">
+                            <i class="fas fa-info-circle mr-1"></i> 🧱 Bricks & 🌲 Timber
+                        </span>
+                    </div>
+                    <div class="table-scroll">
+                        <table style="min-width: 900px;">
+                            <thead>
+                                <tr>
+                                    <th style="min-width: 160px;">Date/Time</th>
+                                    <th style="min-width: 100px;">Category</th>
+                                    <th style="min-width: 180px;">Description</th>
+                                    <th class="text-right" style="min-width: 120px;">Total Amount (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Expenses (TZS)</th>
+                                    <th class="text-right" style="min-width: 120px;">Profit (TZS)</th>
+                                    <th class="text-center" style="min-width: 120px;">Payment Status</th>
+                                    <th class="text-center" style="min-width: 100px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bricksTimberDailyWorkTableBody">
+                                ${bricksTimberRecords.length === 0 ? `
+                                    <tr>
+                                        <td colspan="8">
+                                            <div class="empty-state">
+                                                <i class="fas fa-inbox"></i>
+                                                <p>No bricks & timber daily work records found</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ` : ''}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('dailyworkPage').innerHTML = html;
+        
+        // ============================================================
+        // POPULATE TABLE 1: GENERAL DAILY WORK
+        // ============================================================
+        const generalTbody = document.getElementById('generalDailyWorkTableBody');
+        if (generalTbody && generalRecords.length > 0) {
+            let rows = '';
+            for (let w of generalRecords) {
+                let deptId = w.department_id || w.sent_from_dept || 'Unknown';
+                let deptName = departmentNames[deptId] || 'Department ' + deptId;
+                let budget = parseFloat(w.budget || 0);
+                let amount = parseFloat(w.amount || 0);
+                let status = w.status || 'pending';
+                let statusClass = status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'pending';
+                let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                let description = w.work_description || '-';
+                let isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== 1;
+                
+                rows += `
+                    <tr id="daily-row-${w.id}">
+                        <td style="white-space: nowrap; font-size: 12px; color: #475569;">${recordDate}</td>
+                        <td>
+                            <span class="dept-badge ${isSent ? 'sent' : ''}">
+                                ${isSent ? '<i class="fas fa-paper-plane mr-1"></i>' : ''}
+                                ${escapeHtml(deptName)}
+                            </span>
+                        </td>
+                        <td style="max-width: 180px; word-break: break-word; font-size: 12px; color: #475569;" title="${escapeHtml(description)}">${escapeHtml(description)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #059669;">${formatMoney(budget)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #dc2626;">${formatMoney(amount)}</td>
+                        <td class="text-center"><span class="status-badge-sm ${statusClass}">${statusText}</span></td>
+                        <td class="text-center">
+                            <div class="row-actions">
+                                <!-- VIEW BUTTON - Always visible -->
+                                <button onclick="viewDailyWorkRecord(${w.id})" class="action-btn-sm view" title="View Record">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <!-- DELETE BUTTON - Super Admin Only (DEPARTMENT_ID === 1) -->
+                                ${DEPARTMENT_ID === 1 ? `
+                                    <button onclick="deleteDailyWorkRecord(${w.id})" class="action-btn-sm delete" title="Delete Record (Super Admin)">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                ` : `
+                                    <span class="action-btn-sm delete-disabled" title="Only Super Admin can delete">
+                                        <i class="fas fa-lock"></i>
+                                    </span>
+                                `}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            generalTbody.innerHTML = rows;
+        }
+        
+        // ============================================================
+        // POPULATE TABLE 2: ALUMINIUM DAILY WORK
+        // ============================================================
+        const aluminiumTbody = document.getElementById('aluminiumDailyWorkTableBody');
+        if (aluminiumTbody && aluminiumRecords.length > 0) {
+            let rows = '';
+            for (let w of aluminiumRecords) {
+                let income = parseFloat(w.total_amount || w.income || 0);
+                let expenses = parseFloat(w.expenses || 0);
+                let profit = income - expenses;
+                let profitColor = profit >= 0 ? '#059669' : '#dc2626';
+                let quantityProduced = parseInt(w.quantity_produced) || 0;
+                let pricePerUnit = parseFloat(w.price_per_unit || 0);
+                if (pricePerUnit === 0 && income > 0 && quantityProduced > 0) {
+                    pricePerUnit = income / quantityProduced;
+                }
+                let status = w.status || 'pending';
+                let statusClass = status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'pending';
+                let statusText = status === 'completed' ? 'Completed' : status === 'partial' ? 'Partial' : 'Pending';
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                let description = w.work_description || '-';
+                let isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== 1;
+                
+                rows += `
+                    <tr id="daily-row-${w.id}">
+                        <td style="white-space: nowrap; font-size: 12px; color: #475569;">${recordDate}</td>
+                        <td style="max-width: 180px; word-break: break-word; font-size: 12px; color: #475569;" title="${escapeHtml(description)}">${escapeHtml(description)}</td>
+                        <td class="text-center" style="font-family: monospace; font-weight: 600; color: #374151;">${quantityProduced > 0 ? quantityProduced.toLocaleString() : '-'}</td>
+                        <td class="text-right" style="font-family: monospace; color: #374151;">${pricePerUnit > 0 ? formatMoney(pricePerUnit) : '-'}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #059669;">${formatMoney(income)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #dc2626;">${formatMoney(expenses)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 700; color: ${profitColor};">${formatMoney(profit)}</td>
+                        <td class="text-center"><span class="status-badge-sm ${statusClass}">${statusText}</span></td>
+                        <td class="text-center">
+                            <div class="row-actions">
+                                <button onclick="viewDailyWorkRecord(${w.id})" class="action-btn-sm view" title="View Record">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                ${DEPARTMENT_ID === 1 ? `
+                                    <button onclick="deleteDailyWorkRecord(${w.id})" class="action-btn-sm delete" title="Delete Record (Super Admin)">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                ` : `
+                                    <span class="action-btn-sm delete-disabled" title="Only Super Admin can delete">
+                                        <i class="fas fa-lock"></i>
+                                    </span>
+                                `}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            aluminiumTbody.innerHTML = rows;
+        }
+        
+        // ============================================================
+        // POPULATE TABLE 3: BRICKS & TIMBER DAILY WORK
+        // ============================================================
+        const bricksTimberTbody = document.getElementById('bricksTimberDailyWorkTableBody');
+        if (bricksTimberTbody && bricksTimberRecords.length > 0) {
+            let rows = '';
+            for (let w of bricksTimberRecords) {
+                let totalAmount = parseFloat(w.total_amount || w.income || 0);
+                let expenses = parseFloat(w.expenses || 0);
+                let profit = totalAmount - expenses;
+                let profitColor = profit >= 0 ? '#059669' : '#dc2626';
+                let category = w.work_type === 'bricks' ? 'Bricks' : w.work_type === 'timber' ? 'Timber' : 'General';
+                let categoryClass = w.work_type === 'bricks' ? 'bricks' : w.work_type === 'timber' ? 'timber' : '';
+                let paymentStatus = w.payment_status || w.status || 'pending';
+                let statusClass = paymentStatus === 'completed' ? 'completed' : paymentStatus === 'partial' ? 'partial' : 'pending';
+                let statusText = paymentStatus === 'completed' ? 'Completed' : paymentStatus === 'partial' ? 'Partial' : 'Pending';
+                let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+                let description = w.work_description || '-';
+                let isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== 1;
+                
+                rows += `
+                    <tr id="daily-row-${w.id}">
+                        <td style="white-space: nowrap; font-size: 12px; color: #475569;">${recordDate}</td>
+                        <td><span class="category-badge ${categoryClass}">${category}</span></td>
+                        <td style="max-width: 180px; word-break: break-word; font-size: 12px; color: #475569;" title="${escapeHtml(description)}">${escapeHtml(description)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #059669;">${formatMoney(totalAmount)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 600; color: #dc2626;">${formatMoney(expenses)}</td>
+                        <td class="text-right" style="font-family: monospace; font-weight: 700; color: ${profitColor};">${formatMoney(profit)}</td>
+                        <td class="text-center"><span class="status-badge-sm ${statusClass}">${statusText}</span></td>
+                        <td class="text-center">
+                            <div class="row-actions">
+                                <button onclick="viewDailyWorkRecord(${w.id})" class="action-btn-sm view" title="View Record">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                ${DEPARTMENT_ID === 1 ? `
+                                    <button onclick="deleteDailyWorkRecord(${w.id})" class="action-btn-sm delete" title="Delete Record (Super Admin)">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                ` : `
+                                    <span class="action-btn-sm delete-disabled" title="Only Super Admin can delete">
+                                        <i class="fas fa-lock"></i>
+                                    </span>
+                                `}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            bricksTimberTbody.innerHTML = rows;
+        }
+        
+        updateDailyWorkBadge();
+        window.allDailyWorkData = records;
+        
+    } catch(e) {
+        console.error('❌ Error loading daily work:', e);
+        document.getElementById('dailyworkPage').innerHTML = `
+            <div class="text-center py-12 text-red-500 bg-white rounded-xl border border-red-200 shadow-sm" style="margin: 20px;">
+                <i class="fas fa-exclamation-triangle text-5xl block mb-4 opacity-50"></i>
+                <p class="text-lg font-semibold">Failed to load daily work records</p>
+                <p class="text-sm text-gray-400 mt-2">${escapeHtml(e.message)}</p>
+                <button onclick="loadAllDailyWork()" class="mt-5 btn-primary text-sm" style="background: #0f74ba; color: white; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; transition: all 0.2s;">
+                    <i class="fas fa-sync mr-2"></i> Try Again
+                </button>
+            </div>
+        `;
+    }
+}
+
+// ============================================================
+// VIEW DAILY WORK RECORD - Super Admin
+// ============================================================
+function viewDailyWorkRecord(id) {
+    console.log('👁️ viewDailyWorkRecord called with ID:', id);
+    
+    // ============================================================
+    // FIND THE RECORD IN ALL DAILY WORK DATA
+    // ============================================================
+    let w = allDailyWorkData.find(item => item.id === id);
+    
+    // If not found in allDailyWorkData, try dailyworkData
+    if (!w) {
+        w = dailyworkData.find(item => item.id === id);
+    }
+    
+    // If still not found, try searching in projects data
+    if (!w) {
+        for (let p of projectsData) {
+            if (p.daily_work) {
+                const found = p.daily_work.find(item => item.id === id);
+                if (found) {
+                    w = found;
+                    break;
+                }
+            }
+            if (p._daily_work_records) {
+                const found = p._daily_work_records.find(item => item.id === id);
+                if (found) {
+                    w = found;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!w) {
+        showToast('❌ Daily work record not found', true);
+        console.error('❌ Record not found for ID:', id);
+        return;
+    }
+    
+    console.log('📄 Daily work record found:', w);
+    
+    // ============================================================
+    // GET DEPARTMENT NAME
+    // ============================================================
+    let deptId = w.department_id || w.sent_from_dept || 'Unknown';
+    let deptName = departmentNames[deptId] || 'Department ' + deptId;
+    
+    // ============================================================
+    // CHECK IF SENT FROM OTHER DEPARTMENT
+    // ============================================================
+    let isSent = w.sent_from_dept && parseInt(w.sent_from_dept) !== 1;
+    let sentFromName = isSent ? (departmentNames[w.sent_from_dept] || 'Unknown') : null;
+    
+    // ============================================================
+    // GET ALL VALUES
+    // ============================================================
+    let budget = parseFloat(w.budget || w.dailywork_budget || 0);
+    let amount = parseFloat(w.amount || w.dailywork_amount || 0);
+    let income = parseFloat(w.total_amount || w.income || 0);
+    let expenses = parseFloat(w.expenses || 0);
+    let profit = income - expenses;
+    let profitColor = profit >= 0 ? '#059669' : '#dc2626';
+    let quantityProduced = parseInt(w.quantity_produced) || 0;
+    let quantitySold = parseInt(w.quantity_sold) || 0;
+    let pricePerUnit = parseFloat(w.price_per_unit || 0);
+    
+    // Calculate price per unit if not set
+    if (pricePerUnit === 0 && income > 0 && quantitySold > 0) {
+        pricePerUnit = income / quantitySold;
+    }
+    
+    let status = w.status || w.payment_status || 'pending';
+    let statusClass = 'status-badge-sm pending';
+    let statusText = 'Pending';
+    
+    if (status === 'completed' || status === 'Completed' || status === 'paid') {
+        statusClass = 'status-badge-sm completed';
+        statusText = status === 'paid' ? 'Paid' : 'Completed';
+    } else if (status === 'partial' || status === 'Partial') {
+        statusClass = 'status-badge-sm partial';
+        statusText = 'Partial';
+    } else if (status === 'in_progress' || status === 'In Progress') {
+        statusClass = 'status-badge-sm in-progress';
+        statusText = 'In Progress';
+    }
+    
+    let workType = w.work_type || 'general';
+    let projectName = w.project_name || 'N/A';
+    let description = w.work_description || '-';
+    let recordDate = w.date ? new Date(w.date).toLocaleString() : 'N/A';
+    let createdBy = w.created_by || w.sent_by || 'System';
+    let createdAt = w.created_at || w.sent_at || 'N/A';
+    
+    // ============================================================
+    // BUILD DETAILS HTML
+    // ============================================================
+    let detailsHtml = `
+        <div style="padding: 5px 0;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #0f74ba, #0a5a8e); color: white; padding: 16px 20px; border-radius: 12px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="margin: 0; font-size: 18px; font-weight: 700;">
+                            <i class="fas fa-calendar-day mr-2"></i> Daily Work Details
+                        </h3>
+                        <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.85;">Record ID: #${w.id}</p>
+                    </div>
+                    <div>
+                        <span style="background: rgba(255,255,255,0.2); padding: 4px 14px; border-radius: 20px; font-size: 11px;">
+                            ${escapeHtml(deptName)}
+                        </span>
+                        ${isSent ? `<span style="background: #fef3c7; color: #d97706; padding: 4px 14px; border-radius: 20px; font-size: 11px; margin-left: 6px;">
+                            <i class="fas fa-paper-plane mr-1"></i> Sent from ${escapeHtml(sentFromName)}
+                        </span>` : ''}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Work Type Badge -->
+            <div style="margin-bottom: 15px;">
+                <span style="background: #f3f4f6; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; color: #374151;">
+                    📋 ${workType.charAt(0).toUpperCase() + workType.slice(1)}
+                </span>
+                <span class="${statusClass}" style="margin-left: 8px; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;">
+                    ${statusText}
+                </span>
+            </div>
+            
+            <!-- Details Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #f8fafc; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb;">
+                <div><strong>Date/Time:</strong></div>
+                <div>${recordDate}</div>
+                
+                <div><strong>Project/Category:</strong></div>
+                <div><strong>${escapeHtml(projectName)}</strong></div>
+                
+                <div><strong>Description:</strong></div>
+                <div style="word-break: break-word;">${escapeHtml(description)}</div>
+                
+                <div><strong>Department:</strong></div>
+                <div>${escapeHtml(deptName)}</div>
+                
+                ${isSent ? `
+                    <div><strong>Sent From:</strong></div>
+                    <div><span style="color: #d97706;"><i class="fas fa-paper-plane mr-1"></i> ${escapeHtml(sentFromName)}</span></div>
+                ` : ''}
+            </div>
+            
+            <!-- Financial Details -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; background: white; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb;">
+                <div style="text-align: center; padding: 10px; background: #f0fdf4; border-radius: 8px; border: 1px solid #d1fae5;">
+                    <div style="font-size: 10px; color: #166534; font-weight: 600; text-transform: uppercase;">💰 Budget</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #059669; font-family: monospace;">${formatMoney(budget)}</div>
+                </div>
+                <div style="text-align: center; padding: 10px; background: #fef3c7; border-radius: 8px; border: 1px solid #fde68a;">
+                    <div style="font-size: 10px; color: #92400e; font-weight: 600; text-transform: uppercase;">💸 Amount Spent</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #ea580c; font-family: monospace;">${formatMoney(amount)}</div>
+                </div>
+                <div style="text-align: center; padding: 10px; background: #dbeafe; border-radius: 8px; border: 1px solid #bfdbfe;">
+                    <div style="font-size: 10px; color: #1e40af; font-weight: 600; text-transform: uppercase;">📊 Remaining</div>
+                    <div style="font-size: 16px; font-weight: 800; color: ${budget - amount >= 0 ? '#2563eb' : '#dc2626'}; font-family: monospace;">
+                        ${formatMoney(budget - amount)}
+                    </div>
+                </div>
+            </div>
+            
+            ${workType === 'aluminium' || workType === 'aluminum' || quantityProduced > 0 ? `
+                <!-- Production Details (Aluminium) -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; background: #f9fafb; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">📦 Qty Produced</div>
+                        <div style="font-size: 15px; font-weight: 700; color: #374151;">${quantityProduced > 0 ? quantityProduced.toLocaleString() : '-'}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">💰 Qty Sold</div>
+                        <div style="font-size: 15px; font-weight: 700; color: #059669;">${quantitySold > 0 ? quantitySold.toLocaleString() : '-'}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">💵 Unit Price</div>
+                        <div style="font-size: 15px; font-weight: 700; color: #2563eb;">${pricePerUnit > 0 ? formatMoney(pricePerUnit) : '-'}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">📊 Profit</div>
+                        <div style="font-size: 15px; font-weight: 700; color: ${profitColor}; font-family: monospace;">${formatMoney(profit)}</div>
+                    </div>
+                </div>
+            ` : `
+                <!-- Simple Profit for non-production -->
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; background: #f9fafb; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb;">
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 8px; border: 1px solid #e5e7eb;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">💸 Total Income</div>
+                        <div style="font-size: 15px; font-weight: 700; color: #059669; font-family: monospace;">${formatMoney(income)}</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 8px; border: 1px solid #e5e7eb;">
+                        <div style="font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase;">📊 Profit/Loss</div>
+                        <div style="font-size: 15px; font-weight: 700; color: ${profitColor}; font-family: monospace;">${formatMoney(profit)}</div>
+                    </div>
+                </div>
+            `}
+            
+            <!-- Created Info -->
+            <div style="margin-top: 12px; padding: 12px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">
+                <div><i class="fas fa-user mr-2"></i> Created by: <strong>${escapeHtml(createdBy)}</strong></div>
+                <div><i class="fas fa-clock mr-2"></i> Created at: ${formatDateTime(createdAt)}</div>
+                ${w.updated_by ? `<div><i class="fas fa-edit mr-2"></i> Updated by: <strong>${escapeHtml(w.updated_by)}</strong> on ${formatDateTime(w.updated_at)}</div>` : ''}
+                ${isSent ? `<div><i class="fas fa-paper-plane mr-2"></i> Sent from: <strong>${escapeHtml(sentFromName)}</strong></div>` : ''}
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('viewDailyworkContent').innerHTML = detailsHtml;
+    
+    // ============================================================
+    // OPEN MODAL
+    // ============================================================
+    openModal('viewDailyworkModal');
+    console.log('✅ viewDailyWorkRecord completed for ID:', id);
+}
+
+
+// ============================================================
+// DELETE DAILY WORK RECORD - Super Admin Only (No Popup)
+// ============================================================
+async function deleteDailyWorkRecord(id) {
+    console.log('🗑️ deleteDailyWorkRecord called with ID:', id);
+    
+    // ============================================================
+    // CHECK IF USER IS SUPER ADMIN
+    // ============================================================
+    if (DEPARTMENT_ID !== 1) {
+        showToast('❌ Only Super Admin can delete daily work records', true);
+        console.warn('⚠️ Non-Super Admin attempted to delete daily work:', id);
+        return;
+    }
+    
+    if (!id) {
+        showToast('❌ Daily work ID is required', true);
+        return;
+    }
+    
+    // ============================================================
+    // FIND THE RECORD
+    // ============================================================
+    let w = allDailyWorkData.find(item => item.id === id);
+    if (!w) {
+        w = dailyworkData.find(item => item.id === id);
+    }
+    if (!w) {
+        showToast('❌ Daily work record not found', true);
+        return;
+    }
+    
+    // ============================================================
+    // SHOW LOADING STATE ON ROW
+    // ============================================================
+    let row = document.getElementById(`daily-row-${id}`);
+    let deleteBtn = row ? row.querySelector('.action-btn-sm.delete') : null;
+    let originalText = deleteBtn ? deleteBtn.innerHTML : 'Deleting...';
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span>';
+        deleteBtn.disabled = true;
+        deleteBtn.style.opacity = '0.5';
+        deleteBtn.style.cursor = 'not-allowed';
+    }
+    if (row) {
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
+    }
+    
+    try {
+        // ============================================================
+        // CALL DELETE API - Super Admin
+        // ============================================================
+        const payload = {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID), // 1 = Super Admin
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'Super Admin'
+        };
+        
+        console.log('📤 Delete payload:', payload);
+        
+        const res = await apiCall('delete_dailywork.php', 'POST', payload);
+        
+        console.log('📥 Delete response:', res);
+        
+        if (res && res.success) {
+            let message = res.message || 'Daily work record deleted successfully';
+            showToast('✅ ' + message, false);
+            addLog(`🗑️ Super Admin deleted daily work record #${id}`);
+            
+            // ============================================================
+            // REMOVE FROM LOCAL DATA
+            // ============================================================
+            allDailyWorkData = allDailyWorkData.filter(item => item.id !== id);
+            dailyworkData = dailyworkData.filter(item => item.id !== id);
+            
+            // Remove from project daily_work arrays
+            for (let p of projectsData) {
+                if (p.daily_work) {
+                    p.daily_work = p.daily_work.filter(item => item.id !== id);
+                    p.daily_work_count = p.daily_work.length;
+                }
+                if (p._daily_work_records) {
+                    p._daily_work_records = p._daily_work_records.filter(item => item.id !== id);
+                }
+                if (p.daily_work_records) {
+                    p.daily_work_records = p.daily_work_records.filter(item => item.id !== id);
+                }
+            }
+            
+            // ============================================================
+            // REMOVE ROW FROM UI
+            // ============================================================
+            if (row) {
+                row.style.transition = 'all 0.4s ease';
+                row.style.opacity = '0';
+                row.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    if (row.parentNode) {
+                        row.remove();
+                    }
+                }, 400);
+            }
+            
+            // ============================================================
+            // UPDATE COUNTS & BADGE
+            // ============================================================
+            updateDailyWorkBadge();
+            
+            // ============================================================
+            // REFRESH DATA
+            // ============================================================
+            setTimeout(async () => {
+                await loadAllDailyWork();
+                await loadDashboard();
+            }, 500);
+            
+        } else {
+            let errorMsg = res?.message || 'Failed to delete daily work';
+            showToast('❌ ' + errorMsg, true);
+            console.error('❌ Delete error:', res);
+            
+            // ============================================================
+            // REMOVE FROM UI IF RECORD NOT FOUND
+            // ============================================================
+            if (res && res.success === false && res.message && 
+                (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
+                if (row) {
+                    row.style.opacity = '0';
+                    row.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        if (row.parentNode) {
+                            row.remove();
+                        }
+                    }, 300);
+                }
+                allDailyWorkData = allDailyWorkData.filter(item => item.id !== id);
+                dailyworkData = dailyworkData.filter(item => item.id !== id);
+            }
+        }
+        
+    } catch(e) {
+        console.error('❌ Delete error:', e);
+        showToast('Network error: ' + e.message, true);
+        
+        if (row) {
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                if (row.parentNode) {
+                    row.remove();
+                }
+            }, 300);
+        }
+        allDailyWorkData = allDailyWorkData.filter(item => item.id !== id);
+        dailyworkData = dailyworkData.filter(item => item.id !== id);
+        
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.innerHTML = originalText;
+            deleteBtn.disabled = false;
+            deleteBtn.style.opacity = '1';
+            deleteBtn.style.cursor = 'pointer';
+        }
+        if (row) {
+            row.style.opacity = '1';
+            row.style.pointerEvents = 'auto';
+        }
+    }
+}
+// ============================================================
+// UPDATE DAILY WORK BADGE
+// ============================================================
+function updateDailyWorkBadge() {
+    const badge = document.getElementById('dailyworkBadge');
+    if (!badge) return;
+    
+    // Count unviewed daily work records (sent from other departments)
+    const unviewedCount = allDailyWorkData.filter(w => 
+        w.sent_from_dept && parseInt(w.sent_from_dept) !== 1 && // Not from Super Admin
+        (w.is_viewed_by_admin == 0 || w.is_viewed_by_admin === null)
+    ).length;
+    
+    if (unviewedCount > 0) {
+        badge.classList.remove('hidden');
+        badge.innerText = unviewedCount > 99 ? '99+' : unviewedCount;
+    } else {
+        badge.classList.add('hidden');
+    }
+}
 // ==================== EMPLOYEES FUNCTIONS ====================
 async function loadEmployees() {
     await fetchEmployees();
@@ -9329,16 +10591,26 @@ function restoreBackup() {
     closeModal('backupModal');
 }
 
-// ==================== SHOW PAGE ====================
+// ============================================================
+// SHOW PAGE - ADD DAILYWORK
+// ============================================================
 function showPage(pageId, highlightId = null) {
     // Remove any existing highlights first
     removeAllHighlights();
     
-    const sections = ['dashboardPage', 'employeesPage', 'departmentsPage', 'projectsPage', 'requestsPage', 'reportsPage', 'settingsPage'];
-    sections.forEach(s => { const el = document.getElementById(s); if (el) el.classList.add('hidden'); });
-    document.getElementById(`${pageId}Page`).classList.remove('hidden');
+    const sections = ['dashboardPage', 'employeesPage', 'departmentsPage', 'projectsPage', 'requestsPage', 'reportsPage', 'settingsPage', 'dailyworkPage'];
+    sections.forEach(s => { 
+        const el = document.getElementById(s); 
+        if (el) el.classList.add('hidden'); 
+    });
+    
+    const targetPage = document.getElementById(`${pageId}Page`);
+    if (targetPage) targetPage.classList.remove('hidden');
+    
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.querySelector(`.nav-item[data-page="${pageId}"]`).classList.add('active');
+    const activeNav = document.querySelector(`.nav-item[data-page="${pageId}"]`);
+    if (activeNav) activeNav.classList.add('active');
+    
     if (pageId === 'dashboard') loadDashboard();
     else if (pageId === 'employees') loadEmployees();
     else if (pageId === 'departments') loadDepartmentsPage();
@@ -9346,8 +10618,8 @@ function showPage(pageId, highlightId = null) {
     else if (pageId === 'requests') loadRequests();
     else if (pageId === 'reports') loadReports();
     else if (pageId === 'settings') loadSettings();
+    else if (pageId === 'dailywork') loadAllDailyWork();  // ✅ NEW
 }
-
 // ==================== LOAD DASHBOARD - UPDATED ====================
 async function loadDashboard() {
     document.getElementById('dashboardPage').innerHTML = '<div class="flex justify-center items-center h-64"><div class="loading-spinner"></div><span class="ml-3">Loading dashboard...</span></div>';

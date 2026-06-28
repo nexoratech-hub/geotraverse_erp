@@ -1921,11 +1921,19 @@ function editDailyWork(id) {
 }
 
 // ============================================================
-// DELETE DAILY WORK - FIXED WITH DEPARTMENT ID
+// DELETE DAILY WORK - FOR OTHER DASHBOARDS (Not Super Admin)
 // ============================================================
 async function deleteDailyWork(id) {
     if (!id) {
         showToast('❌ Daily work ID is required', true);
+        return;
+    }
+    
+    // ============================================================
+    // CHECK IF USER IS SUPER ADMIN
+    // ============================================================
+    if (DEPARTMENT_ID !== 1) {
+        showToast('❌ Only Super Admin can delete daily work records', true);
         return;
     }
     
@@ -1934,52 +1942,15 @@ async function deleteDailyWork(id) {
     }
     
     console.log('🗑️ Deleting daily work ID:', id);
-    console.log('📤 Department ID:', DEPARTMENT_ID);
     
-    // ============================================================
-    // FIND THE DAILY WORK RECORD
-    // ============================================================
+    // Find the record
     let w = dailyworkData.find(item => item.id === id);
-    if (!w) {
-        // Try to find in project daily_work
-        for (let p of projectsData) {
-            if (p.daily_work) {
-                const found = p.daily_work.find(item => item.id === id);
-                if (found) {
-                    w = found;
-                    break;
-                }
-            }
-        }
-    }
-    
     if (!w) {
         showToast('❌ Daily work record not found', true);
         return;
     }
     
-    console.log('📄 Daily work found:', w);
-    
-    // ============================================================
-    // CHECK IF PROJECT WAS RECEIVED - CANNOT DELETE
-    // ============================================================
-    const p = projectsData.find(proj => proj.id === w.project_id);
-    if (p && p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
-        showToast('❌ Cannot delete daily work for a project received from another department', true);
-        return;
-    }
-    
-    // ============================================================
-    // CHECK IF THIS IS A SENT RECORD - CANNOT DELETE
-    // ============================================================
-    if (w.sent_from_dept && parseInt(w.sent_from_dept) !== parseInt(DEPARTMENT_ID)) {
-        showToast('❌ Cannot delete a daily work record that was sent from another department', true);
-        return;
-    }
-    
-    // ============================================================
-    // SHOW LOADING STATE
-    // ============================================================
+    // Show loading state
     let row = document.getElementById('daily-row-' + id);
     let btn = row ? row.querySelector('.action-btn.delete') : null;
     let originalText = btn ? btn.innerHTML : 'Deleting...';
@@ -1995,56 +1966,32 @@ async function deleteDailyWork(id) {
         row.style.pointerEvents = 'none';
     }
     
-    // ============================================================
-    // BUILD PAYLOAD WITH DEPARTMENT ID
-    // ============================================================
-    let payload = {
-        id: parseInt(id),
-        department_id: parseInt(DEPARTMENT_ID),  // ✅ REQUIRED
-        is_deleted: 1,
-        deleted_by: CURRENT_USER || 'Survey Manager'
-    };
-    
-    console.log('📤 Delete payload:', payload);
-    
     try {
-        // ============================================================
-        // CALL API
-        // ============================================================
-        const res = await apiCall('delete_dailywork.php', 'POST', payload);
+        const res = await apiCall('delete_dailywork.php', 'POST', {
+            id: parseInt(id),
+            department_id: parseInt(DEPARTMENT_ID),
+            is_deleted: 1,
+            deleted_by: CURRENT_USER || 'System'
+        });
         
         console.log('📥 Delete response:', res);
         
         if (res && res.success) {
-            let message = res.message || 'Daily work record deleted successfully';
-            showToast('✅ ' + message, false);
+            showToast('✅ Daily work record deleted successfully', false);
             addLog('Daily work record deleted (ID: ' + id + ')');
             
-            // ============================================================
-            // REMOVE FROM LOCAL DATA
-            // ============================================================
+            // Remove from local data
             dailyworkData = dailyworkData.filter(item => item.id !== id);
             
-            // Remove from project's daily_work
-            for (let proj of projectsData) {
-                if (proj.daily_work) {
-                    proj.daily_work = proj.daily_work.filter(item => item.id !== id);
-                    proj.daily_work_count = proj.daily_work.length;
-                    if (typeof calculateDailyWorkSummary === 'function') {
-                        proj.daily_work_summary = calculateDailyWorkSummary(proj.daily_work);
-                    }
-                }
-                if (proj._daily_work_records) {
-                    proj._daily_work_records = proj._daily_work_records.filter(item => item.id !== id);
-                }
-                if (proj.daily_work_records) {
-                    proj.daily_work_records = proj.daily_work_records.filter(item => item.id !== id);
+            // Remove from project daily_work
+            for (let p of projectsData) {
+                if (p.daily_work) {
+                    p.daily_work = p.daily_work.filter(item => item.id !== id);
+                    p.daily_work_count = p.daily_work.length;
                 }
             }
             
-            // ============================================================
-            // REMOVE FROM UI
-            // ============================================================
+            // Remove from UI
             if (row) {
                 row.style.transition = 'all 0.3s ease';
                 row.style.opacity = '0';
@@ -2056,27 +2003,18 @@ async function deleteDailyWork(id) {
                 }, 300);
             }
             
-            // ============================================================
-            // UPDATE DAILY WORK SUMMARY
-            // ============================================================
+            // Refresh data
             if (currentProjectId) {
-                // Refresh the project view
                 await loadDailyWorkForProject(currentProjectId);
                 await viewProject(currentProjectId);
             }
-            
-            // ============================================================
-            // REFRESH DATA
-            // ============================================================
             await loadDashboard();
             
         } else {
             let errorMsg = res?.message || 'Failed to delete daily work';
             showToast('❌ ' + errorMsg, true);
             
-            // ============================================================
-            // REMOVE FROM UI IF RECORD NOT FOUND
-            // ============================================================
+            // Remove from UI if record not found
             if (res && res.success === false && res.message && 
                 (res.message.indexOf('not found') !== -1 || res.message.indexOf('already deleted') !== -1)) {
                 if (row) {
@@ -2096,9 +2034,6 @@ async function deleteDailyWork(id) {
         console.error('Delete daily work error:', e);
         showToast('Network error: ' + e.message, true);
         
-        // ============================================================
-        // REMOVE FROM UI ON NETWORK ERROR
-        // ============================================================
         if (row) {
             row.style.opacity = '0';
             row.style.transform = 'scale(0.95)';
@@ -2111,9 +2046,6 @@ async function deleteDailyWork(id) {
         dailyworkData = dailyworkData.filter(item => item.id !== id);
         
     } finally {
-        // ============================================================
-        // RESTORE BUTTON
-        // ============================================================
         if (btn) {
             btn.innerHTML = originalText;
             btn.disabled = false;
@@ -2126,6 +2058,7 @@ async function deleteDailyWork(id) {
         }
     }
 }
+
 // ============================================================
 // VIEW PROJECT DETAILS - ALIAS FOR viewProject()
 // ============================================================
