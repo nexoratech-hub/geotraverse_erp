@@ -1073,7 +1073,6 @@ async function loginAdmin() {
     setLoading('adminLoginBtn', true);
     
     try {
-        // Build the correct API URL
         const baseUrl = window.location.origin + '/geotraverse/backend/api/';
         const url = baseUrl + 'login.php';
         
@@ -1097,19 +1096,15 @@ async function loginAdmin() {
         });
         
         console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
         
-        // Get response as text first
         const text = await response.text();
         console.log('Raw response:', text);
         
-        // Try to parse JSON
         let result;
         try {
             result = JSON.parse(text);
         } catch (parseError) {
             console.error('JSON parse error:', parseError);
-            // Check if response contains HTML
             if (text.includes('<!DOCTYPE') || text.includes('<html')) {
                 showMessage('adminMessage', 'adminMessageText', 'Server returned HTML instead of JSON. Check API path.', 'error');
                 showToast('API path error. Check console.', true);
@@ -1121,18 +1116,23 @@ async function loginAdmin() {
         
         console.log('Parsed response:', result);
         
-        if (result.success && result.user) {
-            const isAdmin = result.user.role === 'Super Administrator' || 
-                           result.user.role === 'Admin' ||
-                           result.user.is_admin === 1 ||
-                           result.user.department_id === 1;
+        if (result.success && result.data && result.data.user) {
+            const user = result.data.user;
+            const isAdmin = user.role === 'Super Administrator' || 
+                           user.role === 'Admin' ||
+                           user.is_admin === 1 ||
+                           user.department_id === 1;
             
             if (isAdmin) {
+                // ✅ USE 'success' TYPE FOR SUCCESS MESSAGES
                 showMessage('adminMessage', 'adminMessageText', '✅ Login successful! Redirecting...', 'success');
                 showToast('✅ Login successful!');
                 
+                // Reset button
+                setLoading('adminLoginBtn', false);
+                
                 setTimeout(() => {
-                    window.location.href = result.redirect || 'super_admin.html';
+                    window.location.href = result.data.redirect || 'super_admin.html';
                 }, 1200);
             } else {
                 showMessage('adminMessage', 'adminMessageText', '❌ You do not have Admin privileges.', 'error');
@@ -1224,13 +1224,17 @@ async function loginDepartment() {
         
         console.log('Parsed response:', result);
         
-        if (result.success && result.user) {
-            const userDeptId = result.user.department_id || 0;
+        if (result.success && result.data && result.data.user) {
+            const user = result.data.user;
+            const userDeptId = user.department_id || 0;
             
             if (userDeptId == deptId) {
                 const deptName = departmentNames[deptId] || 'Department';
+                // ✅ USE 'success' TYPE FOR SUCCESS MESSAGES
                 showMessage('deptMessage', 'deptMessageText', `✅ Login successful! Redirecting to ${deptName} Dashboard...`, 'success');
                 showToast(`✅ Welcome to ${deptName}!`);
+                
+                setLoading('deptLoginBtn', false);
                 
                 setTimeout(() => {
                     const page = departmentPages[deptId] || 'dashboard.html';
@@ -1253,6 +1257,7 @@ async function loginDepartment() {
         setLoading('deptLoginBtn', false);
     }
 }
+
 // ============================================================
 // ==================== CHECK SESSION ====================
 // ============================================================
@@ -1295,6 +1300,9 @@ function closeForgotPasswordModal() {
     document.body.style.overflow = '';
 }
 
+// ============================================================
+// ==================== SEND RESET PASSWORD - FIXED ====================
+// ============================================================
 async function sendResetPassword() {
     const email = document.getElementById('resetEmail').value.trim();
     hideMessage('resetMessage');
@@ -1319,8 +1327,9 @@ async function sendResetPassword() {
         const result = await response.json();
         
         if (result.success) {
+            // ✅ USE 'success' TYPE
             showMessage('resetMessage', 'resetMessageText', result.message || 'Reset link sent successfully!', 'success');
-            showToast('Reset link sent!');
+            showToast('✅ Reset link sent!');
             
             setTimeout(() => {
                 closeForgotPasswordModal();
@@ -1338,7 +1347,6 @@ async function sendResetPassword() {
         btn.disabled = false;
     }
 }
-
 // ============================================================
 // ==================== TAB SWITCHING ====================
 // ============================================================
