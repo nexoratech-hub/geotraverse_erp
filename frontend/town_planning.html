@@ -2957,7 +2957,7 @@ function setupMoneyInputs() {
 }
 
 // ============================================================
-// RENDER DASHBOARD - FIXED
+// RENDER DASHBOARD - 4 GRADIENT CARDS
 // ============================================================
 async function renderDashboard() {
     const dashboardSection = document.getElementById('dashboardSection');
@@ -2979,144 +2979,534 @@ async function renderDashboard() {
     ]);
     
     // ============================================================
-    // HESABU KUTOKA DATA - FAFANUA VARIABLES KABLA
+    // HESABU KUTOKA DATA
     // ============================================================
     let totalProjects = projectsData.length;
     let totalDocs = projectDocuments.length;
+    let totalProjectsDocs = totalProjects + totalDocs;
+    
     let totalAddedReports = reportsList.length;
     let totalUploadedReports = uploadedReportsData.length;
+    let totalReports = totalAddedReports + totalUploadedReports;
+    
     let pendingRequests = requestsData.filter(r => r.status === 'pending').length;
     let approvedRequests = requestsData.filter(r => r.status === 'approved').length;
     let cancelledRequests = requestsData.filter(r => r.status === 'cancelled').length;
     let totalRequests = requestsData.length;
     
-    // ============================================================
-    // HESABU TOTAL BUDGET NA EXPENSES - FAFANUA HAPA
-    // ============================================================
+    // Daily Work
     let totalBudget = 0;
     let totalExpenses = 0;
+    let completedCount = 0, partialCount = 0, pendingCount = 0;
     
     for (let w of dailyworkData) {
         totalBudget += parseFloat(w.budget) || 0;
         totalExpenses += parseFloat(w.amount) || 0;
+        const status = w.status || w.dailywork_status || 'pending';
+        if (status === 'completed' || status === 'Completed') completedCount++;
+        else if (status === 'partial' || status === 'Partial') partialCount++;
+        else pendingCount++;
     }
     let remainingBudget = totalBudget - totalExpenses;
+    const totalDailyRecords = dailyworkData.length;
+    
+    // Unviewed counts
+    const unviewedProjects = projectsData.filter(p => p._is_unviewed).length;
+    const unviewedReports = reportsList.filter(r => r._is_unviewed).length + 
+                           uploadedReportsData.filter(d => d._is_unviewed).length;
     
     console.log('📊 Rendering dashboard with:', {
         totalProjects,
         totalDocs,
+        totalProjectsDocs,
+        totalReports,
+        totalRequests,
+        totalDailyRecords,
         totalBudget,
         totalExpenses,
-        remainingBudget,
-        totalRequests
+        remainingBudget
     });
     
     // ============================================================
-    // UPDATE DASHBOARD HTML
+    // BUILD HTML - 4 GRADIENT CARDS
     // ============================================================
     dashboardSection.innerHTML = `
+        <style>
+            /* ============================================================
+               DASHBOARD CARDS - GRADIENT BACKGROUNDS
+               ============================================================ */
+            
+            .dashboard-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 16px;
+                margin-bottom: 25px;
+            }
+            
+            @media (max-width: 992px) {
+                .dashboard-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 14px;
+                }
+            }
+            
+            @media (max-width: 480px) {
+                .dashboard-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            /* CARD BASE */
+            .dashboard-card {
+                border-radius: 16px;
+                padding: 18px 20px 16px;
+                transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                position: relative;
+                overflow: hidden;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                min-height: 150px;
+                border: none;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+                color: white;
+            }
+            
+            .dashboard-card:hover {
+                transform: translateY(-6px);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            }
+            
+            .dashboard-card:hover .card-icon {
+                transform: scale(1.05) rotate(-3deg);
+            }
+            
+            /* CARD THEMES - GRADIENTS */
+            .dashboard-card.card-teal {
+                background: linear-gradient(145deg, #0d9488, #0f766e);
+            }
+            .dashboard-card.card-purple {
+                background: linear-gradient(145deg, #7c3aed, #5b21b6);
+            }
+            .dashboard-card.card-orange {
+                background: linear-gradient(145deg, #ea580c, #9a3412);
+            }
+            .dashboard-card.card-green {
+                background: linear-gradient(145deg, #059669, #065f46);
+            }
+            
+            /* Card Icon */
+            .dashboard-card .card-icon-wrapper {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 10px;
+            }
+            
+            .dashboard-card .card-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                transition: transform 0.3s ease;
+                background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .dashboard-card .card-icon i {
+                color: white;
+            }
+            
+            /* Badge */
+            .dashboard-card .card-badge {
+                font-size: 9px;
+                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 20px;
+                background: #ef4444;
+                color: white;
+                animation: pulse-badge 1.5s infinite;
+                white-space: nowrap;
+            }
+            
+            @keyframes pulse-badge {
+                0%, 100% { transform: scale(1); opacity: 0.9; }
+                50% { transform: scale(1.05); opacity: 1; }
+            }
+            
+            /* Card Number */
+            .dashboard-card .card-number {
+                font-size: 28px;
+                font-weight: 800;
+                line-height: 1.1;
+                margin-bottom: 3px;
+                letter-spacing: -0.5px;
+                color: white;
+            }
+            
+            .dashboard-card .card-number .small {
+                font-size: 14px;
+                font-weight: 600;
+                opacity: 0.7;
+            }
+            
+            /* Card Title */
+            .dashboard-card .card-title {
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 8px;
+                color: rgba(255, 255, 255, 0.7);
+            }
+            
+            /* Stats Tags */
+            .dashboard-card .card-stats {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 5px;
+                margin-top: 2px;
+            }
+            
+            .dashboard-card .stat-tag {
+                font-size: 10px;
+                font-weight: 500;
+                padding: 3px 10px;
+                border-radius: 20px;
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                background: rgba(255, 255, 255, 0.15);
+                color: rgba(255, 255, 255, 0.9);
+            }
+            
+            .dashboard-card .stat-tag i {
+                font-size: 9px;
+            }
+            
+            /* Footer */
+            .dashboard-card .card-footer {
+                margin-top: 10px;
+                padding-top: 8px;
+                border-top: 1px solid rgba(255, 255, 255, 0.15);
+                font-size: 11px;
+                font-weight: 500;
+                opacity: 0.85;
+            }
+            
+            /* Glow effect on hover */
+            .dashboard-card::before {
+                content: '';
+                position: absolute;
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+                opacity: 0;
+                transition: opacity 0.5s ease;
+                pointer-events: none;
+            }
+            .dashboard-card:hover::before { opacity: 1; }
+            
+            /* Corner accent */
+            .dashboard-card::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 50px;
+                height: 50px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 0 16px 0 50px;
+                pointer-events: none;
+            }
+            
+            /* Dark Mode */
+            body.dark-mode .dashboard-card.card-teal {
+                background: linear-gradient(145deg, #064e4a, #043a3a);
+            }
+            body.dark-mode .dashboard-card.card-purple {
+                background: linear-gradient(145deg, #4a1a6b, #3a125a);
+            }
+            body.dark-mode .dashboard-card.card-orange {
+                background: linear-gradient(145deg, #6a2a0a, #4a1a05);
+            }
+            body.dark-mode .dashboard-card.card-green {
+                background: linear-gradient(145deg, #064e3b, #043a2a);
+            }
+            
+            /* Quick Actions */
+            .quick-actions-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+            }
+            @media (max-width: 768px) {
+                .quick-actions-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+            .quick-action-btn {
+                padding: 8px 12px;
+                border-radius: 10px;
+                border: none;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                color: white;
+                font-size: 11px;
+                height: 36px;
+                min-height: 36px;
+            }
+            .quick-action-btn i {
+                font-size: 12px;
+            }
+            .quick-action-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }
+            .quick-action-btn.teal { background: linear-gradient(145deg, #0d9488, #0f766e); }
+            .quick-action-btn.orange { background: linear-gradient(145deg, #ea580c, #9a3412); }
+            .quick-action-btn.purple { background: linear-gradient(145deg, #7c3aed, #5b21b6); }
+            .quick-action-btn.blue { background: linear-gradient(145deg, #2563eb, #1e40af); }
+            .quick-action-btn.green { background: linear-gradient(145deg, #059669, #065f46); }
+            .quick-action-btn.red { background: linear-gradient(145deg, #ef4444, #dc2626); }
+            
+            body.dark-mode .quick-action-btn.teal { background: linear-gradient(145deg, #0f766e, #065f46); }
+            body.dark-mode .quick-action-btn.orange { background: linear-gradient(145deg, #c2410c, #7c2d12); }
+            body.dark-mode .quick-action-btn.purple { background: linear-gradient(145deg, #6d28d9, #4c1d95); }
+            body.dark-mode .quick-action-btn.blue { background: linear-gradient(145deg, #1d4ed8, #1e3a5f); }
+            body.dark-mode .quick-action-btn.green { background: linear-gradient(145deg, #047857, #064e3b); }
+            body.dark-mode .quick-action-btn.red { background: linear-gradient(145deg, #dc2626, #991b1b); }
+            
+            /* Financial Summary */
+            .financial-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 6px 0;
+                border-bottom: 1px solid #f1f5f9;
+            }
+            body.dark-mode .financial-item {
+                border-bottom-color: #334155;
+            }
+            .financial-item:last-child {
+                border-bottom: none;
+            }
+            
+            /* Activity Items */
+            .activity-item {
+                padding: 8px 0;
+                border-bottom: 1px solid #f1f5f9;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 12px;
+            }
+            body.dark-mode .activity-item {
+                border-bottom-color: #334155;
+            }
+            .activity-item:last-child { border-bottom: none; }
+            .activity-time {
+                font-size: 10px;
+                color: #94a3b8;
+            }
+        </style>
+        
+        <!-- DASHBOARD HEADER -->
         <div class="mb-4">
-            <h2 class="text-xl font-bold text-gray-800">Town Planning Dashboard</h2>
-            <p class="text-xs text-gray-500">Urban Planning & Financial Management</p>
-            <p class="text-xs text-gray-400 mt-1">📊 Projects: ${totalProjects} | Documents: ${totalDocs}</p>
+            <h2 class="text-xl font-bold text-gray-800 dark:text-white">Town Planning Dashboard</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Urban Planning &amp; Financial Management</p>
         </div>
         
-        <div class="dashboard-summary-grid">
-            <!-- Projects Card -->
-            <div class="summary-card-large projects" onclick="showSection('projects')">
-                <div class="new-badge-small" id="projectNewBadge" style="${unviewedProjectsCount > 0 ? 'display:block;' : 'display:none;'}">
-                    ${unviewedProjectsCount} new
+        <!-- ============================================================
+             SECTION 1: 4 GRADIENT CARDS
+             ============================================================ -->
+        <div class="dashboard-grid">
+            <!-- CARD 1: Projects & Documents - TEAL -->
+            <div class="dashboard-card card-teal" onclick="showSection('projects')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-folder-open"></i></div>
+                    ${unviewedProjects > 0 ? `<span class="card-badge">${unviewedProjects} NEW</span>` : ''}
                 </div>
-                <div class="card-icon"><i class="fas fa-tasks"></i></div>
-                <div class="card-title">Projects & Documents</div>
-                <div class="card-number">${totalProjects + totalDocs}</div>
-                <div class="card-sub">
-                    <span class="stat"><span class="dot blue"></span> Projects: ${totalProjects}</span>
-                    <span class="stat"><span class="dot purple"></span> Docs: ${totalDocs}</span>
+                <div class="card-number">${totalProjectsDocs}</div>
+                <div class="card-title">📋 Projects &amp; Docs</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-tasks"></i> ${totalProjects}</span>
+                    <span class="stat-tag"><i class="fas fa-file-alt"></i> ${totalDocs}</span>
                 </div>
+                <div class="card-footer">${unviewedProjects > 0 ? `${unviewedProjects} new items` : 'All items up to date'}</div>
             </div>
             
-            <!-- Reports Card -->
-            <div class="summary-card-large reports" onclick="showSection('reports')">
-                <div class="new-badge-small" id="reportNewBadge" style="${unviewedReportsCount > 0 ? 'display:block;' : 'display:none;'}">
-                    ${unviewedReportsCount} new
+            <!-- CARD 2: All Reports - PURPLE -->
+            <div class="dashboard-card card-purple" onclick="showSection('reports')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-chart-line"></i></div>
                 </div>
-                <div class="card-icon"><i class="fas fa-chart-bar"></i></div>
-                <div class="card-title">All Reports</div>
-                <div class="card-number">${totalAddedReports + totalUploadedReports}</div>
-                <div class="card-sub">
-                    <span class="stat"><span class="dot blue"></span> Added: ${totalAddedReports}</span>
-                    <span class="stat"><span class="dot purple"></span> Uploaded: ${totalUploadedReports}</span>
+                <div class="card-number">${totalReports}</div>
+                <div class="card-title">📊 All Reports</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-plus-circle"></i> ${totalAddedReports}</span>
+                    <span class="stat-tag"><i class="fas fa-upload"></i> ${totalUploadedReports}</span>
                 </div>
+                <div class="card-footer">From Town Planning Department</div>
             </div>
             
-            <!-- Requests Card -->
-            <div class="summary-card-large requests" onclick="showSection('requests')">
-                <div class="new-badge-small" id="requestNewBadge" style="${unviewedRequestsCount > 0 ? 'display:block;' : 'display:none;'}">
-                    ${unviewedRequestsCount} new
+            <!-- CARD 3: Fund Requests - ORANGE -->
+            <div class="dashboard-card card-orange" onclick="showSection('requests')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-hand-holding-usd"></i></div>
+                    ${pendingRequests > 0 ? `<span class="card-badge">${pendingRequests} Pending</span>` : ''}
                 </div>
-                <div class="card-icon"><i class="fas fa-hand-holding-usd"></i></div>
-                <div class="card-title">Fund Requests</div>
                 <div class="card-number">${totalRequests}</div>
-                <div class="card-sub">
-                    <span class="stat"><span class="dot green"></span> Approved: ${approvedRequests}</span>
-                    <span class="stat"><span class="dot yellow"></span> Pending: ${pendingRequests}</span>
-                    <span class="stat"><span class="dot red"></span> Cancelled: ${cancelledRequests}</span>
+                <div class="card-title">💰 Fund Requests</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-check"></i> ${approvedRequests}</span>
+                    <span class="stat-tag"><i class="fas fa-clock"></i> ${pendingRequests}</span>
+                </div>
+                <div class="card-footer">${formatMoney(requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))} total</div>
+            </div>
+            
+            <!-- CARD 4: Daily Work - GREEN -->
+            <div class="dashboard-card card-green" onclick="showSection('projects')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-calendar-day"></i></div>
+                    ${pendingCount > 0 ? `<span class="card-badge">${pendingCount} Pending</span>` : ''}
+                </div>
+                <div class="card-number">${totalDailyRecords} <span class="small">recs</span></div>
+                <div class="card-title">📅 Daily Work</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-check"></i> ${completedCount}</span>
+                    <span class="stat-tag"><i class="fas fa-clock"></i> ${partialCount}</span>
+                    <span class="stat-tag"><i class="fas fa-hourglass"></i> ${pendingCount}</span>
+                </div>
+                <div class="card-footer">Budget: ${formatMoney(totalBudget)}</div>
+            </div>
+        </div>
+        
+        <!-- ============================================================
+             SECTION 2: CHARTS + QUICK ACTIONS
+             ============================================================ -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+            <!-- Chart: Request Status -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-chart-pie text-teal-600"></i> Request Status
+                </h3>
+                <div class="grid grid-cols-3 gap-3 text-center">
+                    <div class="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Pending</p>
+                        <p class="text-lg font-bold text-orange-600 dark:text-orange-400">${pendingRequests}</p>
+                    </div>
+                    <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Approved</p>
+                        <p class="text-lg font-bold text-green-600 dark:text-green-400">${approvedRequests}</p>
+                    </div>
+                    <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Total</p>
+                        <p class="text-lg font-bold text-blue-600 dark:text-blue-400">${totalRequests}</p>
+                    </div>
                 </div>
             </div>
             
-            <!-- Daily Work Card -->
-            <div class="summary-card-large dailywork" onclick="showSection('projects')">
-                <div class="card-icon"><i class="fas fa-calendar-day"></i></div>
-                <div class="card-title">Daily Work</div>
-                <div class="card-number">${dailyworkData.length} records</div>
-                <div class="card-sub">
-                    <span class="stat">Budget: ${formatMoney(totalBudget)}</span>
-                    <span class="stat">Expenses: ${formatMoney(totalExpenses)}</span>
-                    <span class="stat" style="color:${remainingBudget >= 0 ? '#10b981' : '#ef4444'};">Remaining: ${formatMoney(remainingBudget)}</span>
+            <!-- Financial Summary -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-coins text-green-600"></i> Financial Summary
+                </h3>
+                <div class="space-y-1 text-sm">
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Total Budget</span>
+                        <span class="font-bold text-teal-600 dark:text-teal-400">${formatMoney(totalBudget)}</span>
+                    </div>
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Total Expenses</span>
+                        <span class="font-bold text-red-600 dark:text-red-400">${formatMoney(totalExpenses)}</span>
+                    </div>
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Remaining</span>
+                        <span class="font-bold ${remainingBudget >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">${formatMoney(remainingBudget)}</span>
+                    </div>
+                    <div class="financial-item" style="border-bottom: none;">
+                        <span class="text-gray-600 dark:text-gray-400">Requests Total</span>
+                        <span class="font-bold text-orange-600 dark:text-orange-400">${formatMoney(requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-bolt text-orange-600"></i> Quick Actions
+                </h3>
+                <div class="quick-actions-grid">
+                    <button onclick="openAddProjectModal()" class="quick-action-btn teal">
+                        <i class="fas fa-plus"></i> Add Project
+                    </button>
+                    <button onclick="openModal('requestModal')" class="quick-action-btn orange">
+                        <i class="fas fa-hand-holding-usd"></i> New Request
+                    </button>
+                    <button onclick="openModal('addReportModal')" class="quick-action-btn purple">
+                        <i class="fas fa-chart-line"></i> Add Report
+                    </button>
+                    <button onclick="openUploadProjectDocModal()" class="quick-action-btn blue">
+                        <i class="fas fa-upload"></i> Upload Doc
+                    </button>
+                    <button onclick="openGenerateReportModal()" class="quick-action-btn green">
+                        <i class="fas fa-chart-line"></i> Generate
+                    </button>
+                    <button onclick="showSection('projects')" class="quick-action-btn red">
+                        <i class="fas fa-calendar-day"></i> Daily Work
+                    </button>
                 </div>
             </div>
         </div>
         
-        <!-- Charts Row -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-            <div class="bg-white rounded-xl p-4 shadow-sm">
-                <h3 class="font-semibold text-sm mb-3"><i class="fas fa-chart-pie text-indigo-600 mr-2"></i>Request Status</h3>
-                <div class="grid grid-cols-3 gap-3 text-center">
-                    <div class="p-3 bg-orange-50 rounded-lg"><p class="text-xs text-gray-500">Pending</p><p class="text-lg font-bold text-orange-600">${pendingRequests}</p></div>
-                    <div class="p-3 bg-green-50 rounded-lg"><p class="text-xs text-gray-500">Approved</p><p class="text-lg font-bold text-green-600">${approvedRequests}</p></div>
-                    <div class="p-3 bg-blue-50 rounded-lg"><p class="text-xs text-gray-500">Total</p><p class="text-lg font-bold text-blue-600">${totalRequests}</p></div>
-                </div>
-            </div>
-            <div class="bg-white rounded-xl p-4 shadow-sm">
-                <h3 class="font-semibold text-sm mb-3"><i class="fas fa-list-check text-purple-600 mr-2"></i>Quick Actions</h3>
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="openAddProjectModal()" class="bg-indigo-600 text-white py-2 rounded text-sm"><i class="fas fa-plus mr-1"></i> Add Project</button>
-                    <button onclick="openModal('requestModal')" class="bg-orange-600 text-white py-2 rounded text-sm"><i class="fas fa-plus mr-1"></i> New Request</button>
-                    <button onclick="openModal('addReportModal')" class="bg-purple-600 text-white py-2 rounded text-sm"><i class="fas fa-plus mr-1"></i> Add Report</button>
-                    <button onclick="openUploadProjectDocModal()" class="bg-cyan-600 text-white py-2 rounded text-sm"><i class="fas fa-upload mr-1"></i> Upload Document</button>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Recent Activity -->
-        <div class="bg-white rounded-xl p-4 shadow-sm">
+        <!-- ============================================================
+             SECTION 3: RECENT ACTIVITY
+             ============================================================ -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
             <div class="flex justify-between items-center mb-2">
-                <h3 class="text-sm font-semibold"><i class="fas fa-history text-indigo-600 mr-1"></i>Recent Activity</h3>
+                <h3 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-history text-teal-600"></i> Recent Activity
+                </h3>
+                <button onclick="loadRecycleBinFromDB(); showRecycleBinModal()" 
+                        class="text-teal-600 dark:text-teal-400 text-xs hover:underline flex items-center gap-1">
+                    <i class="fas fa-trash-restore"></i> Recycle Bin
+                </button>
             </div>
             <div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">
-                ${activityLogs.slice(0,5).map(l => `
-                    <div class="py-1 border-b flex justify-between">
-                        <span>${escapeHtml(l.action)}</span>
-                        <span class="text-gray-400">${new Date(l.created_at).toLocaleString()}</span>
-                    </div>
-                `).join('')}
+                ${activityLogs && activityLogs.length > 0 ? 
+                    activityLogs.slice(0, 8).map(l => `
+                        <div class="activity-item">
+                            <span class="text-gray-700 dark:text-gray-300">${escapeHtml(l.action || 'No action')}</span>
+                            <span class="activity-time">${l.created_at ? new Date(l.created_at).toLocaleString() : new Date().toLocaleString()}</span>
+                        </div>
+                    `).join('')
+                    : '<div class="py-2 text-gray-400 dark:text-gray-500 text-center text-xs">No recent activity</div>'
+                }
             </div>
         </div>
     `;
     
+    // ============================================================
+    // UPDATE BADGES
+    // ============================================================
+    updateProjectBadge();
+    updateReportBadge();
+    updateRequestBadge();
+    updateDashboardBadges();
+    
     addLog("Dashboard loaded");
 }
+
 // ============================================================
 // PROJECTS SECTION
 // ============================================================

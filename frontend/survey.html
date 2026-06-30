@@ -7262,7 +7262,7 @@ async function generateAndSaveReport() {
 }
 
 // ============================================================
-// LOAD DASHBOARD - FIXED (No Duplicate Daily Work)
+// LOAD DASHBOARD - COMPLETE VERSION
 // ============================================================
 async function loadDashboard() {
     // Show loading state
@@ -7278,22 +7278,20 @@ async function loadDashboard() {
         fetchRequests(), 
         fetchReports(), 
         fetchUploadedReports(), 
-        fetchDailyWork()
+        fetchDailyWork(),
+        fetchProjectDocuments(),
+        loadRecycleBinFromDB()
     ]);
     
     // ============================================================
-    // CALCULATE DAILY WORK TOTALS - FIXED (No Duplicate)
+    // DAILY WORK CALCULATIONS - FIXED (No Duplicate)
     // ============================================================
     let totalBudget = 0, totalSpent = 0;
     let completedCount = 0, partialCount = 0, pendingCount = 0;
     const seenDailyIds = new Set();
     
-    // 1. From dailyworkData
     for (let w of dailyworkData) {
-        // Skip if deleted
         if (w.is_deleted === 1) continue;
-        
-        // Create unique key
         const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
         if (seenDailyIds.has(key)) continue;
         seenDailyIds.add(key);
@@ -7307,45 +7305,10 @@ async function loadDashboard() {
         else pendingCount++;
     }
     
-    // 2. Also check projects data for daily work
     for (let p of projectsData) {
         if (p.is_deleted === 1) continue;
-        
-        // Check p.daily_work
-        if (p.daily_work && Array.isArray(p.daily_work) && p.daily_work.length > 0) {
+        if (p.daily_work && Array.isArray(p.daily_work)) {
             for (let w of p.daily_work) {
-                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
-                if (!seenDailyIds.has(key)) {
-                    seenDailyIds.add(key);
-                    totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
-                    totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
-                    const status = w.status || w.dailywork_status || 'pending';
-                    if (status === 'completed' || status === 'Completed') completedCount++;
-                    else if (status === 'partial' || status === 'Partial') partialCount++;
-                    else pendingCount++;
-                }
-            }
-        }
-        
-        // Check p._daily_work_records
-        if (p._daily_work_records && Array.isArray(p._daily_work_records) && p._daily_work_records.length > 0) {
-            for (let w of p._daily_work_records) {
-                const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
-                if (!seenDailyIds.has(key)) {
-                    seenDailyIds.add(key);
-                    totalBudget += parseFloat(w.budget || w.dailywork_budget || 0);
-                    totalSpent += parseFloat(w.amount || w.dailywork_amount || 0);
-                    const status = w.status || w.dailywork_status || 'pending';
-                    if (status === 'completed' || status === 'Completed') completedCount++;
-                    else if (status === 'partial' || status === 'Partial') partialCount++;
-                    else pendingCount++;
-                }
-            }
-        }
-        
-        // Check p.daily_work_records
-        if (p.daily_work_records && Array.isArray(p.daily_work_records) && p.daily_work_records.length > 0) {
-            for (let w of p.daily_work_records) {
                 const key = w.id || w.original_dailywork_id || (w.date + '_' + (w.work_description || ''));
                 if (!seenDailyIds.has(key)) {
                     seenDailyIds.add(key);
@@ -7363,197 +7326,709 @@ async function loadDashboard() {
     const remainingBudget = totalBudget - totalSpent;
     const totalDailyRecords = seenDailyIds.size;
     
-    console.log('📊 Daily Work Summary (Unique):', {
-        totalRecords: totalDailyRecords,
-        totalBudget: formatCurrency(totalBudget),
-        totalSpent: formatCurrency(totalSpent),
-        remainingBudget: formatCurrency(remainingBudget),
-        completedCount,
-        partialCount,
-        pendingCount
-    });
-    
     // ============================================================
-    // CALCULATE OTHER TOTALS
+    // FINANCIAL CALCULATIONS
     // ============================================================
     let totalIncome = 0, totalExpense = 0;
-    requestsData.forEach(t => { 
-        if (t.type === 'income' && t.status === 'paid') totalIncome += parseFloat(t.amount) || 0; 
-        if (t.type === 'expense' && t.status === 'paid') totalExpense += parseFloat(t.amount) || 0; 
-    });
+    for (let r of requestsData) {
+        const amount = parseFloat(r.amount) || 0;
+        if (r.status === 'approved' || r.status === 'Approved' || r.status === 'paid') {
+            if (r.type === 'income') totalIncome += amount;
+            else if (r.type === 'expense') totalExpense += amount;
+        }
+    }
+    const netProfit = totalIncome - totalExpense;
     
+    // ============================================================
+    // PROJECT & DOCUMENT COUNTS
+    // ============================================================
+    const totalProjects = projectsData.filter(p => p.is_deleted !== 1).length;
+    const totalDocuments = projectDocuments.filter(d => d.is_deleted !== 1).length;
+    const totalProjectsDocs = totalProjects + totalDocuments;
+    const unviewedProjects = projectsData.filter(p => p._is_unviewed).length;
+    const unviewedReports = reportsData.filter(r => r._is_unviewed).length + 
+                           uploadedReportsData.filter(d => d._is_unviewed).length;
+    
+    // ============================================================
+    // REQUEST COUNTS
+    // ============================================================
+    const totalRequests = requestsData.filter(r => r.is_deleted !== 1).length;
+    const pendingRequests = requestsData.filter(r => (r.status === 'pending' || r.status === 'Pending') && r.is_deleted !== 1).length;
+    const approvedRequests = requestsData.filter(r => (r.status === 'approved' || r.status === 'Approved') && r.is_deleted !== 1).length;
+    const cancelledRequests = requestsData.filter(r => (r.status === 'cancelled' || r.status === 'Cancelled') && r.is_deleted !== 1).length;
+    const totalRequestsAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+    
+    // ============================================================
+    // REPORT COUNTS
+    // ============================================================
+    const totalAddedReports = reportsData.filter(r => r.is_deleted !== 1).length;
+    const totalUploadedReports = uploadedReportsData.filter(d => d.is_deleted !== 1).length;
+    const totalReports = totalAddedReports + totalUploadedReports;
+    
+    // ============================================================
+    // PROJECT STATUS COUNTS
+    // ============================================================
     let pending = projectsData.filter(p => p.status === 'pending' && p.is_deleted !== 1).length;
     let inProgress = projectsData.filter(p => p.status === 'in_progress' && p.is_deleted !== 1).length;
     let completed = projectsData.filter(p => p.status === 'completed' && p.is_deleted !== 1).length;
     let approved = projectsData.filter(p => p.status === 'approved' && p.is_deleted !== 1).length;
     
-    let pendingRequests = requestsData.filter(r => r.status === 'pending' && r.is_deleted !== 1).length;
-    let totalRequestsAmount = requestsData.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-    
-    let totalProjects = projectsData.filter(p => p.is_deleted !== 1).length;
-    let totalDocuments = projectDocuments.filter(d => d.is_deleted !== 1).length;
-    let totalProjectsDocs = totalProjects + totalDocuments;
-    let totalAddedReports = reportsData.filter(r => r.is_deleted !== 1).length;
-    let totalUploadedReports = uploadedReportsData.filter(d => d.is_deleted !== 1).length;
-    let totalReports = totalAddedReports + totalUploadedReports;
-    let totalRequests = requestsData.filter(r => r.is_deleted !== 1).length;
-    
     // ============================================================
-    // BUILD HTML
+    // BUILD HTML - 4 CARDS WITH GRADIENT BACKGROUNDS
     // ============================================================
     let html = `
+        <style>
+            /* ============================================================
+               DASHBOARD CARDS - GRADIENT BACKGROUNDS
+               ============================================================ */
+            
+            .dashboard-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 16px;
+                margin-bottom: 25px;
+            }
+            
+            @media (max-width: 992px) {
+                .dashboard-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 14px;
+                }
+            }
+            
+            @media (max-width: 480px) {
+                .dashboard-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            /* CARD BASE */
+            .dashboard-card {
+                border-radius: 16px;
+                padding: 18px 20px 16px;
+                transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                position: relative;
+                overflow: hidden;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                min-height: 150px;
+                border: none;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+                color: white;
+            }
+            
+            .dashboard-card:hover {
+                transform: translateY(-6px);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            }
+            
+            .dashboard-card:hover .card-icon {
+                transform: scale(1.05) rotate(-3deg);
+            }
+            
+            /* CARD THEMES - GRADIENTS */
+            .dashboard-card.card-teal {
+                background: linear-gradient(145deg, #0d9488, #0f766e);
+            }
+            .dashboard-card.card-purple {
+                background: linear-gradient(145deg, #7c3aed, #5b21b6);
+            }
+            .dashboard-card.card-orange {
+                background: linear-gradient(145deg, #ea580c, #9a3412);
+            }
+            .dashboard-card.card-green {
+                background: linear-gradient(145deg, #059669, #065f46);
+            }
+            
+            /* Card Icon */
+            .dashboard-card .card-icon-wrapper {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 10px;
+            }
+            
+            .dashboard-card .card-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                transition: transform 0.3s ease;
+                background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .dashboard-card .card-icon i {
+                color: white;
+            }
+            
+            /* Badge */
+            .dashboard-card .card-badge {
+                font-size: 9px;
+                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 20px;
+                background: #ef4444;
+                color: white;
+                animation: pulse-badge 1.5s infinite;
+                white-space: nowrap;
+            }
+            
+            @keyframes pulse-badge {
+                0%, 100% { transform: scale(1); opacity: 0.9; }
+                50% { transform: scale(1.05); opacity: 1; }
+            }
+            
+            /* Card Number */
+            .dashboard-card .card-number {
+                font-size: 28px;
+                font-weight: 800;
+                line-height: 1.1;
+                margin-bottom: 3px;
+                letter-spacing: -0.5px;
+                color: white;
+            }
+            
+            .dashboard-card .card-number .small {
+                font-size: 14px;
+                font-weight: 600;
+                opacity: 0.7;
+            }
+            
+            /* Card Title */
+            .dashboard-card .card-title {
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 8px;
+                color: rgba(255, 255, 255, 0.7);
+            }
+            
+            /* Stats Tags */
+            .dashboard-card .card-stats {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 5px;
+                margin-top: 2px;
+            }
+            
+            .dashboard-card .stat-tag {
+                font-size: 10px;
+                font-weight: 500;
+                padding: 3px 10px;
+                border-radius: 20px;
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                background: rgba(255, 255, 255, 0.15);
+                color: rgba(255, 255, 255, 0.9);
+            }
+            
+            .dashboard-card .stat-tag i {
+                font-size: 9px;
+            }
+            
+            /* Footer */
+            .dashboard-card .card-footer {
+                margin-top: 10px;
+                padding-top: 8px;
+                border-top: 1px solid rgba(255, 255, 255, 0.15);
+                font-size: 11px;
+                font-weight: 500;
+                opacity: 0.85;
+            }
+            
+            /* Glow effect on hover */
+            .dashboard-card::before {
+                content: '';
+                position: absolute;
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+                opacity: 0;
+                transition: opacity 0.5s ease;
+                pointer-events: none;
+            }
+            .dashboard-card:hover::before { opacity: 1; }
+            
+            /* Corner accent */
+            .dashboard-card::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 50px;
+                height: 50px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 0 16px 0 50px;
+                pointer-events: none;
+            }
+            
+            /* Dark Mode */
+            body.dark-mode .dashboard-card.card-teal {
+                background: linear-gradient(145deg, #064e4a, #043a3a);
+            }
+            body.dark-mode .dashboard-card.card-purple {
+                background: linear-gradient(145deg, #4a1a6b, #3a125a);
+            }
+            body.dark-mode .dashboard-card.card-orange {
+                background: linear-gradient(145deg, #6a2a0a, #4a1a05);
+            }
+            body.dark-mode .dashboard-card.card-green {
+                background: linear-gradient(145deg, #064e3b, #043a2a);
+            }
+            
+            /* ============================================================
+               QUICK ACTIONS - REDUCED SIZE
+               ============================================================ */
+            .quick-actions-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+            }
+            
+            @media (max-width: 768px) {
+                .quick-actions-grid {
+                    grid-template-columns: 1fr 1fr;
+                    gap: 4px;
+                }
+            }
+            @media (max-width: 480px) {
+                .quick-actions-grid {
+                    grid-template-columns: 1fr;
+                    gap: 4px;
+                }
+            }
+            
+            .quick-action-btn {
+                padding: 8px 12px;
+                border-radius: 10px;
+                border: none;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                color: white;
+                font-size: 11px;
+                height: 36px;
+                min-height: 36px;
+            }
+            
+            .quick-action-btn i {
+                font-size: 12px;
+            }
+            
+            .quick-action-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }
+            .quick-action-btn:active {
+                transform: translateY(0px);
+            }
+            
+            .quick-action-btn.teal { background: linear-gradient(145deg, #0d9488, #0f766e); }
+            .quick-action-btn.teal:hover { background: linear-gradient(145deg, #0f766e, #065f46); }
+            .quick-action-btn.orange { background: linear-gradient(145deg, #ea580c, #9a3412); }
+            .quick-action-btn.orange:hover { background: linear-gradient(145deg, #c2410c, #7c2d12); }
+            .quick-action-btn.purple { background: linear-gradient(145deg, #7c3aed, #5b21b6); }
+            .quick-action-btn.purple:hover { background: linear-gradient(145deg, #6d28d9, #4c1d95); }
+            .quick-action-btn.blue { background: linear-gradient(145deg, #2563eb, #1e40af); }
+            .quick-action-btn.blue:hover { background: linear-gradient(145deg, #1d4ed8, #1e3a5f); }
+            .quick-action-btn.green { background: linear-gradient(145deg, #059669, #065f46); }
+            .quick-action-btn.green:hover { background: linear-gradient(145deg, #047857, #064e3b); }
+            .quick-action-btn.red { background: linear-gradient(145deg, #ef4444, #dc2626); }
+            .quick-action-btn.red:hover { background: linear-gradient(145deg, #dc2626, #991b1b); }
+            
+            body.dark-mode .quick-action-btn.teal { background: linear-gradient(145deg, #0f766e, #065f46); }
+            body.dark-mode .quick-action-btn.orange { background: linear-gradient(145deg, #c2410c, #7c2d12); }
+            body.dark-mode .quick-action-btn.purple { background: linear-gradient(145deg, #6d28d9, #4c1d95); }
+            body.dark-mode .quick-action-btn.blue { background: linear-gradient(145deg, #1d4ed8, #1e3a5f); }
+            body.dark-mode .quick-action-btn.green { background: linear-gradient(145deg, #047857, #064e3b); }
+            body.dark-mode .quick-action-btn.red { background: linear-gradient(145deg, #dc2626, #991b1b); }
+            
+            body.dark-mode .quick-action-btn:hover {
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            }
+            
+            /* ============================================================
+               DAILY WORK SUMMARY
+               ============================================================ */
+            .dw-summary-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 10px;
+                margin-top: 12px;
+            }
+            
+            @media (max-width: 768px) {
+                .dw-summary-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+            @media (max-width: 480px) {
+                .dw-summary-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            .dw-summary-item {
+                padding: 12px 16px;
+                border-radius: 12px;
+                text-align: center;
+                background: #f8fafc;
+                border: 1px solid #e5e7eb;
+            }
+            
+            body.dark-mode .dw-summary-item {
+                background: #0f172a;
+                border-color: #334155;
+            }
+            
+            .dw-summary-item .label {
+                font-size: 10px;
+                font-weight: 600;
+                color: #6b7280;
+                text-transform: uppercase;
+            }
+            
+            body.dark-mode .dw-summary-item .label {
+                color: #94a3b8;
+            }
+            
+            .dw-summary-item .value {
+                font-size: 18px;
+                font-weight: 800;
+                margin-top: 4px;
+                font-family: monospace;
+            }
+            
+            .dw-summary-item .value.green { color: #10b981; }
+            .dw-summary-item .value.red { color: #ef4444; }
+            .dw-summary-item .value.blue { color: #3b82f6; }
+            .dw-summary-item .value.purple { color: #8b5cf6; }
+            
+            .dw-status-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+                margin-top: 12px;
+            }
+            
+            .dw-status-item {
+                padding: 8px 12px;
+                border-radius: 10px;
+                text-align: center;
+                border: 1px solid #e5e7eb;
+            }
+            
+            body.dark-mode .dw-status-item {
+                border-color: #334155;
+            }
+            
+            .dw-status-item .count {
+                font-size: 20px;
+                font-weight: 800;
+            }
+            .dw-status-item .status-label {
+                font-size: 10px;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+            
+            .dw-status-item.done { background: #d1fae5; }
+            .dw-status-item.done .count { color: #059669; }
+            .dw-status-item.done .status-label { color: #059669; }
+            
+            .dw-status-item.partial { background: #fef3c7; }
+            .dw-status-item.partial .count { color: #d97706; }
+            .dw-status-item.partial .status-label { color: #d97706; }
+            
+            .dw-status-item.pending { background: #fee2e2; }
+            .dw-status-item.pending .count { color: #dc2626; }
+            .dw-status-item.pending .status-label { color: #dc2626; }
+            
+            body.dark-mode .dw-status-item.done { background: #064e3b; }
+            body.dark-mode .dw-status-item.done .count { color: #34d399; }
+            body.dark-mode .dw-status-item.done .status-label { color: #34d399; }
+            
+            body.dark-mode .dw-status-item.partial { background: #451a03; }
+            body.dark-mode .dw-status-item.partial .count { color: #fbbf24; }
+            body.dark-mode .dw-status-item.partial .status-label { color: #fbbf24; }
+            
+            body.dark-mode .dw-status-item.pending { background: #7f1d1d; }
+            body.dark-mode .dw-status-item.pending .count { color: #fca5a5; }
+            body.dark-mode .dw-status-item.pending .status-label { color: #fca5a5; }
+            
+            /* ============================================================
+               ACTIVITY ITEMS
+               ============================================================ */
+            .activity-item {
+                padding: 8px 0;
+                border-bottom: 1px solid #f1f5f9;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 12px;
+            }
+            
+            body.dark-mode .activity-item {
+                border-bottom-color: #334155;
+            }
+            .activity-item:last-child { border-bottom: none; }
+            
+            .activity-time {
+                font-size: 10px;
+                color: #94a3b8;
+            }
+            
+            /* Financial Summary */
+            .financial-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 6px 0;
+                border-bottom: 1px solid #f1f5f9;
+            }
+            
+            body.dark-mode .financial-item {
+                border-bottom-color: #334155;
+            }
+            .financial-item:last-child {
+                border-bottom: none;
+            }
+        </style>
+        
+        <!-- DASHBOARD HEADER -->
         <div class="mb-4">
             <h2 class="text-xl font-bold text-gray-800 dark:text-white">Survey Dashboard</h2>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Project & Financial Management</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Project &amp; Financial Management</p>
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <!-- CARD 1: Projects & Documents -->
-            <div class="stat-card cursor-pointer" style="border-top: 4px solid #0d9488;" onclick="showSection('projects')">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="stat-icon bg-teal-100 text-teal-600" style="margin:0;"><i class="fas fa-tasks text-lg"></i></div>
-                    <span class="text-xs bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full">${unviewedProjectsCount} new</span>
+        <!-- ============================================================
+             SECTION 1: 4 DASHBOARD CARDS
+             ============================================================ -->
+        <div class="dashboard-grid">
+            <!-- CARD 1: Projects & Documents - TEAL -->
+            <div class="dashboard-card card-teal" onclick="showSection('projects')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-folder-open"></i></div>
+                    ${unviewedProjects > 0 ? `<span class="card-badge">${unviewedProjects} NEW</span>` : ''}
                 </div>
-                <p class="stat-label text-left">Projects & Documents</p>
-                <div class="flex items-end justify-between mt-1">
-                    <p class="stat-number text-teal-600" style="font-size:28px; margin:0;">${totalProjectsDocs}</p>
-                    <div class="text-right">
-                        <p class="text-[10px] text-gray-500">Projects: ${totalProjects}</p>
-                        <p class="text-[10px] text-gray-500">Documents: ${totalDocuments}</p>
-                    </div>
+                <div class="card-number">${totalProjectsDocs}</div>
+                <div class="card-title">📋 Projects &amp; Docs</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-tasks"></i> ${totalProjects}</span>
+                    <span class="stat-tag"><i class="fas fa-file-alt"></i> ${totalDocuments}</span>
                 </div>
+                <div class="card-footer">${unviewedProjects > 0 ? `${unviewedProjects} new` : 'All items up to date'}</div>
             </div>
             
-            <!-- CARD 2: All Reports -->
-            <div class="stat-card cursor-pointer" style="border-top: 4px solid #8b5cf6;" onclick="showSection('reports')">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="stat-icon bg-purple-100 text-purple-600" style="margin:0;"><i class="fas fa-chart-line text-lg"></i></div>
-                    <span class="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">${unviewedReportsCount} new</span>
+            <!-- CARD 2: All Reports - PURPLE -->
+            <div class="dashboard-card card-purple" onclick="showSection('reports')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-chart-line"></i></div>
                 </div>
-                <p class="stat-label text-left">All Reports</p>
-                <div class="flex items-end justify-between mt-1">
-                    <p class="stat-number text-purple-600" style="font-size:28px; margin:0;">${totalReports}</p>
-                    <div class="text-right">
-                        <p class="text-[10px] text-gray-500">Added: ${totalAddedReports}</p>
-                        <p class="text-[10px] text-gray-500">Uploaded: ${totalUploadedReports}</p>
-                    </div>
+                <div class="card-number">${totalReports}</div>
+                <div class="card-title">📊 All Reports</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-plus-circle"></i> ${totalAddedReports}</span>
+                    <span class="stat-tag"><i class="fas fa-upload"></i> ${totalUploadedReports}</span>
                 </div>
+                <div class="card-footer">From Survey Department</div>
             </div>
             
-            <!-- CARD 3: Fund Requests -->
-            <div class="stat-card cursor-pointer" style="border-top: 4px solid #f59e0b;" onclick="showSection('requests')">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="stat-icon bg-orange-100 text-orange-600" style="margin:0;"><i class="fas fa-hand-holding-usd text-lg"></i></div>
-                    <span class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">${totalRequests} total</span>
+            <!-- CARD 3: Fund Requests - ORANGE -->
+            <div class="dashboard-card card-orange" onclick="showSection('requests')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-hand-holding-usd"></i></div>
+                    ${pendingRequests > 0 ? `<span class="card-badge">${pendingRequests} Pending</span>` : ''}
                 </div>
-                <p class="stat-label text-left">Fund Requests</p>
-                <div class="flex items-end justify-between mt-1">
-                    <p class="stat-number text-orange-600" style="font-size:28px; margin:0;">${totalRequests}</p>
-                    <div class="text-right">
-                        <p class="text-[10px] text-green-600">Approved: ${requestsData.filter(r => r.status === 'approved' && r.is_deleted !== 1).length}</p>
-                        <p class="text-[10px] text-yellow-600">Pending: ${pendingRequests}</p>
-                        <p class="text-[10px] text-red-600">Cancelled: ${requestsData.filter(r => r.status === 'cancelled' && r.is_deleted !== 1).length}</p>
-                    </div>
+                <div class="card-number">${totalRequests}</div>
+                <div class="card-title">💰 Fund Requests</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-check"></i> ${approvedRequests}</span>
+                    <span class="stat-tag"><i class="fas fa-clock"></i> ${pendingRequests}</span>
                 </div>
-                <p class="text-[10px] text-gray-500 mt-1 text-right">${formatCurrency(totalRequestsAmount)}</p>
+                <div class="card-footer">${formatCurrency(totalRequestsAmount)} total</div>
             </div>
             
-            <!-- CARD 4: Daily Work -->
-            <div class="stat-card cursor-pointer" style="border-top: 4px solid #10b981;" onclick="showSection('projects')">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="stat-icon bg-green-100 text-green-600" style="margin:0;"><i class="fas fa-calendar-day text-lg"></i></div>
-                    <span class="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">${totalDailyRecords} records</span>
+            <!-- CARD 4: Daily Work - GREEN -->
+            <div class="dashboard-card card-green" onclick="showSection('projects')">
+                <div class="card-icon-wrapper">
+                    <div class="card-icon"><i class="fas fa-calendar-day"></i></div>
+                    ${pendingCount > 0 ? `<span class="card-badge">${pendingCount} Pending</span>` : ''}
                 </div>
-                <p class="stat-label text-left">Daily Work</p>
-                <div class="flex items-end justify-between mt-1">
-                    <p class="stat-number text-green-600" style="font-size:28px; margin:0;">${totalDailyRecords}</p>
-                    <div class="text-right">
-                        <p class="text-[10px] text-green-600">Budget: ${formatCurrency(totalBudget)}</p>
-                        <p class="text-[10px] text-orange-600">Spent: ${formatCurrency(totalSpent)}</p>
-                        <p class="text-[10px] ${remainingBudget >= 0 ? 'text-green-600' : 'text-red-600'}">Remaining: ${formatCurrency(remainingBudget)}</p>
-                    </div>
+                <div class="card-number">${totalDailyRecords} <span class="small">recs</span></div>
+                <div class="card-title">📅 Daily Work</div>
+                <div class="card-stats">
+                    <span class="stat-tag"><i class="fas fa-check"></i> ${completedCount}</span>
+                    <span class="stat-tag"><i class="fas fa-clock"></i> ${partialCount}</span>
+                    <span class="stat-tag"><i class="fas fa-hourglass"></i> ${pendingCount}</span>
                 </div>
-                <div class="flex gap-2 mt-1 flex-wrap">
-                    <span class="text-[8px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded">✅ ${completedCount}</span>
-                    <span class="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded">⏳ ${partialCount}</span>
-                    <span class="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">🕐 ${pendingCount}</span>
-                </div>
+                <div class="card-footer">Budget: ${formatCurrency(totalBudget)}</div>
             </div>
         </div>
         
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-            <!-- Chart 1: Project Status -->
+        <!-- ============================================================
+             SECTION 2: CHART + FINANCIAL SUMMARY + QUICK ACTIONS
+             ============================================================ -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+            <!-- Chart: Project Status -->
             <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
-                <h3 class="font-semibold text-sm mb-3 text-gray-800 dark:text-white">
-                    <i class="fas fa-chart-pie text-teal-600 mr-2"></i>Project Status
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-chart-pie text-teal-600"></i> Project Status
                 </h3>
-                <canvas id="statusChart" height="180"></canvas>
+                <canvas id="statusChart" height="160"></canvas>
                 <div class="flex justify-center gap-3 mt-3 text-xs flex-wrap">
-                    <span class="text-yellow-600">Pending: ${pending}</span>
-                    <span class="text-blue-600">In Progress: ${inProgress}</span>
-                    <span class="text-green-600">Completed: ${completed}</span>
-                    <span class="text-purple-600">Approved: ${approved}</span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-yellow-500"></span> ${pending}
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-blue-500"></span> ${inProgress}
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-green-500"></span> ${completed}
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-purple-500"></span> ${approved}
+                    </span>
                 </div>
             </div>
             
-            <!-- Chart 2: Request Summary -->
+            <!-- Financial Summary -->
             <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
-                <h3 class="font-semibold text-sm mb-3 text-gray-800 dark:text-white">
-                    <i class="fas fa-chart-bar text-green-600 mr-2"></i>Request Summary
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-coins text-green-600"></i> Financial Summary
                 </h3>
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div class="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border dark:border-green-800">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Income Requests</p>
-                        <p class="text-lg font-bold text-green-600 dark:text-green-400">${requestsData.filter(r => r.type === 'income' && r.is_deleted !== 1).length}</p>
-                        <p class="text-xs text-green-500">${formatCurrency(requestsData.filter(r => r.type === 'income' && r.is_deleted !== 1).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}</p>
+                <div class="space-y-1 text-sm">
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Total Income</span>
+                        <span class="font-bold text-green-600 dark:text-green-400">${formatCurrency(totalIncome)}</span>
                     </div>
-                    <div class="bg-red-50 dark:bg-red-900/20 p-3 rounded-xl border dark:border-red-800">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Expense Requests</p>
-                        <p class="text-lg font-bold text-red-600 dark:text-red-400">${requestsData.filter(r => r.type === 'expense' && r.is_deleted !== 1).length}</p>
-                        <p class="text-xs text-red-500">${formatCurrency(requestsData.filter(r => r.type === 'expense' && r.is_deleted !== 1).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}</p>
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Total Expenses</span>
+                        <span class="font-bold text-red-600 dark:text-red-400">${formatCurrency(totalExpense)}</span>
                     </div>
-                    <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border dark:border-blue-800 col-span-2">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Net Balance</p>
-                        <p class="text-lg font-bold ${totalIncome - totalExpense >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
-                            ${formatCurrency(totalIncome - totalExpense)}
-                        </p>
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Net Profit</span>
+                        <span class="font-bold ${netProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">${formatCurrency(netProfit)}</span>
                     </div>
+                    <div class="financial-item">
+                        <span class="text-gray-600 dark:text-gray-400">Budget Requests</span>
+                        <span class="font-bold text-orange-600 dark:text-orange-400">${formatCurrency(totalRequestsAmount)}</span>
+                    </div>
+                    <div class="financial-item" style="border-bottom: none;">
+                        <span class="text-gray-600 dark:text-gray-400">Daily Work Budget</span>
+                        <span class="font-bold text-teal-600 dark:text-teal-400">${formatCurrency(totalBudget)}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
+                <h3 class="font-semibold text-sm mb-2 text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-bolt text-orange-600"></i> Quick Actions
+                </h3>
+                <div class="quick-actions-grid">
+                    <button onclick="openAddProjectModal()" class="quick-action-btn teal">
+                        <i class="fas fa-plus"></i> Add Project
+                    </button>
+                    <button onclick="openAddRequestModal()" class="quick-action-btn orange">
+                        <i class="fas fa-hand-holding-usd"></i> New Request
+                    </button>
+                    <button onclick="openAddReportModal()" class="quick-action-btn purple">
+                        <i class="fas fa-chart-line"></i> Add Report
+                    </button>
+                    <button onclick="openUploadProjectDocModal()" class="quick-action-btn blue">
+                        <i class="fas fa-upload"></i> Upload Doc
+                    </button>
+                    <button onclick="openGenerateReportModal()" class="quick-action-btn green">
+                        <i class="fas fa-chart-line"></i> Generate
+                    </button>
+                    <button onclick="showSection('projects')" class="quick-action-btn red">
+                        <i class="fas fa-calendar-day"></i> Daily Work
+                    </button>
                 </div>
             </div>
         </div>
         
-        <!-- Quick Actions -->
-        <div class="grid grid-cols-3 gap-3 mb-5">
-            <button onclick="showSection('projects')" class="btn-primary text-sm py-2">
-                <i class="fas fa-plus-circle mr-2"></i>Add Project
-            </button>
-            <button onclick="showSection('requests')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#f59e0b,#d97706);">
-                <i class="fas fa-plus-circle mr-2"></i>New Request
-            </button>
-            <button onclick="showSection('reports')" class="btn-primary text-sm py-2" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);">
-                <i class="fas fa-chart-line mr-2"></i>Add Report
-            </button>
+        <!-- ============================================================
+             SECTION 3: DAILY WORK DETAILED SUMMARY
+             ============================================================ -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700 mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-calendar-day text-teal-600"></i> Daily Work Summary
+                </h3>
+                <span class="text-xs text-gray-400 dark:text-gray-500">${totalDailyRecords} total records</span>
+            </div>
+            
+            <div class="dw-summary-grid">
+                <div class="dw-summary-item">
+                    <div class="label">💰 Total Budget</div>
+                    <div class="value green">${formatCurrency(totalBudget)}</div>
+                </div>
+                <div class="dw-summary-item">
+                    <div class="label">💸 Total Spent</div>
+                    <div class="value red">${formatCurrency(totalSpent)}</div>
+                </div>
+                <div class="dw-summary-item">
+                    <div class="label">📊 Remaining</div>
+                    <div class="value ${remainingBudget >= 0 ? 'green' : 'red'}">${formatCurrency(remainingBudget)}</div>
+                </div>
+                <div class="dw-summary-item">
+                    <div class="label">📈 Total Records</div>
+                    <div class="value purple">${totalDailyRecords}</div>
+                </div>
+            </div>
+            
+            <div class="dw-status-grid">
+                <div class="dw-status-item done">
+                    <div class="count">${completedCount}</div>
+                    <div class="status-label">✅ Completed</div>
+                </div>
+                <div class="dw-status-item partial">
+                    <div class="count">${partialCount}</div>
+                    <div class="status-label">⏳ Partial</div>
+                </div>
+                <div class="dw-status-item pending">
+                    <div class="count">${pendingCount}</div>
+                    <div class="status-label">🕐 Pending</div>
+                </div>
+            </div>
         </div>
         
-        <!-- Recent Activity -->
+        <!-- ============================================================
+             SECTION 4: RECENT ACTIVITY
+             ============================================================ -->
         <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border dark:border-gray-700">
             <div class="flex justify-between items-center mb-2">
-                <h3 class="text-sm font-semibold text-gray-800 dark:text-white">
-                    <i class="fas fa-history text-teal-600 mr-1"></i>Recent Activity
+                <h3 class="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                    <i class="fas fa-history text-teal-600"></i> Recent Activity
                 </h3>
-                <button onclick="loadRecycleBinFromDB(); showRecycleBinModal()" class="text-teal-600 dark:text-teal-400 text-xs hover:underline">
-                    <i class="fas fa-trash-restore mr-1"></i>Recycle Bin
+                <button onclick="loadRecycleBinFromDB(); showRecycleBinModal()" 
+                        class="text-teal-600 dark:text-teal-400 text-xs hover:underline flex items-center gap-1">
+                    <i class="fas fa-trash-restore"></i> Recycle Bin
                 </button>
             </div>
             <div id="activityFeed" class="space-y-1 max-h-32 overflow-y-auto text-xs">
                 ${activityLogs && activityLogs.length > 0 ? 
-                    activityLogs.slice(0,5).map(l => `
-                        <div class="py-1 border-b dark:border-gray-700 flex justify-between">
+                    activityLogs.slice(0, 8).map(l => `
+                        <div class="activity-item">
                             <span class="text-gray-700 dark:text-gray-300">${escapeHtml(l.action || 'No action')}</span>
-                            <span class="text-gray-400 dark:text-gray-500">${l.created_at ? new Date(l.created_at).toLocaleString() : new Date().toLocaleString()}</span>
+                            <span class="activity-time">${l.created_at ? new Date(l.created_at).toLocaleString() : new Date().toLocaleString()}</span>
                         </div>
                     `).join('')
-                    : '<div class="py-1 text-gray-400 dark:text-gray-500 text-center">No recent activity</div>'
+                    : '<div class="py-2 text-gray-400 dark:text-gray-500 text-center text-xs">No recent activity</div>'
                 }
             </div>
         </div>
@@ -7564,39 +8039,43 @@ async function loadDashboard() {
     // ============================================================
     // RENDER CHART
     // ============================================================
-    const ctx = document.getElementById('statusChart')?.getContext('2d');
-    if (ctx) { 
-        // Destroy existing chart if any
-        if (window.statusChartInstance) {
-            window.statusChartInstance.destroy();
+    setTimeout(() => {
+        const ctx = document.getElementById('statusChart')?.getContext('2d');
+        if (ctx) { 
+            if (window.statusChartInstance) {
+                window.statusChartInstance.destroy();
+            }
+            
+            window.statusChartInstance = new Chart(ctx, { 
+                type: 'doughnut', 
+                data: { 
+                    labels: ['Pending', 'In Progress', 'Completed', 'Approved'], 
+                    datasets: [{ 
+                        data: [pending, inProgress, completed, approved], 
+                        backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], 
+                        borderWidth: 0,
+                        hoverOffset: 8
+                    }] 
+                }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: true,
+                    plugins: { 
+                        legend: { 
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 10,
+                                font: { size: 10 },
+                                color: document.body.classList.contains('dark-mode') ? '#e2e8f0' : '#1e293b'
+                            }
+                        } 
+                    },
+                    cutout: '60%'
+                } 
+            }); 
         }
-        
-        window.statusChartInstance = new Chart(ctx, { 
-            type: 'doughnut', 
-            data: { 
-                labels: ['Pending', 'In Progress', 'Completed', 'Approved'], 
-                datasets: [{ 
-                    data: [pending, inProgress, completed, approved], 
-                    backgroundColor: ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'], 
-                    borderWidth: 0 
-                }] 
-            }, 
-            options: { 
-                responsive: true, 
-                plugins: { 
-                    legend: { 
-                        position: 'bottom',
-                        labels: {
-                            boxWidth: 12,
-                            padding: 10,
-                            font: { size: 10 }
-                        }
-                    } 
-                },
-                cutout: '60%'
-            } 
-        }); 
-    }
+    }, 150);
     
     // ============================================================
     // UPDATE BADGES
@@ -7610,6 +8089,7 @@ async function loadDashboard() {
     // ============================================================
     addLog("Dashboard loaded successfully");
 }
+
 // ============================================================
 // SETTINGS FUNCTIONS
 // ============================================================
