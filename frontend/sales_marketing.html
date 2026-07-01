@@ -5216,19 +5216,111 @@ function updateConnectionStatus() {
     })
     .catch(function(e) { statusDiv.innerHTML = '<i class="fas fa-plug"></i> Offline'; });
 }
+
+// ============================================================
+// FIXED: LOGOUT - PRESERVE VIEWED IDs IN LOCALSTORAGE
+// ============================================================
+
 async function logout() {
     if (confirm('Are you sure you want to logout?')) {
         try {
+            // ============================================================
+            // ✅ STEP 1: Save viewed IDs before clearing
+            // ============================================================
+            // These are already in localStorage, but we ensure they persist
+            const projectIds = JSON.stringify(viewedProjectIds || []);
+            const reportIds = JSON.stringify(viewedReportIds || []);
+            const requestIds = JSON.stringify(viewedRequestIds || []);
+            
+            // Save to sessionStorage as backup (survives logout)
+            sessionStorage.setItem('backup_viewedProjectIds', projectIds);
+            sessionStorage.setItem('backup_viewedReportIds', reportIds);
+            sessionStorage.setItem('backup_viewedRequestIds', requestIds);
+            
+            console.log('💾 Backed up viewed IDs to sessionStorage');
+            
+            // ============================================================
+            // STEP 2: Call logout API
+            // ============================================================
             const response = await fetch('/geotraverse/backend/api/logout.php', {
                 method: 'POST',
                 credentials: 'include'
             });
+            
+            // ============================================================
+            // STEP 3: Clear only session data, keep viewed IDs
+            // ============================================================
+            // Keep viewed IDs in localStorage
+            // Only clear other data
+            const keptData = {
+                superadmin_viewedProjectIds: localStorage.getItem('superadmin_viewedProjectIds'),
+                superadmin_viewedReportIds: localStorage.getItem('superadmin_viewedReportIds'),
+                superadmin_viewedRequestIds: localStorage.getItem('superadmin_viewedRequestIds'),
+                bricks_viewedReportIds: localStorage.getItem('bricks_viewedReportIds'),
+                bricks_viewedRequestIds: localStorage.getItem('bricks_viewedRequestIds'),
+                sidebar_color: localStorage.getItem('sidebar_color'),
+                dark_mode: localStorage.getItem('dark_mode'),
+                bricks_sidebar_color: localStorage.getItem('bricks_sidebar_color'),
+                bricks_timber_dark_mode: localStorage.getItem('bricks_timber_dark_mode'),
+                user_name: sessionStorage.getItem('user_name')
+            };
+            
+            // Clear localStorage but restore kept data
             localStorage.clear();
+            
+            // Restore viewed IDs and settings
+            if (keptData.superadmin_viewedProjectIds) {
+                localStorage.setItem('superadmin_viewedProjectIds', keptData.superadmin_viewedProjectIds);
+            }
+            if (keptData.superadmin_viewedReportIds) {
+                localStorage.setItem('superadmin_viewedReportIds', keptData.superadmin_viewedReportIds);
+            }
+            if (keptData.superadmin_viewedRequestIds) {
+                localStorage.setItem('superadmin_viewedRequestIds', keptData.superadmin_viewedRequestIds);
+            }
+            if (keptData.bricks_viewedReportIds) {
+                localStorage.setItem('bricks_viewedReportIds', keptData.bricks_viewedReportIds);
+            }
+            if (keptData.bricks_viewedRequestIds) {
+                localStorage.setItem('bricks_viewedRequestIds', keptData.bricks_viewedRequestIds);
+            }
+            if (keptData.sidebar_color) {
+                localStorage.setItem('sidebar_color', keptData.sidebar_color);
+            }
+            if (keptData.dark_mode) {
+                localStorage.setItem('dark_mode', keptData.dark_mode);
+            }
+            if (keptData.bricks_sidebar_color) {
+                localStorage.setItem('bricks_sidebar_color', keptData.bricks_sidebar_color);
+            }
+            if (keptData.bricks_timber_dark_mode) {
+                localStorage.setItem('bricks_timber_dark_mode', keptData.bricks_timber_dark_mode);
+            }
+            
+            // Clear session storage but restore user name
             sessionStorage.clear();
+            if (keptData.user_name) {
+                sessionStorage.setItem('user_name', keptData.user_name);
+            }
+            
+            console.log('✅ Logout successful, viewed IDs preserved');
+            
+            // ============================================================
+            // STEP 4: Redirect to login
+            // ============================================================
             window.location.href = 'login_system.html';
+            
         } catch (error) {
-            localStorage.clear();
-            sessionStorage.clear();
+            console.error('❌ Logout error:', error);
+            // Fallback: preserve viewed IDs
+            const projectIds = JSON.stringify(viewedProjectIds || []);
+            const reportIds = JSON.stringify(viewedReportIds || []);
+            const requestIds = JSON.stringify(viewedRequestIds || []);
+            
+            localStorage.setItem('superadmin_viewedProjectIds', projectIds);
+            localStorage.setItem('superadmin_viewedReportIds', reportIds);
+            localStorage.setItem('superadmin_viewedRequestIds', requestIds);
+            
             window.location.href = 'login_system.html';
         }
     }
