@@ -912,69 +912,133 @@ async function addNotification(departmentId, itemType, itemId, itemTitle, messag
     }
 }
 
-// ==================== BADGE FUNCTIONS ====================
-function updateProjectBadge() { 
-    const badge = document.getElementById('projectBadge'); 
-    if (badge) { 
-        getUnviewedNotificationsCount('project').then(count => {
-            if (count > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = count > 99 ? '99+' : count; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        }).catch(() => {
-            const totalUnviewed = unviewedAluminiumProjectsCount + unviewedIronProjectsCount;
-            if (totalUnviewed > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = totalUnviewed > 99 ? '99+' : totalUnviewed; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        });
-    } 
+// ============================================================
+// BADGE UPDATE FUNCTIONS - FIXED
+// ============================================================
+
+function updateProjectBadge() {
+    const badge = document.getElementById('projectBadge');
+    if (!badge) {
+        console.log('⚠️ Project badge element not found');
+        return;
+    }
+    
+    // Use local counts instead of API
+    const count = unviewedAluminiumProjectsCount + unviewedIronProjectsCount;
+    
+    console.log('🔔 Updating project badge, count:', count);
+    
+    if (count > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.textContent = '0';
+    }
 }
 
-function updateReportBadge() { 
-    const badge = document.getElementById('reportBadge'); 
-    if (badge) { 
-        getUnviewedNotificationsCount('report').then(count => {
-            if (count > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = count > 99 ? '99+' : count; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        }).catch(() => {
-            if (unviewedReportsCount > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        });
-    } 
+function updateReportBadge() {
+    const badge = document.getElementById('reportBadge');
+    if (!badge) {
+        console.log('⚠️ Report badge element not found');
+        return;
+    }
+    
+    // Use local count - force recalc
+    unviewedReportsCount = reportsList.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    // Also check uploaded reports
+    const unviewedUploaded = uploadedReportsData.filter(d => {
+        const isReceived = d.sent_from_department && parseInt(d.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(d.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    unviewedReportsCount += unviewedUploaded;
+    
+    console.log('🔔 Updating report badge, count:', unviewedReportsCount);
+    
+    if (unviewedReportsCount > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+        badge.textContent = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.textContent = '0';
+    }
 }
 
-function updateRequestBadge() { 
-    const badge = document.getElementById('requestBadge'); 
-    if (badge) { 
-        getUnviewedNotificationsCount('fund_request').then(count => {
-            if (count > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = count > 99 ? '99+' : count; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        }).catch(() => {
-            if (unviewedRequestsCount > 0) { 
-                badge.classList.remove('hidden'); 
-                badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount; 
-            } else { 
-                badge.classList.add('hidden'); 
-            } 
-        });
-    } 
+function updateRequestBadge() {
+    const badge = document.getElementById('requestBadge');
+    if (!badge) return;
+    
+    // Recalculate from localStorage
+    unviewedRequestsCount = requestsData.filter(r => {
+        const isUnviewed = (r.is_viewed_by_admin == 0 || r.is_viewed_by_admin === null) || 
+                          (r.is_viewed == 0 || r.is_viewed === null);
+        const notViewedInStorage = !viewedRequestIds.includes(parseInt(r.id));
+        return isUnviewed && notViewedInStorage;
+    }).length;
+    
+    console.log('🔔 Updating request badge, count:', unviewedRequestsCount);
+    
+    if (unviewedRequestsCount > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+        badge.textContent = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.textContent = '0';
+    }
 }
 
 // ==================== API CALLS ====================
@@ -989,31 +1053,170 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     } catch(e) { console.error('API Error:', endpoint, e); return { success: false, message: e.message, data: [] }; }
 }
 
-// ==================== FETCH PROJECTS ====================
-async function fetchAluminiumProjects() { 
-    const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
-    if (res.success && res.data) { 
-        aluminiumProjects = res.data.filter(p => 
-            (p.department_id === DEPARTMENT_ID || p.sent_to_dept === DEPARTMENT_ID) && 
-            (!p.deleted_by_department || p.deleted_by_department != 1) && 
-            (!p.deleted_by_admin || p.deleted_by_admin != 1) &&
-            (p.project_type === 'aluminium' || p.project_type === null || p.project_type === '' || p.project_type === 'general')
-        ).sort((a,b) => b.id - a.id); 
+// ============================================================
+// FETCH ALUMINIUM PROJECTS - PRESERVE VIEWED STATUS
+// ============================================================
+async function fetchAluminiumProjects() {
+    console.log('📡 [fetchAluminiumProjects] Fetching...');
+    
+    try {
+        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
         
-        unviewedAluminiumProjectsCount = aluminiumProjects.filter(p => 
-            p.sent_from_dept && 
-            p.sent_from_dept != DEPARTMENT_ID && 
-            p.sent_to_dept === DEPARTMENT_ID && 
-            (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) && 
-            !viewedAluminiumProjectIds.includes(p.id)
-        ).length;
-    } else { 
-        aluminiumProjects = []; 
-        unviewedAluminiumProjectsCount = 0; 
+        if (res.success && res.data) {
+            // ============================================================
+            // PRESERVE VIEWED STATUS FROM LOCAL DATA
+            // ============================================================
+            let oldProjects = {};
+            aluminiumProjects.forEach(p => {
+                oldProjects[p.id] = {
+                    is_viewed_by_department: p.is_viewed_by_department,
+                    is_viewed_by_admin: p.is_viewed_by_admin,
+                    _is_unviewed: p._is_unviewed
+                };
+            });
+            
+            // ============================================================
+            // FILTER AND MERGE DATA
+            // ============================================================
+            aluminiumProjects = res.data
+                .filter(p => {
+                    if (p.deleted_by_department == 1) return false;
+                    if (p.deleted_by_admin == 1) return false;
+                    if (p.is_deleted == 1) return false;
+                    
+                    const isAluminium = p.project_type === 'aluminium' || 
+                                       p.project_type === null || 
+                                       p.project_type === '' || 
+                                       p.project_type === 'general';
+                    
+                    const isOwn = (p.department_id === DEPARTMENT_ID || 
+                                   p.sent_to_department === DEPARTMENT_ID);
+                    
+                    return isAluminium && isOwn;
+                })
+                .map(p => {
+                    // Preserve viewed status
+                    if (oldProjects[p.id]) {
+                        p.is_viewed_by_department = oldProjects[p.id].is_viewed_by_department || 0;
+                        p.is_viewed_by_admin = oldProjects[p.id].is_viewed_by_admin || 0;
+                        p._is_unviewed = oldProjects[p.id]._is_unviewed || false;
+                    } else {
+                        // New project - check localStorage
+                        if (viewedAluminiumProjectIds.includes(parseInt(p.id))) {
+                            p.is_viewed_by_department = 1;
+                            p.is_viewed_by_admin = 1;
+                            p._is_unviewed = false;
+                        } else {
+                            const isReceived = p.sent_from_dept && 
+                                               parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                            p._is_unviewed = isReceived;
+                        }
+                    }
+                    return p;
+                })
+                .sort((a, b) => b.id - a.id);
+            
+            // ============================================================
+            // RECALCULATE UNVIEWED COUNT
+            // ============================================================
+            unviewedAluminiumProjectsCount = aluminiumProjects.filter(p => {
+                const isReceived = p.sent_from_dept && 
+                                   parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                const isUnviewed = (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) ||
+                                  (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
+                const notViewedInStorage = !viewedAluminiumProjectIds.includes(parseInt(p.id));
+                return isReceived && isUnviewed && notViewedInStorage;
+            }).length;
+            
+            console.log('📊 Aluminium Projects loaded:', aluminiumProjects.length);
+            console.log('📊 Unviewed Aluminium Projects:', unviewedAluminiumProjectsCount);
+            
+        } else {
+            aluminiumProjects = [];
+            unviewedAluminiumProjectsCount = 0;
+        }
+    } catch(e) {
+        console.error('❌ Fetch aluminium projects error:', e);
+        aluminiumProjects = [];
+        unviewedAluminiumProjectsCount = 0;
     }
+    
     updateProjectBadge();
 }
 
+// Similar for fetchIronProjects()
+async function fetchIronProjects() {
+    console.log('📡 [fetchIronProjects] Fetching...');
+    
+    try {
+        const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`);
+        
+        if (res.success && res.data) {
+            let oldProjects = {};
+            ironProjects.forEach(p => {
+                oldProjects[p.id] = {
+                    is_viewed_by_department: p.is_viewed_by_department,
+                    is_viewed_by_admin: p.is_viewed_by_admin,
+                    _is_unviewed: p._is_unviewed
+                };
+            });
+            
+            ironProjects = res.data
+                .filter(p => {
+                    if (p.deleted_by_department == 1) return false;
+                    if (p.deleted_by_admin == 1) return false;
+                    if (p.is_deleted == 1) return false;
+                    
+                    const isIron = p.project_type === 'iron';
+                    const isOwn = (p.department_id === DEPARTMENT_ID || 
+                                   p.sent_to_department === DEPARTMENT_ID);
+                    
+                    return isIron && isOwn;
+                })
+                .map(p => {
+                    if (oldProjects[p.id]) {
+                        p.is_viewed_by_department = oldProjects[p.id].is_viewed_by_department || 0;
+                        p.is_viewed_by_admin = oldProjects[p.id].is_viewed_by_admin || 0;
+                        p._is_unviewed = oldProjects[p.id]._is_unviewed || false;
+                    } else {
+                        if (viewedIronProjectIds.includes(parseInt(p.id))) {
+                            p.is_viewed_by_department = 1;
+                            p.is_viewed_by_admin = 1;
+                            p._is_unviewed = false;
+                        } else {
+                            const isReceived = p.sent_from_dept && 
+                                               parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                            p._is_unviewed = isReceived;
+                        }
+                    }
+                    return p;
+                })
+                .sort((a, b) => b.id - a.id);
+            
+            unviewedIronProjectsCount = ironProjects.filter(p => {
+                const isReceived = p.sent_from_dept && 
+                                   parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+                const isUnviewed = (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) ||
+                                  (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
+                const notViewedInStorage = !viewedIronProjectIds.includes(parseInt(p.id));
+                return isReceived && isUnviewed && notViewedInStorage;
+            }).length;
+            
+            console.log('📊 Iron Projects loaded:', ironProjects.length);
+            console.log('📊 Unviewed Iron Projects:', unviewedIronProjectsCount);
+            
+        } else {
+            ironProjects = [];
+            unviewedIronProjectsCount = 0;
+        }
+    } catch(e) {
+        console.error('❌ Fetch iron projects error:', e);
+        ironProjects = [];
+        unviewedIronProjectsCount = 0;
+    }
+    
+    updateProjectBadge();
+}
 async function fetchIronProjects() { 
     const res = await apiCall(`get_projects.php?department_id=${DEPARTMENT_ID}`); 
     if (res.success && res.data) { 
@@ -1099,12 +1302,89 @@ async function fetchRequests() {
     updateRequestBadge();
 }
 
-async function fetchReports() { 
-    const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
-    if (res.success && res.data) { 
-        reportsList = res.data.filter(r => (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) && (!r.deleted_by_department || r.deleted_by_department != 1) && (!r.deleted_by_admin || r.deleted_by_admin != 1)).sort((a,b) => b.id - a.id); 
-        unviewedReportsCount = reportsList.filter(r => r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && r.sent_to_department === DEPARTMENT_ID && (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && !viewedReportIds.includes(r.id)).length;
-    } else { reportsList = []; unviewedReportsCount = 0; }
+// ============================================================
+// FETCH REPORTS - PRESERVE VIEWED STATUS
+// ============================================================
+async function fetchReports() {
+    console.log('📡 [fetchReports] Fetching reports...');
+    
+    try {
+        const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`);
+        
+        if (res.success && res.data) {
+            // ============================================================
+            // PRESERVE VIEWED STATUS FROM LOCAL DATA
+            // ============================================================
+            let oldReports = {};
+            reportsList.forEach(r => {
+                oldReports[r.id] = {
+                    is_viewed_by_department: r.is_viewed_by_department,
+                    is_viewed_by_admin: r.is_viewed_by_admin,
+                    is_viewed: r.is_viewed,
+                    _is_unviewed: r._is_unviewed
+                };
+            });
+            
+            // ============================================================
+            // FILTER AND MERGE DATA
+            // ============================================================
+            reportsList = res.data
+                .filter(r => {
+                    // Skip deleted
+                    if (r.deleted_by_department == 1) return false;
+                    if (r.deleted_by_admin == 1) return false;
+                    if (r.is_deleted == 1) return false;
+                    return true;
+                })
+                .map(r => {
+                    // If this report was viewed before, preserve the status
+                    if (oldReports[r.id]) {
+                        r.is_viewed_by_department = oldReports[r.id].is_viewed_by_department || 0;
+                        r.is_viewed_by_admin = oldReports[r.id].is_viewed_by_admin || 0;
+                        r.is_viewed = oldReports[r.id].is_viewed || 0;
+                        r._is_unviewed = oldReports[r.id]._is_unviewed || false;
+                    } else {
+                        // New report - check localStorage
+                        if (viewedReportIds.includes(parseInt(r.id))) {
+                            r.is_viewed_by_department = 1;
+                            r.is_viewed_by_admin = 1;
+                            r.is_viewed = 1;
+                            r._is_unviewed = false;
+                        } else {
+                            // Only mark as unviewed if received from other department
+                            const isReceived = r.sent_from_department && 
+                                               parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID);
+                            r._is_unviewed = isReceived;
+                        }
+                    }
+                    return r;
+                })
+                .sort((a, b) => b.id - a.id);
+            
+            // ============================================================
+            // RECALCULATE UNVIEWED COUNT
+            // ============================================================
+            unviewedReportsCount = reportsList.filter(r => {
+                const isReceived = r.sent_from_department && 
+                                   parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID);
+                const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+                const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+                return isReceived && isUnviewed && notViewedInStorage;
+            }).length;
+            
+            console.log('📊 Reports loaded:', reportsList.length);
+            console.log('📊 Unviewed reports:', unviewedReportsCount);
+            
+        } else {
+            reportsList = [];
+            unviewedReportsCount = 0;
+        }
+    } catch(e) {
+        console.error('❌ Fetch reports error:', e);
+        reportsList = [];
+        unviewedReportsCount = 0;
+    }
+    
     updateReportBadge();
 }
 
@@ -1602,27 +1882,128 @@ async function deleteIronDocument(id) {
     }
 }
 
-// ==================== MARK VIEWED ====================
-function markAluminiumProjectViewed(id) { 
-    if(!viewedAluminiumProjectIds.includes(id)) { 
-        viewedAluminiumProjectIds.push(id); 
-        localStorage.setItem('aluminium_viewedProjectIds', JSON.stringify(viewedAluminiumProjectIds)); 
-        markNotificationViewed('project', id).then(() => {
-            unviewedAluminiumProjectsCount = Math.max(0, unviewedAluminiumProjectsCount - 1); 
-            updateProjectBadge();
-        });
-    } 
+
+// ============================================================
+// MARK ALUMINIUM PROJECT VIEWED - FIXED
+// ============================================================
+function markAluminiumProjectViewed(id) {
+    const idNum = parseInt(id);
+    
+    console.log('🔔 markAluminiumProjectViewed called for ID:', idNum);
+    
+    // ============================================================
+    // STEP 1: Add to viewedProjectIds
+    // ============================================================
+    if (!viewedAluminiumProjectIds.includes(idNum)) {
+        viewedAluminiumProjectIds.push(idNum);
+        localStorage.setItem('aluminium_viewedProjectIds', JSON.stringify(viewedAluminiumProjectIds));
+        console.log('✅ Added project ID', idNum, 'to viewedAluminiumProjectIds');
+    }
+    
+    // ============================================================
+    // STEP 2: Update local data
+    // ============================================================
+    const project = aluminiumProjects.find(p => parseInt(p.id) === idNum);
+    if (project) {
+        project._is_unviewed = false;
+        project.is_viewed_by_department = 1;
+        project.is_viewed_by_admin = 1;
+        console.log('✅ Updated project local data:', project.name);
+    }
+    
+    // ============================================================
+    // STEP 3: RECALCULATE unviewedAluminiumProjectsCount
+    // ============================================================
+    unviewedAluminiumProjectsCount = aluminiumProjects.filter(p => {
+        const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) ||
+                          (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
+        const notViewedInStorage = !viewedAluminiumProjectIds.includes(parseInt(p.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    console.log('📊 Updated unviewedAluminiumProjectsCount:', unviewedAluminiumProjectsCount);
+    
+    // ============================================================
+    // STEP 4: Update badge
+    // ============================================================
+    updateProjectBadge();
+    
+    // ============================================================
+    // STEP 5: Remove NEW badge from UI
+    // ============================================================
+    const card = document.getElementById(`aluminium-card-${idNum}`);
+    if (card) {
+        const badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('unviewed');
+    }
+    
+    // ============================================================
+    // STEP 6: Call API (background)
+    // ============================================================
+    apiCall('mark_project_viewed.php', 'POST', {
+        project_id: idNum,
+        department_id: DEPARTMENT_ID
+    }).then(() => {
+        console.log('✅ API call completed for project', idNum);
+    }).catch(e => {
+        console.log('⚠️ API call failed:', e);
+    });
+    
+    return true;
 }
 
-function markIronProjectViewed(id) { 
-    if(!viewedIronProjectIds.includes(id)) { 
-        viewedIronProjectIds.push(id); 
-        localStorage.setItem('iron_viewedProjectIds', JSON.stringify(viewedIronProjectIds)); 
-        markNotificationViewed('project', id).then(() => {
-            unviewedIronProjectsCount = Math.max(0, unviewedIronProjectsCount - 1); 
-            updateProjectBadge();
-        });
-    } 
+// ============================================================
+// MARK IRON PROJECT VIEWED - FIXED
+// ============================================================
+function markIronProjectViewed(id) {
+    const idNum = parseInt(id);
+    
+    console.log('🔔 markIronProjectViewed called for ID:', idNum);
+    
+    if (!viewedIronProjectIds.includes(idNum)) {
+        viewedIronProjectIds.push(idNum);
+        localStorage.setItem('iron_viewedProjectIds', JSON.stringify(viewedIronProjectIds));
+        console.log('✅ Added project ID', idNum, 'to viewedIronProjectIds');
+    }
+    
+    const project = ironProjects.find(p => parseInt(p.id) === idNum);
+    if (project) {
+        project._is_unviewed = false;
+        project.is_viewed_by_department = 1;
+        project.is_viewed_by_admin = 1;
+        console.log('✅ Updated project local data:', project.name);
+    }
+    
+    unviewedIronProjectsCount = ironProjects.filter(p => {
+        const isReceived = p.sent_from_dept && parseInt(p.sent_from_dept) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (p.is_viewed_by_department == 0 || p.is_viewed_by_department === null) ||
+                          (p.is_viewed_by_admin == 0 || p.is_viewed_by_admin === null);
+        const notViewedInStorage = !viewedIronProjectIds.includes(parseInt(p.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    console.log('📊 Updated unviewedIronProjectsCount:', unviewedIronProjectsCount);
+    updateProjectBadge();
+    
+    const card = document.getElementById(`iron-card-${idNum}`);
+    if (card) {
+        const badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('unviewed');
+    }
+    
+    apiCall('mark_project_viewed.php', 'POST', {
+        project_id: idNum,
+        department_id: DEPARTMENT_ID
+    }).then(() => {
+        console.log('✅ API call completed for project', idNum);
+    }).catch(e => {
+        console.log('⚠️ API call failed:', e);
+    });
+    
+    return true;
 }
 
 function markRequestViewed(id) {
@@ -1641,15 +2022,101 @@ function markRequestViewed(id) {
     }
 }
 
-function markReportViewed(id) { 
-    if(!viewedReportIds.includes(id)) { 
-        viewedReportIds.push(id); 
-        localStorage.setItem('aluminium_viewedReportIds', JSON.stringify(viewedReportIds)); 
-        markNotificationViewed('report', id).then(() => {
-            unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-            updateReportBadge();
-        });
-    } 
+// ============================================================
+// MARK REPORT VIEWED - FIXED
+// ============================================================
+function markReportViewed(id) {
+    const idNum = parseInt(id);
+    
+    console.log('🔔 markReportViewed called for ID:', idNum);
+    
+    // ============================================================
+    // STEP 1: Add to viewedReportIds IMMEDIATELY
+    // ============================================================
+    if (!viewedReportIds.includes(idNum)) {
+        viewedReportIds.push(idNum);
+        localStorage.setItem('aluminium_viewedReportIds', JSON.stringify(viewedReportIds));
+        console.log('✅ Added report ID', idNum, 'to viewedReportIds');
+    }
+    
+    // ============================================================
+    // STEP 2: Update local data
+    // ============================================================
+    const report = reportsList.find(r => parseInt(r.id) === idNum);
+    if (report) {
+        report._is_unviewed = false;
+        report.is_viewed_by_department = 1;
+        report.is_viewed_by_admin = 1;
+        report.is_viewed = 1;
+        console.log('✅ Updated report local data:', report.title);
+    }
+    
+    const uploaded = uploadedReportsData.find(r => parseInt(r.id) === idNum);
+    if (uploaded) {
+        uploaded._is_unviewed = false;
+        uploaded.is_viewed_by_department = 1;
+        uploaded.is_viewed = 1;
+        console.log('✅ Updated uploaded report local data:', uploaded.title);
+    }
+    
+    // ============================================================
+    // STEP 3: RECALCULATE unviewedReportsCount
+    // ============================================================
+    // Recalculate from localStorage
+    unviewedReportsCount = reportsList.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    const unviewedUploaded = uploadedReportsData.filter(d => {
+        const isReceived = d.sent_from_department && parseInt(d.sent_from_department) !== parseInt(DEPARTMENT_ID);
+        const isUnviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(d.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    unviewedReportsCount += unviewedUploaded;
+    
+    console.log('📊 Updated unviewedReportsCount:', unviewedReportsCount);
+    
+    // ============================================================
+    // STEP 4: Update badge
+    // ============================================================
+    updateReportBadge();
+    
+    // ============================================================
+    // STEP 5: Remove NEW badge from UI
+    // ============================================================
+    const card = document.getElementById(`report-card-${idNum}`);
+    if (card) {
+        const badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('unviewed');
+    }
+    
+    const uploadedCard = document.getElementById(`uploaded-report-card-${idNum}`);
+    if (uploadedCard) {
+        const badge = uploadedCard.querySelector('.new-badge');
+        if (badge) badge.remove();
+        uploadedCard.classList.remove('unviewed');
+    }
+    
+    // ============================================================
+    // STEP 6: Call API (background)
+    // ============================================================
+    apiCall('mark_notification_viewed.php', 'POST', {
+        item_type: 'report',
+        item_id: idNum,
+        department_id: DEPARTMENT_ID
+    }).then(() => {
+        console.log('✅ API call completed for report', idNum);
+    }).catch(e => {
+        console.log('⚠️ API call failed:', e);
+    });
+    
+    return true;
 }
 
 // ==================== DAILY WORK TABLE LOADING ====================

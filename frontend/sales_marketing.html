@@ -734,50 +734,70 @@ function setupMoneyInputs() {
 }
 
 // ============================================================
-// FIX: fetchUnviewedCounts - USIENDELEE COUNT ZA ZAMANI
+// FETCH UNVIEWED COUNTS - USE LOCAL DATA
 // ============================================================
 function fetchUnviewedCounts() {
-    return apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID)
+    console.log('📊 [fetchUnviewedCounts] Starting...');
+    
+    // ============================================================
+    // COUNT REPORTS - from local data
+    // ============================================================
+    var addedUnviewed = reportsList.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    var uploadedUnviewed = uploadedReports.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    unviewedReportsCount = addedUnviewed + uploadedUnviewed;
+    
+    // ============================================================
+    // COUNT REQUESTS - from local data
+    // ============================================================
+    unviewedRequestsCount = fundRequests.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    // ============================================================
+    // COUNT CAMPAIGNS - from local data
+    // ============================================================
+    unviewedCampaignsCount = campaigns.filter(function(c) {
+        return c._is_unviewed === true;
+    }).length;
+    
+    console.log('📊 Unviewed counts from local data:', {
+        reports: unviewedReportsCount,
+        requests: unviewedRequestsCount,
+        campaigns: unviewedCampaignsCount
+    });
+    
+    // ============================================================
+    // UPDATE BADGES
+    // ============================================================
+    updateReportBadge();
+    updateRequestBadge();
+    updateCampaignBadge();
+    
+    // ============================================================
+    // ALSO SYNC WITH SERVER (background)
+    // ============================================================
+    apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID)
     .then(function(res) {
-        console.log('📥 fetchUnviewedCounts response:', res);
-        
         if (res.success && res.data) {
-            // ============================================================
-            // HESABU KUTOKA FUNDREQUESTS ARRAY (HALISI)
-            // ============================================================
-            var realCount = fundRequests.filter(function(r) { 
-                return r._is_unviewed === true; 
-            }).length;
-            
-            console.log('📊 Real count from fundRequests:', realCount);
-            console.log('📊 Count from server:', res.data.fund_requests);
-            
-            // ============================================================
-            // TUMIA COUNT HALISI, SI KUTOKA SERVER
-            // ============================================================
-            unviewedRequestsCount = realCount;
-            
-            // Update other counts from server (campaigns, reports)
-            unviewedCampaignsCount = parseInt(res.data.campaigns) || 0;
-            unviewedReportsCount = parseInt(res.data.reports) || 0;
-            
-            // Update badges
-            updateCampaignBadge();
-            updateReportBadge();
-            updateRequestBadge();
-            
-            console.log('📊 Final unviewedRequestsCount:', unviewedRequestsCount);
-            
-            return res.data;
+            console.log('📊 Server counts (for reference):', res.data);
         }
-        return null;
     })
     .catch(function(e) {
-        console.error('❌ fetchUnviewedCounts error:', e);
-        return null;
+        console.log('⚠️ Could not sync with server:', e);
     });
+    
+    return {
+        reports: unviewedReportsCount,
+        requests: unviewedRequestsCount,
+        campaigns: unviewedCampaignsCount
+    };
 }
-
 function updateRequestBadge() { 
     var badge = document.getElementById('requestBadge'); 
     if(!badge) {
@@ -845,37 +865,108 @@ function updateCampaignBadge() {
         } else { badge.classList.add('hidden'); } 
     } 
 }
-function updateReportBadge() { 
-    var badge = document.getElementById('reportBadge'); 
-    if(badge) { 
-        if(unviewedReportsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { badge.classList.add('hidden'); } 
-    } 
-}
-
-function updateRequestBadge() { 
-    var badge = document.getElementById('requestBadge'); 
-    if(!badge) return;
+// ============================================================
+// UPDATE REPORT BADGE - FORCE VISIBLE
+// ============================================================
+function updateReportBadge() {
+    var badge = document.getElementById('reportBadge');
+    if (!badge) {
+        console.warn('⚠️ reportBadge element not found!');
+        return;
+    }
     
-    // HESABU KUTOKA FUNDREQUESTS ARRAY PEKEE
-    var count = fundRequests.filter(function(r) { 
-        return r._is_unviewed === true; 
+    // ============================================================
+    // RECALCULATE COUNT FROM LOCAL DATA
+    // ============================================================
+    var addedUnviewed = reportsList.filter(function(r) {
+        return r._is_unviewed === true;
     }).length;
     
-    // UPDATE GLOBAL VARIABLE
-    unviewedRequestsCount = count;
+    var uploadedUnviewed = uploadedReports.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
     
-    if(count > 0) { 
-        badge.classList.remove('hidden'); 
-        badge.innerText = count > 99 ? '99+' : count; 
+    var finalCount = addedUnviewed + uploadedUnviewed;
+    
+    // Update global variable
+    unviewedReportsCount = finalCount;
+    
+    console.log('🔔 Updating report badge:');
+    console.log('  - Added reports unviewed:', addedUnviewed);
+    console.log('  - Uploaded reports unviewed:', uploadedUnviewed);
+    console.log('  - Final count:', finalCount);
+    
+    if (finalCount > 0) {
+        badge.classList.remove('hidden');
         badge.style.display = 'block';
-    } else { 
-        badge.classList.add('hidden'); 
+        badge.style.visibility = 'visible';
+        badge.style.opacity = '1';
+        badge.innerText = finalCount > 99 ? '99+' : finalCount;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
         badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.style.opacity = '0';
         badge.innerText = '0';
-    } 
+    }
+}
+
+// ============================================================
+// UPDATE REQUEST BADGE - FORCE VISIBLE
+// ============================================================
+function updateRequestBadge() {
+    var badge = document.getElementById('requestBadge');
+    if (!badge) {
+        console.warn('⚠️ requestBadge element not found!');
+        return;
+    }
+    
+    // ============================================================
+    // RECALCULATE COUNT FROM LOCAL DATA
+    // ============================================================
+    var finalCount = fundRequests.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    // Update global variable
+    unviewedRequestsCount = finalCount;
+    
+    console.log('🔔 Updating request badge:');
+    console.log('  - Unviewed requests:', finalCount);
+    
+    if (finalCount > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+        badge.style.opacity = '1';
+        badge.innerText = finalCount > 99 ? '99+' : finalCount;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.style.opacity = '0';
+        badge.innerText = '0';
+    }
 }
 function markCampaignViewed(id) {
     if(viewedCampaignIds.indexOf(id) === -1) {
@@ -887,69 +978,185 @@ function markCampaignViewed(id) {
     }
 }
 
+// ============================================================
+// MARK REPORT VIEWED - UPDATE BADGE IMMEDIATELY
+// ============================================================
 function markReportViewed(id) {
-    if(viewedReportIds.indexOf(id) === -1) {
+    console.log('🔔 markReportViewed called for ID:', id);
+    console.log('🔔 Current viewedReportIds:', viewedReportIds);
+    console.log('🔔 Current unviewedReportsCount:', unviewedReportsCount);
+    
+    // ============================================================
+    // STEP 1: Add to viewedReportIds
+    // ============================================================
+    if (viewedReportIds.indexOf(id) === -1) {
         viewedReportIds.push(id);
         localStorage.setItem('sales_viewedReportIds', JSON.stringify(viewedReportIds));
-        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1);
-        updateReportBadge();
-        markNotificationViewed('report', id);
+        console.log('✅ Added report ID', id, 'to viewedReportIds');
     }
+    
+    // ============================================================
+    // STEP 2: Update local data - Added Reports
+    // ============================================================
+    var found = false;
+    for (var i = 0; i < reportsList.length; i++) {
+        if (reportsList[i].id === id) {
+            reportsList[i]._is_unviewed = false;
+            reportsList[i].is_viewed_by_department = 1;
+            found = true;
+            console.log('📋 Updated reportsList[' + i + '] _is_unviewed to false');
+            break;
+        }
+    }
+    
+    // ============================================================
+    // STEP 3: Update local data - Uploaded Reports
+    // ============================================================
+    for (var j = 0; j < uploadedReports.length; j++) {
+        if (uploadedReports[j].id === id) {
+            uploadedReports[j]._is_unviewed = false;
+            uploadedReports[j].is_viewed_by_department = 1;
+            found = true;
+            console.log('📋 Updated uploadedReports[' + j + '] _is_unviewed to false');
+            break;
+        }
+    }
+    
+    if (!found) {
+        console.log('⚠️ Report ID', id, 'not found in local data');
+    }
+    
+    // ============================================================
+    // STEP 4: RECALCULATE unviewedReportsCount
+    // ============================================================
+    // Count from reportsList
+    var addedUnviewed = reportsList.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    // Count from uploadedReports
+    var uploadedUnviewed = uploadedReports.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    
+    unviewedReportsCount = addedUnviewed + uploadedUnviewed;
+    
+    console.log('📊 New unviewed reports count:', unviewedReportsCount);
+    console.log('   - Added reports unviewed:', addedUnviewed);
+    console.log('   - Uploaded reports unviewed:', uploadedUnviewed);
+    
+    // ============================================================
+    // STEP 5: UPDATE BADGE
+    // ============================================================
+    updateReportBadge();
+    
+    // ============================================================
+    // STEP 6: Remove NEW badge from UI
+    // ============================================================
+    var card = document.getElementById('report-card-' + id);
+    if (card) {
+        var badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('unviewed');
+    }
+    
+    var uploadedCard = document.getElementById('uploaded-report-card-' + id);
+    if (uploadedCard) {
+        var badge = uploadedCard.querySelector('.new-badge');
+        if (badge) badge.remove();
+        uploadedCard.classList.remove('unviewed');
+    }
+    
+    // ============================================================
+    // STEP 7: Call API (background)
+    // ============================================================
+    markNotificationViewed('report', id);
+    fetchUnviewedCounts();
+    
+    console.log('✅ Report marked as viewed, badge updated to:', unviewedReportsCount);
+    return true;
 }
 
 // ============================================================
-// ✅ FIXED: markRequestViewed - SASISHA FUNDREQUESTS NA BADGE
+// MARK REQUEST VIEWED - UPDATE BADGE IMMEDIATELY
 // ============================================================
 function markRequestViewed(id) {
     console.log('🔔 markRequestViewed called for ID:', id);
     console.log('🔔 Current viewedRequestIds:', viewedRequestIds);
     console.log('🔔 Current unviewedRequestsCount:', unviewedRequestsCount);
     
-    if(viewedRequestIds.indexOf(id) === -1) {
+    // ============================================================
+    // STEP 1: Add to viewedRequestIds
+    // ============================================================
+    if (viewedRequestIds.indexOf(id) === -1) {
         viewedRequestIds.push(id);
         localStorage.setItem('sales_viewedRequestIds', JSON.stringify(viewedRequestIds));
-        
-        // ============================================================
-        // PIA SASISHA FUNDREQUESTS ARRAY
-        // ============================================================
-        for (var i = 0; i < fundRequests.length; i++) {
-            if (fundRequests[i].id === id) {
-                fundRequests[i]._is_unviewed = false;
-                fundRequests[i].is_viewed_by_department = 1;
-                console.log('📋 Updated fundRequests[' + i + '] _is_unviewed to false');
-                break;
-            }
-        }
-        
-        // ============================================================
-        // HESABU MPYA
-        // ============================================================
-        var newCount = fundRequests.filter(function(r) { 
-            return r._is_unviewed === true; 
-        }).length;
-        unviewedRequestsCount = newCount;
-        
-        console.log('📊 New unviewed count after markRequestViewed:', unviewedRequestsCount);
-        
-        // ============================================================
-        // UPDATE BADGE
-        // ============================================================
-        updateRequestBadge();
-        
-        // ============================================================
-        // CALL API
-        // ============================================================
-        markNotificationViewed('fund_request', id);
-        
-        // ============================================================
-        // SYNC WITH SERVER
-        // ============================================================
-        fetchUnviewedCounts();
-    } else {
-        console.log('🔔 Request already viewed:', id);
+        console.log('✅ Added request ID', id, 'to viewedRequestIds');
     }
+    
+    // ============================================================
+    // STEP 2: Update local data
+    // ============================================================
+    var found = false;
+    for (var i = 0; i < fundRequests.length; i++) {
+        if (fundRequests[i].id === id) {
+            fundRequests[i]._is_unviewed = false;
+            fundRequests[i].is_viewed_by_department = 1;
+            fundRequests[i].is_viewed = 1;
+            found = true;
+            console.log('📋 Updated fundRequests[' + i + '] _is_unviewed to false');
+            break;
+        }
+    }
+    
+    if (!found) {
+        console.log('⚠️ Request ID', id, 'not found in fundRequests');
+    }
+    
+    // ============================================================
+    // STEP 3: RECALCULATE unviewedRequestsCount
+    // ============================================================
+    var newCount = fundRequests.filter(function(r) {
+        return r._is_unviewed === true;
+    }).length;
+    unviewedRequestsCount = newCount;
+    
+    console.log('📊 New unviewed requests count:', unviewedRequestsCount);
+    
+    // ============================================================
+    // STEP 4: UPDATE BADGE
+    // ============================================================
+    updateRequestBadge();
+    
+    // ============================================================
+    // STEP 5: Remove NEW badge from UI
+    // ============================================================
+    var row = document.getElementById('fr-row-' + id);
+    if (row) {
+        row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+        var badge = row.querySelector('.new-badge');
+        if (badge) badge.remove();
+        row.style.backgroundColor = '';
+    }
+    
+    // Also update any other views
+    var reqRow = document.getElementById('req-row-' + id);
+    if (reqRow) {
+        reqRow.classList.remove('request-row-new');
+        reqRow.style.backgroundColor = '';
+        var badge = reqRow.querySelector('.new-badge');
+        if (badge) badge.remove();
+    }
+    
+    // ============================================================
+    // STEP 6: Call API (background)
+    // ============================================================
+    markNotificationViewed('fund_request', id);
+    fetchUnviewedCounts();
+    
+    console.log('✅ Request marked as viewed, badge updated to:', unviewedRequestsCount);
+    return true;
 }
-
 // ============================================================
 // ==================== RECYCLE BIN ====================
 // ============================================================

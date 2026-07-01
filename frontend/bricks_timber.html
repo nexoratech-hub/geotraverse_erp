@@ -746,18 +746,58 @@ async function addNotification(departmentId, itemType, itemId, itemTitle, messag
     }
 }
 
+// ============================================================
+// FIXED: GET UNVIEWED NOTIFICATIONS COUNT
+// ============================================================
 async function getUnviewedNotificationsCount() {
     try {
-        var res = await apiCall('get_unviewed_count.php?department_id=' + DEPARTMENT_ID);
-        if (res.success && res.data) {
-            var counts = res.data;
-            unviewedReportsCount = counts.reports || 0;
-            unviewedRequestsCount = counts.requests || 0;
-            updateReportBadge();
-            updateRequestBadge();
-        }
+        // ============================================================
+        // ✅ COUNT FROM LOCAL DATA WITH LOCALSTORAGE
+        // ============================================================
+        const viewedReports = JSON.parse(localStorage.getItem('bricks_viewedReportIds') || '[]');
+        const viewedRequests = JSON.parse(localStorage.getItem('bricks_viewedRequestIds') || '[]');
+        
+        // Count unviewed reports
+        let reportCount = reportsData.filter(r => {
+            const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+            const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+            const notViewed = !viewedReports.includes(parseInt(r.id));
+            return isReceived && isUnviewed && notViewed;
+        }).length;
+        
+        reportCount += uploadedReportsData.filter(d => {
+            const isReceived = d.sent_from_department && parseInt(d.sent_from_department) !== DEPARTMENT_ID;
+            const isUnviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+            const notViewed = !viewedReports.includes(parseInt(d.id));
+            return isReceived && isUnviewed && notViewed;
+        }).length;
+        
+        unviewedReportsCount = reportCount;
+        
+        // Count unviewed requests
+        const requestCount = requestsData.filter(r => {
+            const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) || 
+                              (r.status === 'pending' || r.status === 'Pending');
+            const notViewed = !viewedRequests.includes(parseInt(r.id));
+            return isUnviewed && notViewed;
+        }).length;
+        
+        unviewedRequestsCount = requestCount;
+        
+        console.log('📊 Unviewed counts:', {
+            reports: unviewedReportsCount,
+            requests: unviewedRequestsCount
+        });
+        
+        // Update badges
+        updateReportBadge();
+        updateRequestBadge();
+        
+        return { reports: unviewedReportsCount, requests: unviewedRequestsCount };
+        
     } catch(e) {
         console.error('Get unviewed count error:', e);
+        return { reports: 0, requests: 0 };
     }
 }
 
@@ -1297,56 +1337,112 @@ async function deleteDailyWorkRecord(id) {
     }
 }
 
-// ==================== REPORTS API (using sent_reports table) ====================
+// ============================================================
+// FIXED: FETCH REPORTS - PRESERVE VIEWED STATUS
+// ============================================================
 async function fetchReports() { 
     try {
         const res = await apiCall(`get_reports.php?department_id=${DEPARTMENT_ID}`); 
         if (res.success && res.data) { 
-            reportsData = res.data.filter(r => 
-                (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
-                (!r.deleted_by_department || r.deleted_by_department != 1) && 
-                (!r.deleted_by_admin || r.deleted_by_admin != 1)
-            ).sort((a,b) => b.id - a.id); 
+            // ============================================================
+            // ✅ PRESERVE VIEWED STATUS FROM LOCALSTORAGE
+            // ============================================================
+            const viewedReports = JSON.parse(localStorage.getItem('bricks_viewedReportIds') || '[]');
             
-            // Mark unviewed reports - show NEW badge for all sent reports
-            reportsData.forEach(r => {
-                r._is_unviewed = r.sent_from_department && r.sent_from_department != DEPARTMENT_ID && 
-                    r.sent_to_department === DEPARTMENT_ID && 
-                    (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) &&
-                    !viewedReportIds.includes(r.id);
-            });
+            reportsData = res.data
+                .filter(r => 
+                    (r.department_id === DEPARTMENT_ID || r.sent_to_department === DEPARTMENT_ID) &&
+                    (!r.deleted_by_department || r.deleted_by_department != 1) && 
+                    (!r.deleted_by_admin || r.deleted_by_admin != 1)
+                )
+                .map(r => {
+                    // Check if viewed from localStorage
+                    const isViewed = viewedReports.includes(parseInt(r.id));
+                    const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+                    
+                    // Set unviewed status based on localStorage
+                    if (isReceived && isViewed) {
+                        r.is_viewed_by_department = 1;
+                        r._is_unviewed = false;
+                    } else if (isReceived && !isViewed) {
+                        r._is_unviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+                    } else {
+                        r._is_unviewed = false;
+                    }
+                    
+                    return r;
+                })
+                .sort((a,b) => b.id - a.id); 
             
+            // ============================================================
+            // ✅ RECALCULATE UNVIEWED COUNT
+            // ============================================================
             unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
-        } else { reportsData = []; unviewedReportsCount = 0; }
-    } catch(e) { reportsData = []; unviewedReportsCount = 0; }
+            
+            console.log('📊 Reports loaded:', reportsData.length);
+            console.log('📊 Unviewed reports:', unviewedReportsCount);
+            
+        } else { 
+            reportsData = []; 
+            unviewedReportsCount = 0; 
+        }
+    } catch(e) { 
+        console.error('❌ Fetch reports error:', e);
+        reportsData = []; 
+        unviewedReportsCount = 0; 
+    }
     updateReportBadge(); 
 }
 
-// ==================== REQUESTS API (using fund_requests table) ====================
+// ============================================================
+// FIXED: FETCH REQUESTS - PRESERVE VIEWED STATUS
+// ============================================================
 async function fetchRequests() { 
     try {
         const res = await apiCall(`get_fund_requests.php?department_id=${DEPARTMENT_ID}`); 
         if (res.success && res.data) { 
-            requestsData = res.data.filter(t => t.department_id === DEPARTMENT_ID && (!t.is_deleted || t.is_deleted != 1))
-                                   .sort((a, b) => b.id - a.id);
+            // ============================================================
+            // ✅ PRESERVE VIEWED STATUS FROM LOCALSTORAGE
+            // ============================================================
+            const viewedRequests = JSON.parse(localStorage.getItem('bricks_viewedRequestIds') || '[]');
             
-            // Mark unviewed requests
-            requestsData.forEach(r => {
-                r._is_unviewed = !viewedRequestIds.includes(r.id) && r.status === 'pending';
-            });
+            requestsData = res.data
+                .filter(t => t.department_id === DEPARTMENT_ID && (!t.is_deleted || t.is_deleted != 1))
+                .map(r => {
+                    // Check if viewed from localStorage
+                    const isViewed = viewedRequests.includes(parseInt(r.id));
+                    
+                    if (isViewed) {
+                        r.is_viewed_by_department = 1;
+                        r._is_unviewed = false;
+                    } else {
+                        r._is_unviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) && 
+                                        (r.status === 'pending' || r.status === 'Pending');
+                    }
+                    
+                    return r;
+                })
+                .sort((a, b) => b.id - a.id);
             
+            // ============================================================
+            // ✅ RECALCULATE UNVIEWED COUNT
+            // ============================================================
             unviewedRequestsCount = requestsData.filter(r => r._is_unviewed).length;
+            
+            console.log('📊 Requests loaded:', requestsData.length);
+            console.log('📊 Unviewed requests:', unviewedRequestsCount);
+            
         } else { 
             requestsData = []; 
-            unviewedRequestsCount = 0;
+            unviewedRequestsCount = 0; 
         }
     } catch(e) { 
+        console.error('❌ Fetch requests error:', e);
         requestsData = []; 
-        unviewedRequestsCount = 0;
+        unviewedRequestsCount = 0; 
     }
     updateRequestBadge();
 }
-
 async function fetchUploadedReports() { 
     try {
         const res = await apiCall(`get_uploaded_reports.php?department_id=${DEPARTMENT_ID}`); 
@@ -1354,66 +1450,251 @@ async function fetchUploadedReports() {
     } catch(e) { uploadedReportsData = []; }
 }
 
+// ============================================================
+// FIXED: BADGE UPDATE FUNCTIONS
+// ============================================================
+
 function updateReportBadge() { 
     const badge = document.getElementById('reportBadge'); 
-    if (badge) { 
-        if (unviewedReportsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { 
-            badge.classList.add('hidden'); 
-        } 
+    if (!badge) {
+        console.log('⚠️ Report badge element not found');
+        return;
+    }
+    
+    // ============================================================
+    // ✅ COUNT FROM LOCAL DATA WITH LOCALSTORAGE CHECK
+    // ============================================================
+    const viewedReports = JSON.parse(localStorage.getItem('bricks_viewedReportIds') || '[]');
+    
+    // Count unviewed reports
+    let count = reportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewed = !viewedReports.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewed;
+    }).length;
+    
+    // Count unviewed uploaded reports
+    count += uploadedReportsData.filter(d => {
+        const isReceived = d.sent_from_department && parseInt(d.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        const notViewed = !viewedReports.includes(parseInt(d.id));
+        return isReceived && isUnviewed && notViewed;
+    }).length;
+    
+    unviewedReportsCount = count;
+    
+    console.log('🔔 Report badge count:', unviewedReportsCount);
+    
+    if (unviewedReportsCount > 0) { 
+        badge.classList.remove('hidden'); 
+        badge.textContent = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount;
+        badge.style.display = 'block';
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+    } else { 
+        badge.classList.add('hidden'); 
+        badge.style.display = 'none';
+        badge.textContent = '0';
     } 
 }
 
 function updateRequestBadge() { 
     const badge = document.getElementById('requestBadge'); 
-    if (badge) { 
-        if (unviewedRequestsCount > 0) { 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount; 
-        } else { 
-            badge.classList.add('hidden'); 
-        } 
+    if (!badge) return;
+    
+    // ============================================================
+    // ✅ COUNT FROM LOCAL DATA WITH LOCALSTORAGE CHECK
+    // ============================================================
+    const viewedRequests = JSON.parse(localStorage.getItem('bricks_viewedRequestIds') || '[]');
+    
+    const count = requestsData.filter(r => {
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) || 
+                          (r.status === 'pending' || r.status === 'Pending');
+        const notViewed = !viewedRequests.includes(parseInt(r.id));
+        return isUnviewed && notViewed;
+    }).length;
+    
+    unviewedRequestsCount = count;
+    
+    console.log('🔔 Request badge count:', unviewedRequestsCount);
+    
+    if (unviewedRequestsCount > 0) { 
+        badge.classList.remove('hidden'); 
+        badge.textContent = unviewedRequestsCount > 99 ? '99+' : unviewedRequestsCount;
+        badge.style.display = 'block';
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+    } else { 
+        badge.classList.add('hidden'); 
+        badge.style.display = 'none';
+        badge.textContent = '0';
     } 
 }
 
+// ============================================================
+// ✅ PROJECT BADGE - ADD THIS FUNCTION
+// ============================================================
+function updateProjectBadge() {
+    // Bricks & Timber dashboard doesn't have projects directly,
+    // but we keep this for consistency
+    console.log('ℹ️ Project badge not used in Bricks & Timber dashboard');
+}
+
+// ============================================================
+// FIXED: MARK REPORT VIEWED
+// ============================================================
 function markReportViewed(id) { 
-    if(!viewedReportIds.includes(id)) { 
-        viewedReportIds.push(id); 
+    const idNum = parseInt(id);
+    
+    console.log('🔔 markReportViewed called for ID:', idNum);
+    
+    // ============================================================
+    // STEP 1: Add to viewedReportIds IMMEDIATELY
+    // ============================================================
+    if (!viewedReportIds.includes(idNum)) { 
+        viewedReportIds.push(idNum); 
         localStorage.setItem('bricks_viewedReportIds', JSON.stringify(viewedReportIds)); 
-        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-        updateReportBadge(); 
-        
-        const card = document.getElementById('report-card-' + id);
-        if (card) {
-            const badge = card.querySelector('.new-badge');
-            if (badge) badge.remove();
-            card.classList.remove('unviewed');
-        }
-        
-        const uploadedCard = document.getElementById('uploaded-report-card-' + id);
-        if (uploadedCard) {
-            const badge = uploadedCard.querySelector('.new-badge');
-            if (badge) badge.remove();
-            uploadedCard.classList.remove('unviewed');
-        }
-    } 
+        console.log('✅ Added report ID', idNum, 'to viewedReportIds');
+    }
+    
+    // ============================================================
+    // STEP 2: Update local data
+    // ============================================================
+    const report = reportsData.find(r => parseInt(r.id) === idNum);
+    if (report) {
+        report._is_unviewed = false;
+        report.is_viewed_by_department = 1;
+    }
+    
+    const uploaded = uploadedReportsData.find(r => parseInt(r.id) === idNum);
+    if (uploaded) {
+        uploaded._is_unviewed = false;
+        uploaded.is_viewed_by_department = 1;
+    }
+    
+    // ============================================================
+    // STEP 3: RECALCULATE unviewedReportsCount
+    // ============================================================
+    const viewedReports = JSON.parse(localStorage.getItem('bricks_viewedReportIds') || '[]');
+    
+    let count = reportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewed = !viewedReports.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewed;
+    }).length;
+    
+    count += uploadedReportsData.filter(d => {
+        const isReceived = d.sent_from_department && parseInt(d.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null);
+        const notViewed = !viewedReports.includes(parseInt(d.id));
+        return isReceived && isUnviewed && notViewed;
+    }).length;
+    
+    unviewedReportsCount = count;
+    
+    // ============================================================
+    // STEP 4: Update badge
+    // ============================================================
+    updateReportBadge();
+    
+    // ============================================================
+    // STEP 5: Remove NEW badge from UI
+    // ============================================================
+    const card = document.getElementById(`report-card-${idNum}`) || 
+                document.getElementById(`uploaded-report-card-${idNum}`);
+    if (card) {
+        const badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('unviewed');
+    }
+    
+    // ============================================================
+    // STEP 6: Call API (background)
+    // ============================================================
+    try {
+        apiCall('mark_report_viewed.php', 'POST', { 
+            report_id: idNum, 
+            department_id: DEPARTMENT_ID 
+        });
+        console.log('✅ API call completed for report', idNum);
+    } catch(e) {
+        console.log('⚠️ API call failed, but local data is updated:', e);
+    }
+    
+    console.log('✅ Report marked as viewed, new count:', unviewedReportsCount);
 }
 
+// ============================================================
+// FIXED: MARK REQUEST VIEWED
+// ============================================================
 function markRequestViewed(id) { 
-    if(!viewedRequestIds.includes(id)) { 
-        viewedRequestIds.push(id); 
+    const idNum = parseInt(id);
+    
+    console.log('🔔 markRequestViewed called for ID:', idNum);
+    
+    // ============================================================
+    // STEP 1: Add to viewedRequestIds IMMEDIATELY
+    // ============================================================
+    if (!viewedRequestIds.includes(idNum)) { 
+        viewedRequestIds.push(idNum); 
         localStorage.setItem('bricks_viewedRequestIds', JSON.stringify(viewedRequestIds)); 
-        unviewedRequestsCount = Math.max(0, unviewedRequestsCount - 1); 
-        updateRequestBadge(); 
-        
-        const row = document.getElementById(`req-row-${id}`);
-        if (row) {
-            row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
-            row.style.backgroundColor = '';
-        }
-    } 
+        console.log('✅ Added request ID', idNum, 'to viewedRequestIds');
+    }
+    
+    // ============================================================
+    // STEP 2: Update local data
+    // ============================================================
+    const request = requestsData.find(r => parseInt(r.id) === idNum);
+    if (request) {
+        request._is_unviewed = false;
+        request.is_viewed_by_department = 1;
+    }
+    
+    // ============================================================
+    // STEP 3: RECALCULATE unviewedRequestsCount
+    // ============================================================
+    const viewedRequests = JSON.parse(localStorage.getItem('bricks_viewedRequestIds') || '[]');
+    
+    const count = requestsData.filter(r => {
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) || 
+                          (r.status === 'pending' || r.status === 'Pending');
+        const notViewed = !viewedRequests.includes(parseInt(r.id));
+        return isUnviewed && notViewed;
+    }).length;
+    
+    unviewedRequestsCount = count;
+    
+    // ============================================================
+    // STEP 4: Update badge
+    // ============================================================
+    updateRequestBadge();
+    
+    // ============================================================
+    // STEP 5: Remove highlight from UI
+    // ============================================================
+    const row = document.getElementById(`req-row-${idNum}`);
+    if (row) {
+        row.classList.remove('bg-yellow-50', 'dark:bg-yellow-900/20');
+        row.style.backgroundColor = '';
+    }
+    
+    console.log('✅ Request marked as viewed, new count:', unviewedRequestsCount);
 }
 
 // ==================== RECYCLE BIN ====================

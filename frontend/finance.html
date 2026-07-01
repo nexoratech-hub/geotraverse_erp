@@ -759,30 +759,65 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
 }
 
+// ============================================================
+// FETCH NOTIFICATIONS - FIXED
+// ============================================================
+
 async function fetchNotifications() {
+    console.log('📨 [fetchNotifications] Fetching for department:', DEPARTMENT_ID);
+    
     try {
-        const res = await apiCall(`get_notifications.php?department_id=${DEPARTMENT_ID}`);
+        // ============================================================
+        // USE get_notifications.php WITH department_id
+        // ============================================================
+        const url = `get_notifications.php?department_id=${DEPARTMENT_ID}&limit=50`;
+        const res = await apiCall(url);
+        
         console.log('📥 Notifications response:', res);
         
         if (res && res.success) {
-            if (Array.isArray(res.data)) {
-                notifications = res.data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                unviewedNotificationsCount = notifications.filter(n => n.is_viewed == 0).length;
-                updateNotificationBadge();
-                renderNotifications();
+            // Make sure data is an array
+            if (res.data && Array.isArray(res.data)) {
+                notifications = res.data.sort((a, b) => 
+                    new Date(b.created_at) - new Date(a.created_at)
+                );
+            } else if (res.data && res.data.data && Array.isArray(res.data.data)) {
+                notifications = res.data.data.sort((a, b) => 
+                    new Date(b.created_at) - new Date(a.created_at)
+                );
             } else {
-                console.warn('⚠️ Notifications data is not an array:', res.data);
-                notifications = [];
-                unviewedNotificationsCount = 0;
-                updateNotificationBadge();
-                renderNotifications();
+                // If data is an object with numeric keys
+                const dataArray = Object.values(res.data).filter(Array.isArray);
+                if (dataArray.length > 0) {
+                    notifications = dataArray[0].sort((a, b) => 
+                        new Date(b.created_at) - new Date(a.created_at)
+                    );
+                } else {
+                    notifications = [];
+                }
             }
+            
+            console.log('✅ Notifications loaded:', notifications.length);
+            
+            // Count unviewed
+            unviewedNotificationsCount = notifications.filter(n => 
+                n.is_viewed == 0 || n.is_viewed === null
+            ).length;
+            
+            console.log('🔔 Unviewed notifications:', unviewedNotificationsCount);
+            
+            // Update UI
+            updateNotificationBadge();
+            renderNotifications();
+            
+            return notifications;
         } else {
             console.warn('⚠️ Failed to fetch notifications:', res?.message);
             notifications = [];
             unviewedNotificationsCount = 0;
             updateNotificationBadge();
             renderNotifications();
+            return [];
         }
     } catch(e) {
         console.error('❌ Error fetching notifications:', e);
@@ -790,93 +825,328 @@ async function fetchNotifications() {
         unviewedNotificationsCount = 0;
         updateNotificationBadge();
         renderNotifications();
+        return [];
     }
 }
+// ============================================================
+// MARK NOTIFICATION AS VIEWED - FIXED
+// ============================================================
 
 async function markNotificationViewed(notificationId) {
+    console.log('👁️ markNotificationViewed called for ID:', notificationId);
+    
+    if (!notificationId) {
+        console.warn('⚠️ No notification ID provided');
+        return;
+    }
+    
+    // Find the notification
+    const notif = notifications.find(n => n.id === notificationId);
+    if (!notif) {
+        console.warn('⚠️ Notification not found:', notificationId);
+        return;
+    }
+    
+    console.log('📄 Notification found:', notif);
+    
     try {
-        const res = await apiCall('mark_notification_viewed.php', 'POST', {
-            notification_id: notificationId,
-            department_id: DEPARTMENT_ID
-        });
-        if (res.success) {
-            const notif = notifications.find(n => n.id === notificationId);
-            if (notif) notif.is_viewed = 1;
+        // ============================================================
+        // USE THE CORRECT API - mark_notification_viewed.php
+        // WITH item_type AND item_id
+        // ============================================================
+        const payload = {
+            item_type: notif.item_type || 'general',
+            item_id: parseInt(notif.item_id) || 0,
+            department_id: DEPARTMENT_ID,
+            notification_id: notificationId
+        };
+        
+        console.log('📤 Mark viewed payload:', payload);
+        
+        const res = await apiCall('mark_notification_viewed.php', 'POST', payload);
+        
+        console.log('📥 Mark viewed response:', res);
+        
+        if (res && res.success) {
+            // Update local data
+            notif.is_viewed = 1;
+            notif.viewed_at = new Date().toISOString();
+            
+            // Recalculate unviewed count
+            unviewedNotificationsCount = notifications.filter(n => 
+                n.is_viewed == 0 || n.is_viewed === null
+            ).length;
+            
+            updateNotificationBadge();
+            renderNotifications();
+            
+            console.log('✅ Notification marked as viewed');
+        } else {
+            // If API fails, still update locally
+            notif.is_viewed = 1;
             unviewedNotificationsCount = Math.max(0, unviewedNotificationsCount - 1);
             updateNotificationBadge();
             renderNotifications();
-            await fetchUnviewedCounts();
+            console.log('⚠️ API failed, but updated locally');
         }
-    } catch(e) { console.error('Error marking notification viewed:', e); }
+    } catch(e) {
+        console.error('❌ Error marking notification viewed:', e);
+        // Fallback: update locally
+        notif.is_viewed = 1;
+        unviewedNotificationsCount = Math.max(0, unviewedNotificationsCount - 1);
+        updateNotificationBadge();
+        renderNotifications();
+    }
 }
+// ============================================================
+// MARK ALL NOTIFICATIONS AS VIEWED - FIXED
+// ============================================================
 
 async function markAllNotificationsAsViewed() {
+    console.log('📨 markAllNotificationsAsViewed called');
+    
     try {
-        const res = await apiCall('mark_all_notifications_viewed.php', 'POST', {
+        // ============================================================
+        // CALL mark_all_notifications_viewed.php
+        // ============================================================
+        const payload = {
             department_id: DEPARTMENT_ID
-        });
-        if (res.success) {
-            notifications.forEach(n => n.is_viewed = 1);
+        };
+        
+        console.log('📤 Mark all viewed payload:', payload);
+        
+        const res = await apiCall('mark_all_notifications_viewed.php', 'POST', payload);
+        
+        console.log('📥 Mark all viewed response:', res);
+        
+        if (res && res.success) {
+            // Update all local notifications
+            notifications.forEach(n => {
+                n.is_viewed = 1;
+                n.viewed_at = new Date().toISOString();
+            });
+            
             unviewedNotificationsCount = 0;
             updateNotificationBadge();
             renderNotifications();
+            
+            // Also update badge counts
             await fetchUnviewedCounts();
-            showToast('All notifications marked as read');
+            
+            showToast('✅ All notifications marked as read', false);
+            console.log('✅ All notifications marked as viewed');
+        } else {
+            // Fallback: update locally
+            notifications.forEach(n => {
+                n.is_viewed = 1;
+            });
+            unviewedNotificationsCount = 0;
+            updateNotificationBadge();
+            renderNotifications();
+            
+            // Also call the API for each notification
+            for (let n of notifications) {
+                if (n.is_viewed == 0) {
+                    try {
+                        await apiCall('mark_notification_viewed.php', 'POST', {
+                            item_type: n.item_type || 'general',
+                            item_id: parseInt(n.item_id) || 0,
+                            department_id: DEPARTMENT_ID
+                        });
+                    } catch(e) {
+                        console.log('Error marking individual:', e);
+                    }
+                }
+            }
+            
+            showToast('✅ All notifications marked as read', false);
         }
-    } catch(e) { console.error('Error marking all viewed:', e); }
+    } catch(e) {
+        console.error('❌ Error marking all viewed:', e);
+        // Fallback
+        notifications.forEach(n => {
+            n.is_viewed = 1;
+        });
+        unviewedNotificationsCount = 0;
+        updateNotificationBadge();
+        renderNotifications();
+        showToast('✅ Notifications marked as read', false);
+    }
 }
+// ============================================================
+// UPDATE NOTIFICATION BADGE - FIXED
+// ============================================================
 
 function updateNotificationBadge() {
     const dot = document.getElementById('notificationDot');
-    if (dot) {
-        if (unviewedNotificationsCount > 0) {
-            dot.classList.remove('hidden');
-            dot.innerText = unviewedNotificationsCount > 99 ? '99+' : unviewedNotificationsCount;
-        } else {
-            dot.classList.add('hidden');
-        }
+    if (!dot) {
+        console.log('⚠️ Notification dot element not found');
+        return;
+    }
+    
+    const count = unviewedNotificationsCount || 0;
+    console.log('🔔 Updating notification badge, count:', count);
+    
+    if (count > 0) {
+        dot.classList.remove('hidden');
+        dot.innerText = count > 99 ? '99+' : count;
+        dot.style.display = 'flex';
+        dot.style.alignItems = 'center';
+        dot.style.justifyContent = 'center';
+        dot.style.background = '#ef4444';
+        dot.style.color = 'white';
+        dot.style.fontSize = '9px';
+        dot.style.fontWeight = '700';
+        dot.style.borderRadius = '50%';
+        dot.style.width = '18px';
+        dot.style.height = '18px';
+        dot.style.minWidth = '18px';
+        dot.style.border = '2px solid white';
+    } else {
+        dot.classList.add('hidden');
+        dot.style.display = 'none';
+        dot.innerText = '0';
     }
 }
+// ============================================================
+// RENDER NOTIFICATIONS - FIXED
+// ============================================================
 
 function renderNotifications() {
     const list = document.getElementById('notificationList');
-    if (!list) return;
-    if (notifications.length === 0) {
-        list.innerHTML = '<div class="notification-empty">📭 No notifications</div>';
+    if (!list) {
+        console.log('⚠️ Notification list element not found');
         return;
     }
+    
+    console.log('📨 Rendering notifications, count:', notifications.length);
+    
+    if (notifications.length === 0) {
+        list.innerHTML = `
+            <div class="notification-empty">
+                <i class="fas fa-bell-slash text-2xl block mb-2 opacity-50"></i>
+                No notifications
+            </div>
+        `;
+        return;
+    }
+    
     let html = '';
-    for (let n of notifications) {
-        const isUnviewed = n.is_viewed == 0;
-        const icon = n.item_type === 'project' ? 'fa-tasks' : 
-                     n.item_type === 'report' ? 'fa-chart-line' : 
-                     n.item_type === 'uploaded_report' ? 'fa-file-upload' : 
-                     n.item_type === 'fund_request' ? 'fa-hand-holding-usd' : 
-                     n.item_type === 'document' ? 'fa-file-alt' : 'fa-bell';
-        const fromDept = n.from_department_id ? departmentNames[n.from_department_id] || 'Unknown' : 'System';
+    
+    // Show only recent notifications (max 20)
+    const recentNotifs = notifications.slice(0, 20);
+    
+    for (let n of recentNotifs) {
+        const isUnviewed = n.is_viewed == 0 || n.is_viewed === null;
+        const iconMap = {
+            'project': 'fa-tasks',
+            'report': 'fa-chart-line',
+            'uploaded_report': 'fa-file-upload',
+            'fund_request': 'fa-hand-holding-usd',
+            'document': 'fa-file-alt',
+            'dailywork': 'fa-calendar-day',
+            'transaction': 'fa-exchange-alt'
+        };
+        const icon = iconMap[n.item_type] || 'fa-bell';
+        const fromDept = n.from_department_name || departmentNames[n.from_department_id] || 'Unknown';
+        const timeAgo = getTimeAgo(n.created_at);
+        
         html += `
-            <div class="notification-item ${isUnviewed ? 'unviewed' : ''}" onclick="handleNotificationClick(${n.id}, '${n.item_type}', ${n.item_id})">
-                <div class="title"><i class="fas ${icon} mr-2" style="color:#059669;"></i>${escapeHtml(n.item_title || n.message || 'Notification')}</div>
+            <div class="notification-item ${isUnviewed ? 'unviewed' : ''}" 
+                 onclick="handleNotificationClick(${n.id}, '${n.item_type}', ${n.item_id})">
+                <div class="title">
+                    <i class="fas ${icon} mr-2" style="color:#059669;"></i>
+                    ${escapeHtml(n.item_title || n.message || 'Notification')}
+                </div>
                 <div class="message">${escapeHtml(n.message || '')}</div>
-                <div class="time"><i class="fas fa-clock mr-1"></i> ${formatDateTime(n.created_at)} · From: ${escapeHtml(fromDept)}</div>
+                <div class="time">
+                    <i class="fas fa-clock mr-1"></i> 
+                    ${timeAgo} · From: ${escapeHtml(fromDept)}
+                    ${isUnviewed ? ' · <span style="color:#059669;font-weight:600;">NEW</span>' : ''}
+                </div>
             </div>
         `;
     }
+    
+    if (notifications.length > 20) {
+        html += `
+            <div class="text-center py-2 text-xs text-gray-400">
+                + ${notifications.length - 20} more notifications
+            </div>
+        `;
+    }
+    
     list.innerHTML = html;
 }
 
-function handleNotificationClick(notifId, itemType, itemId) {
-    markNotificationViewed(notifId);
-    if (itemType === 'fund_request') {
-        showPage('requests', itemId);
-    } else if (itemType === 'report' || itemType === 'uploaded_report') {
-        showPage('reports', itemId);
-    } else if (itemType === 'project' || itemType === 'document') {
-        showPage('dashboard');
-    }
-    document.getElementById('notificationDropdown').classList.remove('active');
-}
+// ============================================================
+// GET TIME AGO STRING
+// ============================================================
 
+function getTimeAgo(dateString) {
+    if (!dateString) return 'N/A';
+    try {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diff = now - date;
+        
+        const seconds = Math.floor(diff / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+        const weeks = Math.floor(days / 7);
+        const months = Math.floor(days / 30);
+        const years = Math.floor(days / 365);
+        
+        if (seconds < 60) return 'Just now';
+        if (minutes < 60) return minutes + 'm ago';
+        if (hours < 24) return hours + 'h ago';
+        if (days < 7) return days + 'd ago';
+        if (weeks < 4) return weeks + 'w ago';
+        if (months < 12) return months + 'mo ago';
+        return years + 'y ago';
+    } catch(e) {
+        return 'N/A';
+    }
+}
+// ============================================================
+// HANDLE NOTIFICATION CLICK - FIXED
+// ============================================================
+
+function handleNotificationClick(notifId, itemType, itemId) {
+    console.log('👆 Notification clicked:', { notifId, itemType, itemId });
+    
+    // Mark as viewed
+    markNotificationViewed(notifId);
+    
+    // Navigate based on item type
+    const pageMap = {
+        'fund_request': 'requests',
+        'report': 'reports',
+        'uploaded_report': 'reports',
+        'project': 'dashboard',
+        'document': 'dashboard',
+        'dailywork': 'dashboard',
+        'transaction': 'transactions'
+    };
+    
+    const page = pageMap[itemType] || 'dashboard';
+    
+    // Close dropdown
+    const dropdown = document.getElementById('notificationDropdown');
+    if (dropdown) {
+        dropdown.classList.remove('active');
+    }
+    
+    // Navigate to the page
+    if (itemId && (itemType === 'fund_request' || itemType === 'report' || itemType === 'uploaded_report')) {
+        showPage(page, itemId);
+    } else {
+        showPage(page);
+    }
+    
+    console.log('✅ Navigation to:', page, 'with ID:', itemId);
+}
 document.getElementById('notificationBell')?.addEventListener('click', function(e) {
     e.stopPropagation();
     const dropdown = document.getElementById('notificationDropdown');
@@ -1591,18 +1861,70 @@ function updateRequestBadge() {
     } 
 }
 
-function updateReportBadge() { 
-    const badge = document.getElementById('reportBadge'); 
-    if(badge) { 
-        if(unviewedReportsCount > 0){ 
-            badge.classList.remove('hidden'); 
-            badge.innerText = unviewedReportsCount > 99 ? '99+' : unviewedReportsCount; 
-        } else { 
-            badge.classList.add('hidden'); 
-        } 
-    } 
-}
+// ============================================================
+// UPDATE REPORT BADGE - FORCE REFRESH
+// ============================================================
 
+function updateReportBadge() {
+    const badge = document.getElementById('reportBadge');
+    if (!badge) {
+        console.log('⚠️ Report badge element not found');
+        return;
+    }
+    
+    // ============================================================
+    // RECALCULATE FROM LOCAL DATA
+    // ============================================================
+    // Count added reports that are unviewed
+    const addedUnviewed = reportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    // Count uploaded reports that are unviewed
+    const uploadedUnviewed = uploadedReportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    const count = addedUnviewed + uploadedUnviewed;
+    
+    // Update global variable
+    unviewedReportsCount = count;
+    
+    console.log('🔔 Updating report badge, count:', count);
+    console.log('📊 Added unviewed:', addedUnviewed, 'Uploaded unviewed:', uploadedUnviewed);
+    console.log('📊 viewedReportIds:', viewedReportIds);
+    
+    if (count > 0) {
+        badge.classList.remove('hidden');
+        badge.style.display = 'block';
+        badge.style.visibility = 'visible';
+        badge.style.opacity = '1';
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.background = '#ef4444';
+        badge.style.color = 'white';
+        badge.style.fontWeight = '700';
+        badge.style.fontSize = '10px';
+        badge.style.padding = '2px 8px';
+        badge.style.borderRadius = '20px';
+        badge.style.marginLeft = 'auto';
+        badge.style.textAlign = 'center';
+        badge.style.animation = 'pulse-badge 1.5s infinite';
+        badge.style.minWidth = '20px';
+        badge.style.lineHeight = '1.4';
+    } else {
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+        badge.style.visibility = 'hidden';
+        badge.style.opacity = '0';
+        badge.textContent = '0';
+    }
+}
 function markRequestAsViewed(requestId) {
     if(!viewedRequestIds.includes(requestId)) { 
         viewedRequestIds.push(requestId); 
@@ -2325,16 +2647,14 @@ function exportAllRequestsToPDF() {
 }
 
 // ============================================================
-// FETCH REPORTS - FIXED (Includes Sent Reports)
+// FETCH REPORTS - RESET UNVIEWED COUNT
 // ============================================================
 
 async function fetchReports() {
-    console.log('📡 Fetching reports for department:', DEPARTMENT_ID);
+    console.log('📡 [fetchReports] Fetching reports for department:', DEPARTMENT_ID);
     
     try {
         const cacheBuster = `&_t=${Date.now()}`;
-        
-        // Use all=1 for Super Admin, otherwise use department_id
         let url;
         if (DEPARTMENT_ID == 1) {
             url = `get_reports.php?all=1${cacheBuster}`;
@@ -2360,7 +2680,6 @@ async function fetchReports() {
         if (res && res.success) {
             let reportsArray = [];
             
-            // Extract data from response
             if (res.data) {
                 if (Array.isArray(res.data)) {
                     reportsArray = res.data;
@@ -2376,29 +2695,38 @@ async function fetchReports() {
             }
             
             console.log('📊 Raw reports array length:', reportsArray.length);
-            console.log('📊 Sample report:', reportsArray.length > 0 ? reportsArray[0] : 'No reports');
             
             // Filter and process reports
             reportsData = reportsArray
                 .filter(r => {
-                    // Skip deleted
                     if (r.is_deleted == 1) return false;
                     if (r.deleted_by_admin == 1) return false;
                     if (r.deleted_by_department == 1) return false;
                     return true;
                 })
                 .map(r => {
-                    // Ensure ID is set
                     r.id = parseInt(r.id) || parseInt(r.sent_id) || 0;
-                    // Set source_type if not set
                     if (!r.source_type) r.source_type = 'original';
-                    // Set unviewed flag
-                    if (r._is_unviewed === undefined) {
-                        r._is_unviewed = (r.sent_from_department && 
-                                         r.sent_from_department != DEPARTMENT_ID && 
-                                         (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null));
+                    
+                    // ============================================================
+                    // CHECK IF ALREADY VIEWED FROM localStorage
+                    // ============================================================
+                    const isViewedInStorage = viewedReportIds.includes(parseInt(r.id));
+                    
+                    // Set unviewed flag - only for received reports
+                    if (r.sent_from_department && r.sent_from_department != DEPARTMENT_ID) {
+                        if (isViewedInStorage) {
+                            r.is_viewed_by_department = 1;
+                            r._is_unviewed = false;
+                        } else if (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null) {
+                            r._is_unviewed = true;
+                        } else {
+                            r._is_unviewed = false;
+                        }
+                    } else {
+                        r._is_unviewed = false;
                     }
-                    // Ensure title is set
+                    
                     if (!r.title) {
                         r.title = r.report_title || 'Untitled Report';
                     }
@@ -2408,26 +2736,20 @@ async function fetchReports() {
             
             console.log(`✅ Reports loaded: ${reportsData.length}`);
             
-            // Log sample for debugging
-            if (reportsData.length > 0) {
-                console.log('📋 Sample reports:', reportsData.slice(0, 5).map(r => ({ 
-                    id: r.id, 
-                    title: r.title, 
-                    source: r.source_type,
-                    from: r.sent_from_department,
-                    to: r.sent_to_department
-                })));
-            }
-            
         } else {
             console.warn('⚠️ Failed to fetch reports:', res?.message);
             reportsData = [];
         }
         
-        // Calculate unviewed count
+        // ============================================================
+        // RECALCULATE UNVIEWED COUNT
+        // ============================================================
         unviewedReportsCount = reportsData.filter(r => r._is_unviewed).length;
-        updateReportBadge();
         
+        console.log('📊 Unviewed reports count:', unviewedReportsCount);
+        console.log('📊 viewedReportIds:', viewedReportIds);
+        
+        updateReportBadge();
         return reportsData;
         
     } catch(e) {
@@ -2438,7 +2760,7 @@ async function fetchReports() {
 }
 
 // ============================================================
-// FETCH UPLOADED REPORTS - FINANCE DEPARTMENT
+// FETCH UPLOADED REPORTS - RESET UNVIEWED COUNT
 // ============================================================
 
 async function fetchUploadedReports() {
@@ -2476,17 +2798,18 @@ async function fetchUploadedReports() {
                 } catch(e2) {
                     console.error('❌ Failed to extract JSON:', e2);
                     uploadedReportsData = [];
+                    updateReportBadge();
                     return [];
                 }
             } else {
                 console.error('❌ No JSON found in response');
                 uploadedReportsData = [];
+                updateReportBadge();
                 return [];
             }
         }
         
         console.log('📥 Parsed data:', parsedData);
-        console.log('📥 Debug:', parsedData?.debug);
         
         let reportsArray = [];
         
@@ -2494,7 +2817,6 @@ async function fetchUploadedReports() {
             if (Array.isArray(parsedData.data)) {
                 reportsArray = parsedData.data;
             } else if (parsedData.data && typeof parsedData.data === 'object') {
-                // Try to find array in data object
                 for (let key in parsedData.data) {
                     if (Array.isArray(parsedData.data[key])) {
                         reportsArray = parsedData.data[key];
@@ -2512,179 +2834,69 @@ async function fetchUploadedReports() {
         if (!Array.isArray(reportsArray) || reportsArray.length === 0) {
             console.log('📊 No uploaded reports found');
             uploadedReportsData = [];
+            updateReportBadge();
             return [];
         }
         
-        // Log sample for debugging
-        console.log('📋 Sample reports:', reportsArray.slice(0, 5).map(r => ({
-            id: r.id,
-            title: r.title,
-            source_type: r.source_type,
-            is_original: r.is_original,
-            is_sent_copy: r.is_sent_copy,
-            sent_from: r.sent_from_department,
-            sent_to: r.sent_to_department,
-            department_id: r.department_id,
-            display_type: r._display_type
-        })));
-        
-        // ============================================================
-        // FILTER: ORIGINAL + RECEIVED COPIES ONLY
-        // ============================================================
-        // Finance inaona:
-        // 1. ORIGINAL zake (department_id = Finance)
-        // 2. COPY alizopokea (sent_to_department = Finance)
-        // 3. HAIONI ORIGINAL za sender
-        // 4. HAIONI COPY alizotuma yeye
-        // ============================================================
+        // Process and filter
         uploadedReportsData = reportsArray
             .filter(d => {
-                // Skip deleted
                 if (d.is_deleted == 1) return false;
                 if (d.deleted_at && d.deleted_at !== null) return false;
                 
-                // ============================================================
-                // LOG FOR DEBUGGING
-                // ============================================================
-                console.log(`📄 Checking: ${d.id} - ${d.title}`, {
-                    source_type: d.source_type,
-                    is_original: d.is_original,
-                    is_sent_copy: d.is_sent_copy,
-                    department_id: d.department_id,
-                    sent_from: d.sent_from_department,
-                    sent_to: d.sent_to_department,
-                    display_type: d._display_type
-                });
-                
-                // ============================================================
-                // CASE 1: ORIGINAL (is_original = 1)
-                // Finance ANAONA ORIGINAL ZAKE TU (department_id = Finance)
-                // Finance HAONI ORIGINAL ZA WATU WENGINE
-                // ============================================================
+                // ORIGINAL (owned by Finance)
                 if (d.is_original == 1 || d.source_type === 'original') {
                     if (d.department_id == DEPARTMENT_ID) {
-                        console.log(`✅ ORIGINAL (owned) kept: ${d.id} - ${d.title}`);
                         return true;
                     }
-                    console.log(`⏭️ ORIGINAL (not owned) HIDDEN: ${d.id} - ${d.title} (department: ${d.department_id})`);
                     return false;
                 }
                 
-                // ============================================================
-                // CASE 2: COPY (is_sent_copy = 1)
-                // Finance ANAONA COPY ALIZOPOKEA (sent_to_department = Finance)
-                // Finance HAONI COPY ALIZOTUMA YEYE (sent_from_department = Finance)
-                // ============================================================
+                // COPY (received by Finance)
                 if (d.is_sent_copy == 1 || d.source_type === 'copy') {
-                    // RECEIVER: Finance inaona copy aliyopokea
                     if (d.sent_to_department == DEPARTMENT_ID) {
-                        console.log(`✅ COPY (received) kept: ${d.id} - ${d.title} from ${d.sent_from_department}`);
                         return true;
                     }
-                    // SENDER: Finance HAIONI copy aliyotuma
-                    if (d.sent_from_department == DEPARTMENT_ID) {
-                        console.log(`⏭️ COPY (sent by me) HIDDEN: ${d.id} - ${d.title}`);
-                        return false;
-                    }
-                    // Not for this department
-                    console.log(`⏭️ COPY (not for me) HIDDEN: ${d.id} - ${d.title}`);
                     return false;
                 }
                 
-                // ============================================================
-                // CASE 3: SENT HISTORY (from sent_uploaded_reports)
-                // ============================================================
+                // SENT HISTORY
                 if (d.source_type === 'sent_history') {
-                    // Show if this department sent OR received it (for history)
                     if (d.sent_from_department == DEPARTMENT_ID || d.sent_to_department == DEPARTMENT_ID) {
-                        console.log(`✅ HISTORY kept: ${d.id} - ${d.title}`);
                         return true;
                     }
                     return false;
                 }
                 
-                // Default: show if department matches
                 return d.department_id == DEPARTMENT_ID;
             })
             .map(d => {
-                // Ensure ID is set
                 d.id = parseInt(d.id) || parseInt(d.sent_id) || 0;
                 
                 // ============================================================
-                // SET DISPLAY TYPE
+                // CHECK IF ALREADY VIEWED FROM localStorage
                 // ============================================================
-                if (d.source_type === 'original' || d.is_original == 1) {
-                    d._display_type = 'Original';
-                    d._display_icon = '📁';
-                    d._display_color = '#059669';
-                    d._is_original = true;
-                    d._is_copy = false;
-                } else if (d.source_type === 'copy' || d.is_sent_copy == 1) {
-                    if (d.sent_to_department == DEPARTMENT_ID) {
-                        d._display_type = '📨 Received Copy';
-                        d._display_icon = '📨';
-                        d._display_color = '#8b5cf6';
-                        d._is_received_by_me = true;
-                        d._is_sent_by_me = false;
-                    } else if (d.sent_from_department == DEPARTMENT_ID) {
-                        d._display_type = '📤 Sent Copy';
-                        d._display_icon = '📤';
-                        d._display_color = '#f59e0b';
-                        d._is_sent_by_me = true;
-                        d._is_received_by_me = false;
+                const isViewedInStorage = viewedReportIds.includes(parseInt(d.id));
+                
+                // Set unviewed flag
+                if (d.sent_from_department && d.sent_from_department != DEPARTMENT_ID) {
+                    if (isViewedInStorage) {
+                        d.is_viewed_by_department = 1;
+                        d._is_unviewed = false;
+                    } else if (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null) {
+                        d._is_unviewed = true;
                     } else {
-                        d._display_type = 'Copy';
-                        d._display_icon = '📄';
-                        d._display_color = '#6b7280';
+                        d._is_unviewed = false;
                     }
-                    d._is_original = false;
-                    d._is_copy = true;
-                } else if (d.source_type === 'sent_history') {
-                    if (d.sent_from_department == DEPARTMENT_ID) {
-                        d._display_type = '📤 Sent History';
-                        d._display_icon = '📤';
-                        d._display_color = '#f59e0b';
-                        d._is_sent_by_me = true;
-                        d._is_received_by_me = false;
-                    } else if (d.sent_to_department == DEPARTMENT_ID) {
-                        d._display_type = '📨 Received History';
-                        d._display_icon = '📨';
-                        d._display_color = '#8b5cf6';
-                        d._is_sent_by_me = false;
-                        d._is_received_by_me = true;
-                    } else {
-                        d._display_type = 'History';
-                        d._display_icon = '📄';
-                        d._display_color = '#6b7280';
-                    }
-                    d._is_original = false;
-                    d._is_copy = true;
-                    d._is_sent_history = true;
                 } else {
-                    d._display_type = 'Unknown';
-                    d._display_icon = '📄';
-                    d._display_color = '#6b7280';
+                    d._is_unviewed = false;
                 }
                 
-                // ============================================================
-                // SET UNVIEWED FLAG (only for received reports)
-                // ============================================================
-                d._is_unviewed = (d.sent_from_department && 
-                                 parseInt(d.sent_from_department) !== DEPARTMENT_ID && 
-                                 d.sent_to_department == DEPARTMENT_ID &&
-                                 (d.is_viewed_by_department == 0 || d.is_viewed_by_department === null));
-                
-                // Ensure title is set
                 if (!d.title) d.title = d.uploaded_report_title || 'Untitled Uploaded Report';
-                
-                // Ensure file_name is set
                 if (!d.file_name) d.file_name = d.uploaded_report_file || 'document.pdf';
                 
                 return d;
             })
-            // ============================================================
-            // REMOVE DUPLICATES
-            // ============================================================
             .filter((d, index, self) => {
                 return index === self.findIndex((t) => t.id === d.id);
             })
@@ -2694,41 +2906,143 @@ async function fetchUploadedReports() {
                 return dateB - dateA;
             });
         
-        // ============================================================
-        // LOG FINAL RESULTS
-        // ============================================================
         console.log(`✅ Uploaded reports loaded: ${uploadedReportsData.length}`);
-        console.log('📋 Report types:', uploadedReportsData.map(d => ({
-            id: d.id,
-            title: d.title,
-            display_type: d._display_type,
-            is_original: d._is_original,
-            is_copy: d._is_copy,
-            sent_by_me: d._is_sent_by_me,
-            received_by_me: d._is_received_by_me,
-            source_type: d.source_type,
-            is_unviewed: d._is_unviewed
-        })));
         
-        // Update unviewed count
+        // ============================================================
+        // RECALCULATE UNVIEWED COUNT
+        // ============================================================
         unviewedReportsCount = uploadedReportsData.filter(d => d._is_unviewed).length;
-        updateReportBadge();
         
+        console.log('📊 Unviewed uploaded reports count:', unviewedReportsCount);
+        console.log('📊 viewedReportIds:', viewedReportIds);
+        
+        updateReportBadge();
         return uploadedReportsData;
         
     } catch(e) {
         console.error('❌ [fetchUploadedReports] Error:', e);
         uploadedReportsData = [];
+        updateReportBadge();
         return [];
     }
 }
-function markReportViewed(id) { 
-    if(!viewedReportIds.includes(id)) { 
-        viewedReportIds.push(id); 
-        localStorage.setItem('finance_viewedReportIds', JSON.stringify(viewedReportIds)); 
-        unviewedReportsCount = Math.max(0, unviewedReportsCount - 1); 
-        updateReportBadge(); 
-    } 
+
+// ============================================================
+// MARK REPORT AS VIEWED - FORCE UPDATE
+// ============================================================
+
+function markReportViewed(id) {
+    console.log('👁️ markReportViewed called for ID:', id);
+    
+    const idNum = parseInt(id);
+    if (!idNum) {
+        console.warn('⚠️ Invalid report ID:', id);
+        return;
+    }
+    
+    // ============================================================
+    // STEP 1: Add to viewedReportIds
+    // ============================================================
+    if (!viewedReportIds.includes(idNum)) {
+        viewedReportIds.push(idNum);
+        localStorage.setItem('finance_viewedReportIds', JSON.stringify(viewedReportIds));
+        console.log('✅ Added report ID', idNum, 'to viewedReportIds');
+    }
+    
+    // ============================================================
+    // STEP 2: Update local data - reportsData
+    // ============================================================
+    const report = reportsData.find(r => parseInt(r.id) === idNum);
+    if (report) {
+        report._is_unviewed = false;
+        report.is_viewed_by_department = 1;
+        console.log('✅ Updated report in reportsData:', report.id, report.title);
+    }
+    
+    // ============================================================
+    // STEP 3: Update local data - uploadedReportsData
+    // ============================================================
+    const uploaded = uploadedReportsData.find(r => parseInt(r.id) === idNum);
+    if (uploaded) {
+        uploaded._is_unviewed = false;
+        uploaded.is_viewed_by_department = 1;
+        console.log('✅ Updated uploaded report in uploadedReportsData:', uploaded.id, uploaded.title);
+    }
+    
+    // ============================================================
+    // STEP 4: RECALCULATE unviewedReportsCount
+    // ============================================================
+    // Count added reports that are unviewed
+    const addedUnviewed = reportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    // Count uploaded reports that are unviewed
+    const uploadedUnviewed = uploadedReportsData.filter(r => {
+        const isReceived = r.sent_from_department && parseInt(r.sent_from_department) !== DEPARTMENT_ID;
+        const isUnviewed = (r.is_viewed_by_department == 0 || r.is_viewed_by_department === null);
+        const notViewedInStorage = !viewedReportIds.includes(parseInt(r.id));
+        return isReceived && isUnviewed && notViewedInStorage;
+    }).length;
+    
+    unviewedReportsCount = addedUnviewed + uploadedUnviewed;
+    
+    console.log('📊 Recalculated unviewedReportsCount:', {
+        addedUnviewed,
+        uploadedUnviewed,
+        total: unviewedReportsCount
+    });
+    
+    // ============================================================
+    // STEP 5: Update badge
+    // ============================================================
+    updateReportBadge();
+    
+    // ============================================================
+    // STEP 6: Remove NEW badge from UI
+    // ============================================================
+    // Added reports
+    const card = document.getElementById(`report-card-${idNum}`);
+    if (card) {
+        const badge = card.querySelector('.new-badge');
+        if (badge) badge.remove();
+        card.classList.remove('report-unviewed');
+        card.classList.remove('unviewed');
+        console.log('✅ Removed NEW badge from report card:', idNum);
+    }
+    
+    // Uploaded reports
+    const uploadedCard = document.getElementById(`uploaded-report-card-${idNum}`);
+    if (uploadedCard) {
+        const badge = uploadedCard.querySelector('.new-badge');
+        if (badge) badge.remove();
+        uploadedCard.classList.remove('report-unviewed');
+        uploadedCard.classList.remove('unviewed');
+        console.log('✅ Removed NEW badge from uploaded report card:', idNum);
+    }
+    
+    // ============================================================
+    // STEP 7: Call API (background)
+    // ============================================================
+    try {
+        apiCall('mark_report_viewed.php', 'POST', {
+            report_id: idNum,
+            department_id: DEPARTMENT_ID
+        }).catch(e => console.log('⚠️ API call failed:', e));
+        
+        apiCall('mark_notification_viewed.php', 'POST', {
+            item_type: 'report',
+            item_id: idNum,
+            department_id: DEPARTMENT_ID
+        }).catch(e => console.log('⚠️ Notification API call failed:', e));
+        
+        console.log('✅ API calls completed for report', idNum);
+    } catch(e) {
+        console.log('⚠️ API call failed, but local data is updated:', e);
+    }
 }
 
 function getFullReportPath(filePath) {
